@@ -1,3 +1,5 @@
+<div align="center">
+
 ![Python](https://img.shields.io/badge/Python-3.10+-FFD43B?style=flat&labelColor=306998)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.128-white?style=flat&labelColor=009485)
 ![LangGraph](https://img.shields.io/badge/LangGraph-latest-white?style=flat&labelColor=333)
@@ -9,7 +11,9 @@
 
 # MARS — Multi-Agent Research System
 
-> A lightweight, asynchronous research pipeline that plans, searches, summarizes, critiques, and delivers structured markdown reports — powered by remote LLM APIs with no local model serving required.
+</div>
+
+A lightweight, asynchronous research pipeline that plans, searches, summarizes, critiques, and delivers structured markdown reports — powered by remote LLM APIs with no local model serving required.
 
 
 Key capabilities:
