@@ -185,6 +185,4 @@ Final reports are stored in SQLite table `research_reports` with:
 - Frontend proxy is configured in `ui/vite.config.js` for `/api -> http://127.0.0.1:8000`
 - CORS allows `http://127.0.0.1:5173` and `http://localhost:5173`
 
-## License
 
-Add your project license here (for example: MIT, Apache-2.0, or Proprietary).
