@@ -1,6 +1,29 @@
-.env
-.venv/
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment files
+.env
+.env.local
+.env.example
+
+# Local databases and artifacts
+*.db
+*.sqlite3
+
+# Node / Vite
 ui/node_modules/
 ui/dist/
+
+# OS / editor noise
+.DS_Store
+.vscode/
+.idea/

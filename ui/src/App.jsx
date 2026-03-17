@@ -1,4 +1,7 @@
 import { useMemo, useState } from "react";
+import FinalAnswerCard from "./components/FinalAnswerCard";
+import PipelineBar from "./components/PipelineBar";
+import SectionCard from "./components/SectionCard";
 
 const EXAMPLES = [
   "What are the most credible small-language-model benchmarks in 2026?",
@@ -18,8 +21,13 @@ export default function App() {
   const [confidence, setConfidence] = useState(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
+  const [activeStep, setActiveStep] = useState("planner");
 
   const canSubmit = useMemo(() => query.trim().length >= 5 && !running, [query, running]);
+
+  const topFindings = useMemo(() => findings.slice(0, 7), [findings]);
+
+  const finalAnswer = useMemo(() => extractFinalAnswer(report), [report]);
 
   const runResearch = async (event) => {
     event.preventDefault();
@@ -35,6 +43,7 @@ export default function App() {
     setSearchSnippets(0);
     setReport("");
     setConfidence(null);
+    setActiveStep("planner");
 
     try {
       const response = await fetch("/api/research/stream", {
@@ -63,27 +72,32 @@ export default function App() {
             break;
           case "plan":
             setPlan(Array.isArray(evt.items) ? evt.items : []);
+            setActiveStep("planner");
             break;
           case "search_progress":
             if (typeof evt.snippets === "number") {
               setSearchSnippets(evt.snippets);
             }
+            setActiveStep("search");
             break;
           case "critic":
             if (evt.iteration) {
               setLoops((prev) => [...prev, { iteration: evt.iteration, reason: evt.reason || "" }]);
             }
+            setActiveStep("critic");
             break;
           case "findings":
             if (Array.isArray(evt.items)) {
               setFindings((prev) => [...prev, ...evt.items]);
             }
+            setActiveStep("summarizer");
             break;
           case "final_report":
             setReport(evt.report || "");
             if (typeof evt.confidence === "number") {
               setConfidence(evt.confidence);
             }
+            setActiveStep("synthesizer");
             break;
           case "error":
             setError(evt.message || "Unknown stream error");
@@ -131,17 +145,21 @@ export default function App() {
   };
 
   return (
-    <div className="page">
+    <div className="app-shell">
       <header className="hero">
         <p className="eyebrow">MARS</p>
         <h1>Multi Agent Research System</h1>
         <p className="sub">Fast, low-resource, citation-grounded research streaming.</p>
       </header>
 
-      <main className="grid">
-        <section className="panel input-panel">
+      <FinalAnswerCard answer={finalAnswer} confidence={confidence} running={running} />
+
+      <PipelineBar activeStep={activeStep} />
+
+      <main className="layout-grid">
+        <section className="card input-panel">
           <form onSubmit={runResearch}>
-            <label htmlFor="query">Research query</label>
+            <label htmlFor="query" className="label-title">Research query</label>
             <textarea
               id="query"
               value={query}
@@ -168,71 +186,88 @@ export default function App() {
           {error ? <p className="error">Error: {error}</p> : null}
         </section>
 
-        <section className="panel output-panel">
-          <div className="stream-title">Research Stream</div>
-
-          <div className="event-block">
-            <h3>Status</h3>
-            <p>{running ? "Running" : "Idle"}</p>
-            {requestId ? <p className="meta">Request ID: {requestId}</p> : null}
+        <section className="stream-column">
+          <SectionCard
+            title="Status"
+            rightMeta={requestId ? `Request ${requestId.slice(0, 8)}` : null}
+          >
+            <p className="status-line">
+              <span className={`status-dot ${running ? "is-running" : "is-idle"}`} />
+              {running ? "Running" : "Idle"}
+            </p>
             {searchSnippets > 0 ? <p className="meta">Snippets retrieved: {searchSnippets}</p> : null}
-          </div>
+          </SectionCard>
 
-          {progress.length > 0 ? (
-            <div className="event-block">
-              <h3>Progress</h3>
-              <ul>
+          <SectionCard title="Progress" rightMeta={`${progress.length} updates`}>
+            {progress.length > 0 ? (
+              <ul className="list-plain">
                 {progress.map((item, idx) => (
                   <li key={`progress-${idx}`}>{item}</li>
                 ))}
               </ul>
-            </div>
-          ) : null}
+            ) : (
+              <p className="empty">No progress events yet.</p>
+            )}
+          </SectionCard>
 
-          {plan.length > 0 ? (
-            <div className="event-block">
-              <h3>Plan</h3>
-              <ul>
+          <SectionCard title="Plan" initiallyCollapsed rightMeta={`${plan.length} items`}>
+            {plan.length > 0 ? (
+              <ul className="list-plain">
                 {plan.map((item, idx) => (
                   <li key={`plan-${idx}`}>{item}</li>
                 ))}
               </ul>
-            </div>
-          ) : null}
+            ) : (
+              <p className="empty">No plan generated yet.</p>
+            )}
+          </SectionCard>
 
-          {loops.length > 0 ? (
-            <div className="event-block">
-              <h3>Critic Loops</h3>
-              <ul>
+          <SectionCard title="Critique" initiallyCollapsed rightMeta={`${loops.length} loops`}>
+            {loops.length > 0 ? (
+              <ul className="list-plain">
                 {loops.map((item, idx) => (
                   <li key={`loop-${idx}`}>
                     Iteration {item.iteration}: {item.reason}
                   </li>
                 ))}
               </ul>
-            </div>
-          ) : null}
+            ) : (
+              <p className="empty">No critique loops yet.</p>
+            )}
+          </SectionCard>
 
-          {findings.length > 0 ? (
-            <div className="event-block">
-              <h3>Findings</h3>
-              <ul>
-                {findings.map((item, idx) => (
-                  <li key={`finding-${idx}`}>
-                    {item.claim}
-                    {item.source ? <span className="source"> ({item.source})</span> : null}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
+          <SectionCard title="Findings" initiallyCollapsed rightMeta={`${topFindings.length} shown`}>
+            {topFindings.length > 0 ? (
+              <div className="findings-grid">
+                {topFindings.map((item, idx) => {
+                  const domain = extractDomain(item.source || "");
+                  const trust = sourceTrustLevel(domain);
+                  const rowConfidence = clampPercent((item.confidence ?? confidence ?? 0.62) * 100 - idx * 4);
+
+                  return (
+                    <article key={`finding-${idx}`} className="finding-card">
+                      <p className="finding-claim">{item.claim}</p>
+                      <div className="finding-meta">
+                        <span className="finding-domain">{domain || "unknown source"}</span>
+                        <span className={`source-badge ${trust.className}`}>{trust.label}</span>
+                      </div>
+                      <div className="confidence-bar" aria-label="confidence">
+                        <div className="confidence-bar-fill" style={{ width: `${rowConfidence}%` }} />
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="empty">No findings extracted yet.</p>
+            )}
+          </SectionCard>
 
           {report ? (
-            <div className="event-block report-block">
-              <h3>Final Report</h3>
+            <SectionCard title="Final Report (Raw)" rightMeta={typeof confidence === "number" ? `Confidence ${confidence.toFixed(2)}` : null}>
               {typeof confidence === "number" ? <p className="meta">Confidence: {confidence.toFixed(2)}</p> : null}
-              <pre>{report}</pre>
-            </div>
+              <pre className="report-raw">{report}</pre>
+            </SectionCard>
           ) : null}
 
           {!report && findings.length === 0 && !running ? <p className="empty">No output yet. Submit a query to begin.</p> : null}
@@ -240,4 +275,47 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+function extractFinalAnswer(reportText) {
+  if (!reportText) return "";
+  const marker = "# Final Answer";
+  const evidenceMarker = "# Supporting Evidence";
+
+  const start = reportText.indexOf(marker);
+  if (start === -1) return "";
+  const bodyStart = start + marker.length;
+  const end = reportText.indexOf(evidenceMarker, bodyStart);
+  const section = end === -1 ? reportText.slice(bodyStart) : reportText.slice(bodyStart, end);
+  return section.trim();
+}
+
+function extractDomain(url) {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+function sourceTrustLevel(domain) {
+  const host = (domain || "").toLowerCase();
+  const highTrust = ["wikipedia.org", "arxiv.org"];
+  const lowTrust = ["reddit.com", "medium.com", "quora.com"];
+
+  if (highTrust.some((d) => host === d || host.endsWith(`.${d}`))) {
+    return { label: "high", className: "source-badge-high" };
+  }
+  if (lowTrust.some((d) => host === d || host.endsWith(`.${d}`))) {
+    return { label: "low", className: "source-badge-low" };
+  }
+  return { label: "medium", className: "source-badge-medium" };
+}
+
+function clampPercent(value) {
+  const n = Number(value);
+  if (Number.isNaN(n)) return 0;
+  return Math.max(8, Math.min(100, Math.round(n)));
 }

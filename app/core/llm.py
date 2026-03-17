@@ -8,6 +8,13 @@ import httpx
 from app.core.config import Settings
 
 
+HF_FALLBACK_MODELS: List[str] = [
+    "Qwen/Qwen2.5-7B-Instruct",
+    "HuggingFaceH4/zephyr-7b-beta",
+    "mistralai/Mixtral-8x7B-Instruct-v0.1",
+]
+
+
 class LLMClient:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -56,7 +63,6 @@ class LLMClient:
             return data["choices"][0]["message"]["content"]
 
     async def _call_huggingface(self, system_prompt: str, user_prompt: str) -> str:
-        url = f"https://api-inference.huggingface.co/models/{self.settings.huggingface_model}"
         headers = {
             "Authorization": f"Bearer {self.settings.huggingface_api_key}",
             "Content-Type": "application/json",
@@ -74,16 +80,36 @@ class LLMClient:
                 "return_full_text": False,
             },
         }
-        async with httpx.AsyncClient(timeout=self.settings.llm_timeout_sec) as client:
-            response = await client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            data = response.json()
 
-        if isinstance(data, list) and data and "generated_text" in data[0]:
-            return data[0]["generated_text"]
-        if isinstance(data, dict) and "generated_text" in data:
-            return data["generated_text"]
-        raise RuntimeError("Unexpected HuggingFace response format")
+        model_candidates = [self.settings.huggingface_model, *[m for m in HF_FALLBACK_MODELS if m != self.settings.huggingface_model]]
+        not_available_errors: List[str] = []
+
+        async with httpx.AsyncClient(timeout=self.settings.llm_timeout_sec) as client:
+            for model_name in model_candidates:
+                url = f"https://api-inference.huggingface.co/models/{model_name}"
+                response = await client.post(url, headers=headers, json=payload)
+
+                if response.status_code in (404, 410):
+                    not_available_errors.append(f"{model_name} -> {response.status_code}")
+                    continue
+
+                response.raise_for_status()
+                data = response.json()
+
+                if isinstance(data, list) and data and "generated_text" in data[0]:
+                    return data[0]["generated_text"]
+                if isinstance(data, dict) and "generated_text" in data:
+                    return data["generated_text"]
+                if isinstance(data, dict) and "error" in data:
+                    # Model can be valid but unavailable due to provider-side load.
+                    raise RuntimeError(f"HuggingFace model '{model_name}' error: {data.get('error')}")
+
+        tried = ", ".join(not_available_errors) if not_available_errors else "no models tried"
+        raise RuntimeError(
+            "HuggingFace inference models are unavailable (404/410). "
+            "Set HUGGINGFACE_MODEL in .env to an available model. "
+            f"Tried: {tried}"
+        )
 
     def _extract_json(self, text: str) -> Dict[str, Any]:
         text = text.strip()

@@ -1,88 +1,144 @@
-# MARS: Multi Agent Research System
+![Python](https://img.shields.io/badge/Python-3.10+-FFD43B?style=flat&labelColor=306998)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.128-white?style=flat&labelColor=009485)
+![LangGraph](https://img.shields.io/badge/LangGraph-latest-white?style=flat&labelColor=333)
+![React](https://img.shields.io/badge/React-18-white?style=flat&labelColor=222&color=149eca)
+![Vite](https://img.shields.io/badge/Vite-5-white?style=flat&labelColor=4a4a4a&color=646CFF)
+![SQLite](https://img.shields.io/badge/SQLite-aiosqlite-white?style=flat&labelColor=003B57&color=0a6a8a)
+![Pydantic](https://img.shields.io/badge/Pydantic-v2-white?style=flat&labelColor=e34c26&color=c0392b)
+![License](https://img.shields.io/badge/License-MIT-2da44e?style=flat&labelColor=555)
 
-MARS is a lightweight, asynchronous research assistant that plans a query, searches the web, extracts evidence, critiques completeness, and produces a final markdown report.
+# MARS — Multi-Agent Research System
 
-It is designed for low-resource environments by delegating model inference to remote APIs and keeping local infrastructure minimal.
+> A lightweight, asynchronous research pipeline that plans, searches, summarizes, critiques, and delivers structured markdown reports — powered by remote LLM APIs with no local model serving required.
 
-## Highlights
 
-- Multi-agent workflow orchestrated with LangGraph
-- Streaming research progress via NDJSON events
-- SQLite persistence for final reports
-- Provider fallback for LLM and web search
-- React + Vite frontend with no heavy UI dependencies
+Key capabilities:
 
-## System Architecture
+- **Autonomous planning** — decomposes queries into targeted sub-questions
+- **Parallel search** — bounded async retrieval with provider fallback
+- **Iterative refinement** — critic agent loops until research is sufficient or iteration ceiling is reached
+- **Streaming output** — real-time NDJSON events for live frontend updates
+- **Zero heavy infrastructure** — no Redis, no message queue, no local model serving
 
-Pipeline:
+---
 
-`Query -> Planner -> Search -> Summarizer -> Critic -> (loop or Finalize)`
+## Architecture
 
-Core components:
+MARS orchestrates a five-stage pipeline via **LangGraph**:
 
-- `app/agents/planner.py`: Generates focused sub-questions
-- `app/agents/search.py`: Runs bounded async search with fallback providers
-- `app/agents/summarizer.py`: Extracts structured facts from search snippets
-- `app/agents/critic.py`: Evaluates sufficiency and suggests refinement
-- `app/graph/workflow.py`: Defines graph transitions and loop routing
-- `app/api/routes.py`: Exposes health and streaming research endpoints
-- `app/db/sqlite.py`: Initializes and writes report records
+```
+Query → Planner → Search → Summarizer → Critic → (loop or Finalize)
+```
+
+| Agent | Module | Responsibility |
+|---|---|---|
+| Planner | `app/agents/planner.py` | Generates focused sub-questions from the original query |
+| Search | `app/agents/search.py` | Executes bounded async searches with provider fallback |
+| Summarizer | `app/agents/summarizer.py` | Extracts structured facts from raw search snippets |
+| Critic | `app/agents/critic.py` | Evaluates research sufficiency; triggers refinement or finalization |
+| Workflow | `app/graph/workflow.py` | Defines graph transitions and loop routing logic |
+
+Supporting components:
+
+- **`app/api/routes.py`** — FastAPI endpoints including the streaming research route
+- **`app/db/sqlite.py`** — SQLite initialization and report persistence
+- **`app/core/`** — Configuration, logging, and shared utilities
+
+---
 
 ## Technology Stack
 
-- Backend: FastAPI, LangGraph, httpx, aiosqlite, pydantic
-- Frontend: React 18, Vite 5
-- Storage: SQLite
+| Layer | Technology |
+|---|---|
+| Backend framework | FastAPI |
+| Agent orchestration | LangGraph |
+| HTTP client | httpx (async) |
+| Database | aiosqlite / SQLite |
+| Data validation | Pydantic |
+| Frontend | React 18 + Vite 5 |
 
-## Project Layout
+---
 
-```text
-main.py
-app/
-  agents/
-  api/
-  core/
-  db/
-  graph/
-ui/
-  src/
+## Project Structure
+
 ```
+mars/
+├── main.py                   # Application entrypoint
+├── requirements.txt
+├── .env.example
+├── app/
+│   ├── agents/
+│   │   ├── planner.py
+│   │   ├── search.py
+│   │   ├── summarizer.py
+│   │   └── critic.py
+│   ├── api/
+│   │   └── routes.py
+│   ├── core/
+│   ├── db/
+│   │   └── sqlite.py
+│   └── graph/
+│       └── workflow.py
+└── ui/
+    └── src/
+```
+
+---
 
 ## Prerequisites
 
-- Python 3.10+
-- Node.js 18+
-- npm 9+
+| Requirement | Minimum Version |
+|---|---|
+| Python | 3.10+ |
+| Node.js | 18+ |
+| npm | 9+ |
 
-## Quick Start
+> **LLM Provider:** At least one of `GROQ_API_KEY` or `HUGGINGFACE_API_KEY` must be configured.
 
-### 1. Backend setup
+---
+
+## Getting Started
+
+### 1. Clone the repository
+
+```bash
+git clone <repository-url>
+cd mars
+```
+
+### 2. Set up the backend
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate        # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
 ```
 
-### 2. Configure environment
+### 3. Configure environment variables
 
-Set at least one LLM provider key in `.env`:
+Open `.env` and set at least one LLM provider key:
 
-- `GROQ_API_KEY` (recommended)
-- `HUGGINGFACE_API_KEY` (fallback)
+```env
+# Primary LLM (recommended)
+GROQ_API_KEY=your_groq_key_here
 
-Optional:
+# Fallback LLM
+HUGGINGFACE_API_KEY=your_hf_key_here
 
-- `TAVILY_API_KEY` for richer search results
+# Optional: richer search results
+TAVILY_API_KEY=your_tavily_key_here
+```
 
-### 3. Run backend
+See the full [Configuration Reference](#configuration-reference) below.
+
+### 4. Start the backend server
 
 ```bash
 uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-### 4. Run frontend
+### 5. Start the frontend
 
 ```bash
 cd ui
@@ -90,99 +146,131 @@ npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`.
+The application will be available at **http://127.0.0.1:5173**.
+
+---
 
 ## Configuration Reference
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `GROQ_API_KEY` | No* | `""` | Primary LLM API key |
-| `GROQ_MODEL` | No | `llama-3.1-8b-instant` | Groq model name |
-| `HUGGINGFACE_API_KEY` | No* | `""` | Fallback LLM API key |
-| `HUGGINGFACE_MODEL` | No | `mistralai/Mistral-7B-Instruct-v0.3` | HuggingFace model |
-| `TAVILY_API_KEY` | No | `""` | Optional search provider |
-| `DATABASE_URL` | No | `./research.db` | SQLite file path |
-| `MAX_PARALLEL_SEARCH` | No | `2` | Max concurrent search operations |
-| `MAX_ITERATIONS` | No | `3` | Max planner-search-summarize-critic loops |
-| `LLM_TIMEOUT_SEC` | No | `25` | LLM request timeout |
-| `SEARCH_TIMEOUT_SEC` | No | `20` | Search request timeout |
+| `GROQ_API_KEY` | Conditional* | `""` | Primary LLM provider API key |
+| `GROQ_MODEL` | No | `llama-3.1-8b-instant` | Groq model identifier |
+| `HUGGINGFACE_API_KEY` | Conditional* | `""` | Fallback LLM provider API key |
+| `HUGGINGFACE_MODEL` | No | `Qwen/Qwen2.5-7B-Instruct` | HuggingFace model identifier |
+| `TAVILY_API_KEY` | No | `""` | Optional enriched search provider |
+| `DATABASE_URL` | No | `./research.db` | SQLite database file path |
+| `MAX_PARALLEL_SEARCH` | No | `2` | Maximum concurrent search operations |
+| `MAX_ITERATIONS` | No | `3` | Maximum planner–search–summarize–critic loop cycles |
+| `LLM_TIMEOUT_SEC` | No | `25` | Per-request LLM timeout (seconds) |
+| `SEARCH_TIMEOUT_SEC` | No | `20` | Per-request search timeout (seconds) |
 
-`*` At least one of `GROQ_API_KEY` or `HUGGINGFACE_API_KEY` must be set.
+> \* At least one of `GROQ_API_KEY` or `HUGGINGFACE_API_KEY` must be provided.
 
-## API Endpoints
+---
+
+## API Reference
 
 ### `GET /`
 
-Service metadata and available endpoints.
+Returns service metadata and a list of available endpoints.
+
+---
 
 ### `GET /api/health`
 
-Health check.
+Health check endpoint.
 
-Response:
+**Response**
 
 ```json
 { "status": "ok" }
 ```
 
+---
+
 ### `POST /api/research/stream`
 
-Streams research progress as newline-delimited JSON (`application/x-ndjson`).
+Executes the full research pipeline and streams progress as newline-delimited JSON (`application/x-ndjson`).
 
-Request body:
+**Request body**
 
 ```json
-{ "query": "What are the latest open-source small language model benchmarks in 2026?" }
+{
+  "query": "What are the latest open-source small language model benchmarks in 2026?"
+}
 ```
 
-Validation:
+**Validation**
 
-- `query` length: 5 to 500 characters
+- `query` must be between **5 and 500 characters**.
 
-Event schema:
+**Event schema**
 
-- `progress`: `{ "type": "progress", "request_id": "...", "message": "..." }`
-- `plan`: `{ "type": "plan", "items": ["..."] }`
-- `search_progress`: `{ "type": "search_progress", "snippets": 12 }`
-- `critic`: `{ "type": "critic", "iteration": 1, "reason": "..." }`
-- `findings`: `{ "type": "findings", "items": [{"claim":"...","source":"..."}] }`
-- `final_report`: `{ "type": "final_report", "report": "...", "confidence": 0.73 }`
-- `error`: `{ "type": "error", "message": "..." }`
+| Event type | Payload |
+|---|---|
+| `progress` | `{ "type": "progress", "request_id": "...", "message": "..." }` |
+| `plan` | `{ "type": "plan", "items": ["..."] }` |
+| `search_progress` | `{ "type": "search_progress", "snippets": 12 }` |
+| `critic` | `{ "type": "critic", "iteration": 1, "reason": "..." }` |
+| `findings` | `{ "type": "findings", "items": [{ "claim": "...", "source": "..." }] }` |
+| `final_report` | `{ "type": "final_report", "report": "...", "confidence": 0.73 }` |
+| `error` | `{ "type": "error", "message": "..." }` |
 
-Example:
+**Example**
 
 ```bash
 curl -N -X POST http://127.0.0.1:8000/api/research/stream \
   -H "Content-Type: application/json" \
-  -d '{"query":"Compare efficient open-source speech-to-text models for CPU inference"}'
+  -d '{"query": "Compare efficient open-source speech-to-text models for CPU inference"}'
 ```
 
-## Persistence
+---
 
-Final reports are stored in SQLite table `research_reports` with:
+## Data Persistence
 
-- `query`
-- `report`
-- `confidence`
-- `created_at` (UTC ISO-8601)
+Completed research reports are automatically persisted to a local SQLite database (`research.db` by default).
 
-## Reliability and Resource Profile
+**Table:** `research_reports`
 
-- Async I/O across API, search, and workflow operations
-- Bounded search concurrency (`MAX_PARALLEL_SEARCH`)
-- Iteration ceiling (`MAX_ITERATIONS`) to avoid unbounded loops
-- Fallback behavior for missing provider responses
-- Minimal local footprint: no Redis, no external queue, no local model serving
+| Column | Type | Description |
+|---|---|---|
+| `query` | TEXT | The original research query |
+| `report` | TEXT | Final markdown report content |
+| `confidence` | REAL | Model-assigned confidence score (0.0–1.0) |
+| `created_at` | TEXT | UTC timestamp in ISO-8601 format |
 
-## Security Notes
+---
 
-- Do not commit real API keys to source control.
-- Keep `.env` local and secret.
-- Rotate keys immediately if they are exposed.
+## Reliability & Resource Profile
+
+MARS is designed to operate efficiently in constrained environments:
+
+- **Async I/O** throughout the API, search, and workflow layers
+- **Bounded concurrency** via `MAX_PARALLEL_SEARCH` to cap simultaneous search requests
+- **Iteration ceiling** via `MAX_ITERATIONS` to prevent unbounded agent loops
+- **Provider fallback** for graceful degradation when a primary LLM is unavailable
+- **Minimal footprint** — no Redis, no external queue, no local model inference
+
+---
+
+## Security
+
+- **Never commit real API keys** to source control
+- Keep `.env` local — add it to `.gitignore`
+- Rotate keys immediately if they are accidentally exposed
+- In production, use a secrets manager rather than a flat `.env` file
+
+---
 
 ## Development Notes
 
-- Frontend proxy is configured in `ui/vite.config.js` for `/api -> http://127.0.0.1:8000`
-- CORS allows `http://127.0.0.1:5173` and `http://localhost:5173`
+- The Vite dev server proxies `/api` requests to `http://127.0.0.1:8000` — configured in `ui/vite.config.js`
+- CORS is enabled for `http://127.0.0.1:5173` and `http://localhost:5173`
+- Backend hot-reload is enabled by default via `--reload` flag in the `uvicorn` start command
 
+<<<<<<< HEAD
+=======
+---
+>>>>>>> 13bcce1 (update)
 

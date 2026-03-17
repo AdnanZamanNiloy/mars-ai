@@ -27,7 +27,7 @@ def get_settings() -> Settings:
         groq_api_key=os.getenv("GROQ_API_KEY", "").strip(),
         groq_model=os.getenv("GROQ_MODEL", "llama-3.1-8b-instant").strip(),
         huggingface_api_key=os.getenv("HUGGINGFACE_API_KEY", "").strip(),
-        huggingface_model=os.getenv("HUGGINGFACE_MODEL", "mistralai/Mistral-7B-Instruct-v0.3").strip(),
+        huggingface_model=os.getenv("HUGGINGFACE_MODEL", "Qwen/Qwen2.5-7B-Instruct").strip(),
         tavily_api_key=os.getenv("TAVILY_API_KEY", "").strip(),
         database_url=os.getenv("DATABASE_URL", "./research.db").strip(),
         max_parallel_search=int(os.getenv("MAX_PARALLEL_SEARCH", "2")),
