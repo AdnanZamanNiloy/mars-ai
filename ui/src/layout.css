@@ -1,15 +1,18 @@
 @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Serif:wght@400;600&display=swap");
 
 :root {
-  --bg-a: #f7f3ea;
-  --bg-b: #ecf4f4;
-  --ink: #172127;
-  --muted: #536168;
-  --line: #d8cfbb;
+  --bg-a: #faf9f6;
+  --bg-b: #f0eee6;
+  --ink: #11181c;
+  --muted: #687076;
+  --line: #e6e4df;
   --card: #ffffff;
-  --brand: #146a6f;
-  --brand-soft: #e7f6f7;
-  --shadow-soft: 0 8px 26px rgb(20 31 38 / 9%);
+  --brand: #1a1e23;
+  --brand-soft: #f1f3f5;
+  --shadow-soft: 0 8px 30px rgba(0, 0, 0, 0.04), 0 2px 4px rgba(0, 0, 0, 0.02);
+  --shadow-hover: 0 12px 40px rgba(0, 0, 0, 0.08), 0 4px 8px rgba(0, 0, 0, 0.04);
+  --radius: 16px;
+  --radius-sm: 10px;
 }
 
 * {
@@ -19,12 +22,15 @@
 body {
   margin: 0;
   color: var(--ink);
-  font-family: "Space Grotesk", sans-serif;
-  background:
-    radial-gradient(circle at 12% 15%, #f2dbb4 0 200px, transparent 210px),
-    radial-gradient(circle at 86% 8%, #d7e9ea 0 260px, transparent 270px),
-    linear-gradient(160deg, var(--bg-a), var(--bg-b));
+  font-family: "Space Grotesk", system-ui, -apple-system, sans-serif;
+  background-color: var(--bg-a);
+  background-image: 
+    radial-gradient(at 10% 10%, rgba(200, 180, 150, 0.08) 0px, transparent 40%),
+    radial-gradient(at 90% 90%, rgba(150, 180, 200, 0.08) 0px, transparent 40%);
+  background-attachment: fixed;
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #root {
@@ -32,46 +38,77 @@ body {
 }
 
 .app-shell {
-  max-width: 900px;
+  max-width: 1400px;
   margin: 0 auto;
-  padding: 22px 16px 34px;
+  padding: 32px 24px 48px;
 }
 
 .hero {
-  margin-bottom: 14px;
+  margin-bottom: 24px;
+  text-align: center;
+  padding: 20px 0;
 }
 
 .hero h1 {
-  margin: 6px 0;
-  font-size: clamp(1.8rem, 4vw, 2.5rem);
+  margin: 12px 0 8px;
+  font-size: clamp(2.2rem, 5vw, 3.5rem);
   line-height: 1.1;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, #11181c 0%, #475569 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .eyebrow {
   margin: 0;
-  letter-spacing: 0.2em;
+  display: inline-block;
+  letter-spacing: 0.3em;
   text-transform: uppercase;
-  color: var(--brand);
+  color: #3b82f6;
   font-weight: 700;
+  font-size: 0.9rem;
+  padding: 4px 12px;
+  background: rgba(59, 130, 246, 0.1);
+  border-radius: 999px;
+  border: 1px solid rgba(59, 130, 246, 0.2);
 }
 
 .sub {
-  margin: 0;
+  margin: 0 auto;
   max-width: 62ch;
   color: var(--muted);
-  font-family: "IBM Plex Serif", serif;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.1rem;
+  line-height: 1.5;
 }
 
 .layout-grid {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 14px;
-  margin-top: 14px;
+  grid-template-columns: 1fr 380px;
+  gap: 28px;
+  margin-top: 24px;
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .layout-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.main-column {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
 .stream-column {
   display: grid;
-  gap: 12px;
+  gap: 16px;
+  position: sticky;
+  top: 24px;
 }
 
 .label-title {
@@ -87,14 +124,26 @@ textarea {
   resize: vertical;
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 12px;
+  padding: 14px;
   color: var(--ink);
-  background: #fffcf8;
+  background: rgba(255, 255, 255, 0.6);
   font: inherit;
+  transition: all 0.2s ease;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.01);
+}
+
+textarea:focus {
+  outline: none;
+  border-color: #94a3b8;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.15);
 }
 
 .row {
   margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 button {
@@ -102,34 +151,84 @@ button {
   border-radius: 999px;
   font: inherit;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 button[type="submit"] {
   background: var(--brand);
   color: #fff;
-  font-weight: 700;
-  padding: 10px 16px;
+  font-weight: 600;
+  padding: 10px 20px;
+  box-shadow: inset 0 1px 1px rgba(255,255,255,0.1), 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.run-search-btn {
+  background: linear-gradient(180deg, #10b981, #059669);
+  color: #fff;
+  font-weight: 600;
+  padding: 10px 20px;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.2), 0 2px 4px rgba(5, 150, 105, 0.2);
+}
+
+.run-search-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.2), 0 4px 10px rgba(5, 150, 105, 0.3);
+  background: linear-gradient(180deg, #059669, #047857);
+}
+
+.run-search-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.abort-mission-btn {
+  background: linear-gradient(180deg, #ef4444, #dc2626);
+  color: #fff;
+  font-weight: 600;
+  padding: 10px 20px;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.2), 0 2px 4px rgba(220, 38, 38, 0.2);
+}
+
+.abort-mission-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.2), 0 4px 10px rgba(220, 38, 38, 0.3);
+  background: linear-gradient(180deg, #dc2626, #b91c1c);
+}
+
+.abort-mission-btn:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 button:disabled {
   opacity: 0.55;
+  filter: grayscale(0.5);
   cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
 }
 
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
+  gap: 10px;
+  margin-top: 14px;
 }
 
 .chip {
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(8px);
   color: var(--ink);
-  padding: 7px 12px;
+  padding: 8px 14px;
   font-size: 0.88rem;
+  transition: all 0.2s ease;
+}
+
+.chip:hover:not(:disabled) {
+  background: #fff;
+  border-color: #cbd5e1;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
 }
 
 .meta {
@@ -190,9 +289,12 @@ button:disabled {
   max-height: 52vh;
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 12px;
-  background: #fbf9f5;
+  border-radius: 12px;
+  padding: 16px;
+  background: #ffffff;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.02);
   font-family: "IBM Plex Serif", serif;
-  line-height: 1.45;
+  line-height: 1.6;
+  font-size: 0.96rem;
+  color: #1f2937;
 }

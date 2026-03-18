@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import FinalAnswerCard from "./components/FinalAnswerCard";
 import PipelineBar from "./components/PipelineBar";
 import SectionCard from "./components/SectionCard";
@@ -22,6 +22,7 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [activeStep, setActiveStep] = useState("planner");
+  const activeController = useRef(null);
 
   const canSubmit = useMemo(() => query.trim().length >= 5 && !running, [query, running]);
 
@@ -29,9 +30,19 @@ export default function App() {
 
   const finalAnswer = useMemo(() => extractFinalAnswer(report), [report]);
 
+  const abortRun = () => {
+    if (activeController.current) {
+      activeController.current.abort();
+      activeController.current = null;
+    }
+  };
+
   const runResearch = async (event) => {
     event.preventDefault();
     if (!canSubmit) return;
+
+    const controller = new AbortController();
+    activeController.current = controller;
 
     setRunning(true);
     setError("");
@@ -50,6 +61,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: query.trim() }),
+        signal: controller.signal,
       });
 
       if (!response.ok || !response.body) {
@@ -138,8 +150,13 @@ export default function App() {
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown stream error");
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setProgress((prev) => [...prev, "Mission aborted by user."]);
+      } else {
+        setError(err instanceof Error ? err.message : "Unknown stream error");
+      }
     } finally {
+      activeController.current = null;
       setRunning(false);
     }
   };
@@ -152,41 +169,79 @@ export default function App() {
         <p className="sub">Fast, low-resource, citation-grounded research streaming.</p>
       </header>
 
-      <FinalAnswerCard answer={finalAnswer} confidence={confidence} running={running} />
-
-      <PipelineBar activeStep={activeStep} />
-
       <main className="layout-grid">
-        <section className="card input-panel">
-          <form onSubmit={runResearch}>
-            <label htmlFor="query" className="label-title">Research query</label>
-            <textarea
-              id="query"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Ask a research question..."
-              rows={6}
-            />
+        <div className="main-column">
+          <section className="card input-panel">
+            <form onSubmit={runResearch}>
+              <label htmlFor="query" className="label-title">Research query</label>
+              <textarea
+                id="query"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Ask a research question..."
+                rows={4}
+              />
 
-            <div className="row">
-              <button type="submit" disabled={!canSubmit}>
-                {running ? "Running..." : "Run Research"}
-              </button>
+              <div className="row">
+                <button type="submit" className="run-search-btn" disabled={!canSubmit}>
+                  Run Search
+                </button>
+                <button type="button" className="abort-mission-btn" onClick={abortRun} disabled={!running}>
+                  Abort Mission
+                </button>
+              </div>
+            </form>
+
+            <div className="chips">
+              {EXAMPLES.map((item) => (
+                <button key={item} type="button" className="chip" onClick={() => setQuery(item)} disabled={running}>
+                  {item}
+                </button>
+              ))}
             </div>
-          </form>
 
-          <div className="chips">
-            {EXAMPLES.map((item) => (
-              <button key={item} type="button" className="chip" onClick={() => setQuery(item)} disabled={running}>
-                {item}
-              </button>
-            ))}
-          </div>
+            {error ? <p className="error">Error: {error}</p> : null}
+          </section>
 
-          {error ? <p className="error">Error: {error}</p> : null}
-        </section>
+          <PipelineBar activeStep={activeStep} />
 
-        <section className="stream-column">
+          <FinalAnswerCard answer={finalAnswer} confidence={confidence} running={running} />
+
+          <SectionCard title="Findings" rightMeta={`${topFindings.length} shown`}>
+            {topFindings.length > 0 ? (
+              <div className="findings-grid">
+                {topFindings.map((item, idx) => {
+                  const domain = extractDomain(item.source || "");
+                  const trust = sourceTrustLevel(domain);
+                  const rowConfidence = clampPercent((item.confidence ?? confidence ?? 0.62) * 100 - idx * 4);
+
+                  return (
+                    <article key={`finding-${idx}`} className="finding-card">
+                      <p className="finding-claim">{item.claim}</p>
+                      <div className="finding-meta">
+                        {item.source ? (
+                          <a href={item.source} target="_blank" rel="noopener noreferrer" className="finding-domain finding-link">
+                            {domain || "unknown source"}
+                          </a>
+                        ) : (
+                          <span className="finding-domain">{domain || "unknown source"}</span>
+                        )}
+                        <span className={`source-badge ${trust.className}`}>{trust.label}</span>
+                      </div>
+                      <div className="confidence-bar" aria-label="confidence">
+                        <div className="confidence-bar-fill" style={{ width: `${rowConfidence}%` }} />
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="empty">No findings extracted yet.</p>
+            )}
+          </SectionCard>
+        </div>
+
+        <aside className="stream-column">
           <SectionCard
             title="Status"
             rightMeta={requestId ? `Request ${requestId.slice(0, 8)}` : null}
@@ -236,33 +291,6 @@ export default function App() {
             )}
           </SectionCard>
 
-          <SectionCard title="Findings" initiallyCollapsed rightMeta={`${topFindings.length} shown`}>
-            {topFindings.length > 0 ? (
-              <div className="findings-grid">
-                {topFindings.map((item, idx) => {
-                  const domain = extractDomain(item.source || "");
-                  const trust = sourceTrustLevel(domain);
-                  const rowConfidence = clampPercent((item.confidence ?? confidence ?? 0.62) * 100 - idx * 4);
-
-                  return (
-                    <article key={`finding-${idx}`} className="finding-card">
-                      <p className="finding-claim">{item.claim}</p>
-                      <div className="finding-meta">
-                        <span className="finding-domain">{domain || "unknown source"}</span>
-                        <span className={`source-badge ${trust.className}`}>{trust.label}</span>
-                      </div>
-                      <div className="confidence-bar" aria-label="confidence">
-                        <div className="confidence-bar-fill" style={{ width: `${rowConfidence}%` }} />
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="empty">No findings extracted yet.</p>
-            )}
-          </SectionCard>
-
           {report ? (
             <SectionCard title="Final Report (Raw)" rightMeta={typeof confidence === "number" ? `Confidence ${confidence.toFixed(2)}` : null}>
               {typeof confidence === "number" ? <p className="meta">Confidence: {confidence.toFixed(2)}</p> : null}
@@ -271,7 +299,7 @@ export default function App() {
           ) : null}
 
           {!report && findings.length === 0 && !running ? <p className="empty">No output yet. Submit a query to begin.</p> : null}
-        </section>
+        </aside>
       </main>
     </div>
   );
