@@ -273,8 +273,8 @@ MARS is designed to operate efficiently in constrained environments:
 - CORS is enabled for `http://127.0.0.1:5173` and `http://localhost:5173`
 - Backend hot-reload is enabled by default via `--reload` flag in the `uvicorn` start command
 
-<<<<<<< HEAD
-=======
----
->>>>>>> 13bcce1 (update)
+## Demo
+![MARS](image.png)
+
+
 
