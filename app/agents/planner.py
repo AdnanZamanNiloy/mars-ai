@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Dict, List, TypedDict
 
 from app.core.llm import LLMClient
+
+logger = logging.getLogger(__name__)
 
 
 # =========================
@@ -18,103 +21,122 @@ class SubQuestion(TypedDict, total=False):
     priority: int
     depends_on: List[int]
     coverage_goal: str
-    domain: str  # NEW: helps filtering (ml, philosophy, etc.)
+    domain: str
 
 
-class PlannerOutput(TypedDict):
+class PlannerOutput(TypedDict, total=False):
     query_type: str
     query_scope: str
+    dominant_domain: str
     sub_questions: List[SubQuestion]
     coverage_note: str
 
 
 # =========================
-# System Prompt (UPGRADED)
+# Constants
 # =========================
 
-PLANNER_SYSTEM_PROMPT = """
-You are a world-class research planner in a multi-agent AI system.
-
-Your job is to break a query into high-quality, non-overlapping,
-search-optimized sub-questions that enable deep, accurate research.
-
-━━━━━━━━━ STEP 0: DISAMBIGUATION (CRITICAL) ━━━━━━━━━
-
-If the query contains ambiguous terms (e.g., "Transformer", "Python"),
-you MUST infer the most likely domain from context.
-
-Return:
-- dominant_domain (e.g., "machine_learning", "electrical_engineering")
-- discard irrelevant meanings completely
-
-━━━━━━━━━ STEP 1: CLASSIFY QUERY ━━━━━━━━━
-
-Types:
-FACTUAL, COMPARATIVE, CAUSAL, EXPLORATORY, EVALUATIVE, PROCEDURAL
-
-━━━━━━━━━ STEP 2: DECOMPOSE BY AXIS ━━━━━━━━━
-
-Each sub-question MUST cover a unique axis:
-
-- definition
-- mechanism
-- evidence
-- comparison
-- application
-- criticism
-
-NO duplication allowed.
-
-━━━━━━━━━ STEP 3: SEARCH-OPTIMIZED QUERIES ━━━━━━━━━
-
-Write queries like search engine inputs (NOT natural language questions).
-
-Example:
-BAD: "What is machine learning?"
-GOOD: "machine learning definition supervised unsupervised reinforcement overview"
-
-━━━━━━━━━ STEP 4: SEARCH TYPE + DOMAIN ━━━━━━━━━
-
-Assign:
-- search_type: encyclopedia | academic | statistical | news | comparison
-- domain: one of (machine_learning, philosophy, software, economics, etc.)
-
-━━━━━━━━━ STEP 5: PRIORITY ━━━━━━━━━
-
-- 1 = core
-- 2 = important
-- 3 = optional depth
-
-━━━━━━━━━ STEP 6: SELF-CHECK ━━━━━━━━━
-
-Ensure:
-- No redundancy
-- No mixed domains
-- Full coverage
-
-━━━━━━━━━ OUTPUT ━━━━━━━━━
-
-Return ONLY JSON:
-
-{
-  "query_type": "...",
-  "query_scope": "...",
-  "dominant_domain": "...",
-  "sub_questions": [
-    {
-      "id": 1,
-      "question": "...",
-      "axis": "...",
-      "search_type": "...",
-      "priority": 1,
-      "depends_on": [],
-      "coverage_goal": "...",
-      "domain": "..."
-    }
-  ],
-  "coverage_note": "..."
+VALID_SEARCH_TYPES = {
+    "encyclopedia",
+    "academic",
+    "statistical",
+    "news",
+    "comparison",
 }
-""".strip()
+
+VALID_DOMAINS = {
+    "machine_learning",
+    "software",
+    "philosophy",
+    "economics",
+    "science",
+    "general",
+}
+
+
+# =========================
+# Utilities
+# =========================
+
+def normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text.strip().lower())
+
+
+def normalize_domain(domain: str) -> str:
+    d = normalize_text(domain)
+    return d if d in VALID_DOMAINS else "general"
+
+
+def is_valid_question(q: str) -> bool:
+    return len(q.split()) >= 3
+
+
+def deduplicate_semantic(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    seen = set()
+    result = []
+
+    for item in items:
+        key = normalize_text(item["question"])
+        key = re.sub(r"(definition|overview|introduction)", "", key)
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        result.append(item)
+
+    return result
+
+
+# =========================
+# Fallback Planner (CRITICAL)
+# =========================
+
+def fallback_plan(query: str) -> List[Dict[str, Any]]:
+    concept = re.sub(r"^(what is|define|explain)\s+", "", query.lower()).strip()
+
+    return [
+        {
+            "id": 1,
+            "question": f"{concept} definition explanation overview",
+            "axis": "definition",
+            "search_type": "encyclopedia",
+            "priority": 1,
+            "depends_on": [],
+            "coverage_goal": "core meaning",
+            "domain": "general",
+        },
+        {
+            "id": 2,
+            "question": f"{concept} mechanism how it works components",
+            "axis": "mechanism",
+            "search_type": "academic",
+            "priority": 2,
+            "depends_on": [1],
+            "coverage_goal": "internal working",
+            "domain": "general",
+        },
+        {
+            "id": 3,
+            "question": f"{concept} applications real world examples",
+            "axis": "application",
+            "search_type": "comparison",
+            "priority": 2,
+            "depends_on": [1],
+            "coverage_goal": "practical usage",
+            "domain": "general",
+        },
+        {
+            "id": 4,
+            "question": f"{concept} limitations challenges drawbacks",
+            "axis": "criticism",
+            "search_type": "academic",
+            "priority": 3,
+            "depends_on": [2],
+            "coverage_goal": "weaknesses",
+            "domain": "general",
+        },
+    ]
 
 
 # =========================
@@ -127,59 +149,17 @@ async def planner_agent(
     critique_feedback: str = ""
 ) -> List[Dict[str, Any]]:
 
-    normalized = query.strip().lower()
+    normalized = normalize_text(query)
 
     # =========================
-    # Fast Path (optimized)
+    # Fast Path
     # =========================
-    if normalized.startswith(("what is", "define")) and not critique_feedback:
-        concept = re.sub(r"^(what is|define)\s+", "", normalized).strip()
-
-        return [
-            {
-                "id": 1,
-                "question": f"{concept} definition formal explanation",
-                "axis": "definition",
-                "search_type": "encyclopedia",
-                "priority": 1,
-                "depends_on": [],
-                "coverage_goal": "formal definition and meaning",
-                "domain": "general",
-            },
-            {
-                "id": 2,
-                "question": f"{concept} how it works mechanism components",
-                "axis": "mechanism",
-                "search_type": "academic",
-                "priority": 2,
-                "depends_on": [1],
-                "coverage_goal": "internal working and structure",
-                "domain": "general",
-            },
-            {
-                "id": 3,
-                "question": f"{concept} real world applications examples",
-                "axis": "application",
-                "search_type": "comparison",
-                "priority": 2,
-                "depends_on": [1],
-                "coverage_goal": "practical usage",
-                "domain": "general",
-            },
-            {
-                "id": 4,
-                "question": f"{concept} limitations drawbacks challenges",
-                "axis": "criticism",
-                "search_type": "academic",
-                "priority": 3,
-                "depends_on": [2],
-                "coverage_goal": "weaknesses and limitations",
-                "domain": "general",
-            },
-        ]
+    if normalized.startswith(("what is", "define", "explain")) and not critique_feedback:
+        logger.info("[Planner] Using fast-path")
+        return fallback_plan(normalized)
 
     # =========================
-    # Full LLM Planning
+    # LLM Planning
     # =========================
 
     feedback_block = f"\nCritique feedback: {critique_feedback}" if critique_feedback else ""
@@ -188,41 +168,60 @@ async def planner_agent(
 Query: {query}
 {feedback_block}
 
-Generate a high-quality structured research plan.
+Generate a structured research plan.
 Return JSON only.
 """
 
-    payload: PlannerOutput = await llm.generate_json(
-        PLANNER_SYSTEM_PROMPT,
-        user_prompt
-    )
+    try:
+        payload: PlannerOutput = await llm.generate_json(
+            system_prompt=PLANNER_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+        )
+    except Exception as e:
+        logger.error(f"[Planner] LLM failed: {e}")
+        return fallback_plan(query)
 
     sub_questions = payload.get("sub_questions", [])
 
+    if not sub_questions:
+        logger.warning("[Planner] Empty LLM output, using fallback")
+        return fallback_plan(query)
+
     # =========================
-    # Post-processing (ELITE TOUCH)
+    # Post-processing
     # =========================
 
     cleaned: List[Dict[str, Any]] = []
-    seen = set()
 
-    for item in sub_questions:
-        q = item.get("question", "").strip().lower()
+    for i, item in enumerate(sub_questions):
+        q = item.get("question", "").strip()
 
-        if not q or q in seen:
+        if not q or not is_valid_question(q):
             continue
 
-        seen.add(q)
-
         cleaned.append({
-            "id": item.get("id"),
-            "question": item.get("question"),
-            "axis": item.get("axis"),
-            "search_type": item.get("search_type", "encyclopedia"),
-            "priority": item.get("priority", 2),
+            "id": item.get("id", i + 1),
+            "question": q,
+            "axis": item.get("axis", "general"),
+            "search_type": item.get("search_type", "encyclopedia")
+                if item.get("search_type") in VALID_SEARCH_TYPES else "encyclopedia",
+            "priority": int(item.get("priority", 2)),
             "depends_on": item.get("depends_on", []),
             "coverage_goal": item.get("coverage_goal", ""),
-            "domain": item.get("domain", "general"),
+            "domain": normalize_domain(item.get("domain", "general")),
         })
 
-    return cleaned[:5]
+    # Deduplicate (semantic-ish)
+    cleaned = deduplicate_semantic(cleaned)
+
+    # Sort by priority
+    cleaned.sort(key=lambda x: x["priority"])
+
+    # Limit results
+    final = cleaned[:5]
+
+    if not final:
+        logger.warning("[Planner] All filtered out, fallback used")
+        return fallback_plan(query)
+
+    return final

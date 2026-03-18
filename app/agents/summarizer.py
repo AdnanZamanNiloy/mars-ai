@@ -83,8 +83,8 @@ async def summarizer_agent(
     query: str,
     search_results: List[Dict[str, str]],
 ) -> List[Dict[str, Any]]:
-    filtered_results = filter_search_results_by_domain(search_results)
-    if not filtered_results:
+    quality_results = filter_search_results_by_domain(search_results)
+    if not quality_results:
         return []
 
     compact_results = [
@@ -94,7 +94,7 @@ async def summarizer_agent(
             "snippet": item.get("snippet", "")[:500],
             "sub_question": item.get("sub_question", ""),
         }
-        for item in filtered_results[:16]
+        for item in quality_results[:16]
     ]
 
     user_prompt = (
@@ -118,7 +118,7 @@ async def summarizer_agent(
         claim = normalize_claim_text(str(fact.get("claim", "")))
         source = str(fact.get("source", "")).strip()
         source_score = source_reliability_score(source)
-        if source_score < 0.60:
+        if source_score < 0.55:
             continue
 
         model_confidence = clamp_confidence(fact.get("confidence", 0.0))
@@ -131,7 +131,7 @@ async def summarizer_agent(
 
     # Heuristic fallback when the model output is malformed or empty.
     fallback: List[Dict[str, Any]] = []
-    for item in filtered_results[:6]:
+    for item in quality_results[:6]:
         snippet = item.get("snippet", "").strip()
         if not snippet:
             continue
