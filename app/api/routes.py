@@ -36,6 +36,22 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
         payload_data = {"type": event_type, **data}
         return json.dumps(payload_data, ensure_ascii=True) + "\n"
 
+    def plan_items_for_event(raw_items: Any) -> list[str]:
+        if not isinstance(raw_items, list):
+            return []
+
+        items: list[str] = []
+        for item in raw_items:
+            if isinstance(item, str):
+                text = item.strip()
+            elif isinstance(item, dict):
+                text = str(item.get("question", "")).strip()
+            else:
+                text = ""
+            if text:
+                items.append(text)
+        return items
+
     async def event_stream() -> AsyncGenerator[str, None]:
         state = build_initial_state(payload.query, settings.max_iterations)
         last_iteration = -1
@@ -50,7 +66,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 iteration = int(snapshot.get("iteration", 0))
 
                 if snapshot.get("sub_questions") and not emitted_plan:
-                    yield event_line("plan", items=snapshot.get("sub_questions", []))
+                    yield event_line("plan", items=plan_items_for_event(snapshot.get("sub_questions", [])))
                     emitted_plan = True
 
                 if snapshot.get("search_results"):

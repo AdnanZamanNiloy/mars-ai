@@ -15,7 +15,7 @@ from app.core.llm import LLMClient
 
 class ResearchState(TypedDict, total=False):
     query: str
-    sub_questions: List[str]
+    sub_questions: List[Any]
     search_results: List[Dict[str, str]]
     facts: List[Dict[str, Any]]
     critique: Dict[str, Any]
@@ -63,6 +63,14 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _extract_question_text(item: Any) -> str:
+    if isinstance(item, str):
+        return item.strip()
+    if isinstance(item, dict):
+        return str(item.get("question", "")).strip()
+    return ""
 
 
 def build_initial_state(query: str, max_iterations: int) -> ResearchState:
@@ -170,7 +178,11 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
         return {"sub_questions": sub_questions}
 
     async def search_node(state: ResearchState) -> SearchUpdate:
-        questions = state.get("sub_questions", [])[:5]
+        raw_questions = state.get("sub_questions", [])[:5]
+        questions = [_extract_question_text(item) for item in raw_questions]
+        questions = [q for q in questions if q]
+        if not questions:
+            questions = [state.get("query", "").strip()]
         results = await search_client.run_search(questions)
         return {"search_results": results}
 

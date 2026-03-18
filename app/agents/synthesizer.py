@@ -97,7 +97,7 @@ def _sanitize_answer_text(answer: str, query: str) -> str:
     q = (query or "").strip().rstrip("?")
     q_escaped = re.escape(q)
     text = re.sub(
-        rf"^(?i){q_escaped}\s+refers to",
+        rf"(?i)^{q_escaped}\s+refers to",
         f"{_normalize_query_concept(query)} refers to",
         text,
     )
