@@ -6,6 +6,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agents.evidence_utils import dedupe_semantic_facts, filter_facts_by_domain, source_reliability_score
 from app.agents.critic import critic_agent
+from app.agents.orchestrator import orchestrate
 from app.agents.planner import planner_agent
 from app.agents.search import SearchClient
 from app.agents.summarizer import summarizer_agent
@@ -28,6 +29,8 @@ class ResearchState(TypedDict, total=False):
     final_report: str
     synthesized_answer: str
     confidence: float
+    orchestration: Dict[str, Any]
+    deep_research: bool
 
 
 class PlannerUpdate(TypedDict):
@@ -72,8 +75,14 @@ def _extract_question_text(item: Any) -> str:
     return ""
 
 
-def build_initial_state(query: str, max_iterations: int) -> ResearchState:
+def build_initial_state(
+    query: str,
+    max_iterations: int,
+    deep_research: bool = False,
+    max_parallel_agents: int = 3,
+) -> ResearchState:
     effective_max_iterations = max(3, int(max_iterations))
+    plan = orchestrate(query, max_parallel_agents=max_parallel_agents, deep_research=deep_research)
     return {
         "query": query,
         "sub_questions": [],
@@ -86,6 +95,17 @@ def build_initial_state(query: str, max_iterations: int) -> ResearchState:
         "final_report": "",
         "synthesized_answer": "",
         "confidence": 0.0,
+        "orchestration": {
+            "complexity_score": plan.complexity.score,
+            "complexity_level": plan.complexity.level,
+            "query_type": plan.complexity.query_type,
+            "target_agents": plan.target_agents,
+            "max_parallel_agents": plan.max_parallel_agents,
+            "clamped": plan.clamped,
+            "deep_research": plan.deep_research,
+            "notes": plan.notes,
+        },
+        "deep_research": plan.deep_research,
     }
 
 
@@ -174,6 +194,10 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
             query=state["query"],
             critique_feedback=state.get("critique_feedback", ""),
         )
+        # Hardware guardrail: cap the plan at the orchestrated target agents.
+        orchestration = state.get("orchestration", {})
+        target = int(orchestration.get("target_agents", 5) or 5)
+        sub_questions = sub_questions[: max(1, target)]
         logger.info("planner_done", sub_questions=len(sub_questions))
         return {"sub_questions": sub_questions}
 

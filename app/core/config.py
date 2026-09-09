@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     # Pipeline limits
     max_parallel_search: int = 2
+    max_parallel_agents: int = 3  # hardware cap (8GB host) — raise only after load-testing
     max_iterations: int = 3
 
     # Timeouts (seconds)

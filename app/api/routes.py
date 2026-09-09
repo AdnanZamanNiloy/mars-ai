@@ -23,6 +23,7 @@ limiter = Limiter(key_func=get_remote_address)
 
 class ResearchRequest(BaseModel):
     query: str = Field(..., min_length=5, max_length=500)
+    deep_research: bool = False
 
 
 @router.get("/health")
@@ -64,7 +65,12 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
     async def event_stream() -> AsyncGenerator[str, None]:
         bind_request_context(request_id=request_id)
         try:
-            state = build_initial_state(payload.query, settings.max_iterations)
+            state = build_initial_state(
+                payload.query,
+                settings.max_iterations,
+                deep_research=payload.deep_research,
+                max_parallel_agents=settings.max_parallel_agents,
+            )
             last_iteration = -1
             emitted_plan = False
             emitted_findings = 0
@@ -83,7 +89,11 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                         iteration = int(snapshot.get("iteration", 0))
 
                         if snapshot.get("sub_questions") and not emitted_plan:
-                            yield event_line("plan", items=plan_items_for_event(snapshot.get("sub_questions", [])))
+                            yield event_line(
+                                "plan",
+                                items=plan_items_for_event(snapshot.get("sub_questions", [])),
+                                orchestration=snapshot.get("orchestration", {}),
+                            )
                             emitted_plan = True
 
                         if snapshot.get("search_results"):
