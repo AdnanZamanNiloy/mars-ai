@@ -88,11 +88,26 @@ These are real bugs found by reading the code, not hypotheticals. Each one below
   local/scoped value. Phase 1 replaced it with a local `last_snapshot`
   variable in event_stream(); the global no longer exists.
 
-[GAP per manual.md 0.5] app/agents/search.py
+[FIXED — Phase 1 task 1.4] app/agents/search.py
   Multiple bare `except: return []` / `except: return ""` blocks
-  swallow all errors, including transient ones a retry would fix.
+  swallowed all errors, including transient ones a retry would fix.
   Root cause: exception handling written for "never crash" without
-  distinguishing expected-empty from actually-broken.
+  distinguishing expected-empty from actually-broken. All bare excepts
+  now log with context; provider failures degrade to empty results
+  instead of killing the run.
+
+[FIXED — Phase 2 audit] app/core/config.py
+  `SettingsConfigDict(env_file=(".env", ".env.example"))` — in
+  pydantic-settings the LAST file wins, so the placeholder
+  `your_groq_api_key_here` from .env.example silently overrode the real
+  key from .env. Every LLM call 401'd and the pipeline "worked" via
+  deterministic fallbacks, hiding the misconfiguration for two phases.
+  Root cause: wrong env_file precedence plus fallbacks that mask
+  provider auth failures. Fixed by putting .env last and adding a
+  regression test. Secondary finding: the configured Groq model
+  (llama-3.1-8b-instant) had been decommissioned upstream — always
+  verify model IDs against the provider when auth succeeds but calls
+  still fail.
 ```
 
 If you find a new instance of any of these patterns anywhere in the codebase while working on something else, fix it or flag it in your commit message — don't leave it for later just because it's outside your current task's file scope.
