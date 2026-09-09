@@ -57,7 +57,8 @@ async def test_budget_cutoff_stops_loop_and_notes_limitation(monkeypatch):
 
     async def fake_planner(llm, query, critique_feedback=""):
         return [{"id": 1, "question": "q one", "axis": "definition", "search_type": "encyclopedia",
-                 "priority": 1, "depends_on": [], "coverage_goal": "", "domain": "general"}]
+                 "priority": 1, "depends_on": [], "coverage_goal": "", "domain": "general",
+                 "minimum_sources": 2, "stop_condition": "enough"}]
 
     async def fake_summarizer(llm, query, search_results):
         # One summarizer call costs ~$0.0065 — 6x the $0.001 budget.
@@ -78,12 +79,16 @@ async def test_budget_cutoff_stops_loop_and_notes_limitation(monkeypatch):
     monkeypatch.setattr(wf, "critic_agent", fake_critic)
     monkeypatch.setattr(wf, "synthesizer_agent", fake_synthesizer)
 
-    class NoSearch:
+    class StubSearch:
+        SEARCH_RESULTS = [
+            {"url": "https://arxiv.org/a", "sub_question": "q one", "content": "content for the sub-question", "snippet": "snip"},
+        ]
+
         async def run_search(self, questions):
-            return []
+            return self.SEARCH_RESULTS
 
     llm = LLMClient(settings)
-    workflow = wf.create_workflow(llm, NoSearch())
+    workflow = wf.create_workflow(llm, StubSearch())
 
     final = None
     async for snap in workflow.astream(state, stream_mode="values"):
