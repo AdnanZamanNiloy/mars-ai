@@ -794,17 +794,17 @@ Phase 1 — Tier 0 Foundation
 [x] 1.9  Settings hardening (pydantic-settings, fail-fast validation)
 
 Phase 2 — Tier 1 features
-[ ] 2.1  Adaptive Orchestrator + MAX_PARALLEL_AGENTS hardware cap
-[ ] 2.2  Cost / Token Governor + budget NDJSON event
-[ ] 2.3  Verification Agent (new graph node)
-[ ] 2.4  Confidence Engine (multi-signal, replaces inline formula)
-[ ] 2.5  Critic → Red Team prompt upgrade
-[ ] 2.6  Delegation Contracts formalized via PlannerOutputModel
-[ ] 2.7  Research Memory schema extension — FIRST SLICE ONLY
+[x] 2.1  Adaptive Orchestrator + MAX_PARALLEL_AGENTS hardware cap
+[x] 2.2  Cost / Token Governor + budget NDJSON event
+[x] 2.3  Verification Agent (new graph node)
+[x] 2.4  Confidence Engine (multi-signal, replaces inline formula)
+[x] 2.5  Critic → Red Team prompt upgrade
+[x] 2.6  Delegation Contracts formalized via PlannerOutputModel
+[x] 2.7  Research Memory schema extension — FIRST SLICE ONLY
          (research_runs, agent_tasks, sources, claims); completed by 3.8
-[ ] 2.8  Dynamic Research Depth / Adaptive Expansion (Feature 11)
-[ ] 2.9  Agent Context Isolation (Feature 04)
-[ ] 2.10 Full Observability Persistence — agent_events table (Feature 14)
+[x] 2.8  Dynamic Research Depth / Adaptive Expansion (Feature 11)
+[x] 2.9  Agent Context Isolation (Feature 04)
+[x] 2.10 Full Observability Persistence — agent_events table (Feature 14)
 
 Phase 3 — Tier 2 features
 [ ] 3.1  Specialized Agent Workforce (2-3 roles to start) — requires 2.9
