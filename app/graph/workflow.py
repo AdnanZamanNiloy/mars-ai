@@ -11,6 +11,7 @@ from app.agents.planner import planner_agent
 from app.agents.search import SearchClient
 from app.agents.summarizer import summarizer_agent
 from app.agents.synthesizer import synthesizer_agent
+from app.agents.verifier import verify_facts
 from app.core.llm import LLMClient
 from app.core.logging import get_logger
 
@@ -32,6 +33,7 @@ class ResearchState(TypedDict, total=False):
     orchestration: Dict[str, Any]
     deep_research: bool
     budget_tracker: Any
+    verification_stats: Dict[str, Any]
 
 
 class PlannerUpdate(TypedDict):
@@ -44,6 +46,11 @@ class SearchUpdate(TypedDict):
 
 class SummarizerUpdate(TypedDict):
     facts: List[Dict[str, Any]]
+
+
+class VerifierUpdate(TypedDict):
+    facts: List[Dict[str, Any]]
+    verification_stats: Dict[str, Any]
 
 
 class CriticUpdate(TypedDict):
@@ -129,6 +136,15 @@ def _prepare_supporting_evidence(facts: List[Dict[str, Any]]) -> List[Dict[str, 
             break
 
     return diverse if diverse else ranked[:10]
+
+
+def _verified_facts(facts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Facts that passed verification; if verification never ran, treat all as usable."""
+    if not facts:
+        return []
+    if not any("verified" in f for f in facts):
+        return facts
+    return [f for f in facts if f.get("verified")]
 
 
 def build_markdown_report(state: ResearchState) -> str:
@@ -226,6 +242,18 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
         logger.info("summarizer_done", fresh_facts=len(fresh_facts), total_facts=len(merged))
         return {"facts": merged}
 
+    async def verifier_node(state: ResearchState) -> VerifierUpdate:
+        verified = verify_facts(
+            facts=state.get("facts", []),
+            search_results=state.get("search_results", []),
+        )
+        stats = {
+            "total": len(verified),
+            "verified": sum(1 for f in verified if f.get("verified")),
+        }
+        logger.info("verifier_done", **stats)
+        return {"facts": verified, "verification_stats": stats}
+
     async def critic_node(state: ResearchState) -> CriticUpdate:
         next_iteration = int(state.get("iteration", 0)) + 1
         critique = await critic_agent(
@@ -257,12 +285,14 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
         }
 
     async def synthesizer_node(state: ResearchState) -> SynthesizerUpdate:
+        # Only verification-passed facts are usable evidence (Phase 2.3).
+        usable = _verified_facts(state.get("facts", []))
         answer = await synthesizer_agent(
             llm=llm,
             query=state["query"],
-            facts=state.get("facts", []),
+            facts=usable,
         )
-        logger.info("synthesizer_done", answer_chars=len(answer))
+        logger.info("synthesizer_done", answer_chars=len(answer), usable_facts=len(usable))
         return {"synthesized_answer": answer}
 
     async def finalize_node(state: ResearchState) -> FinalizeUpdate:
@@ -293,6 +323,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
     graph.add_node("planner", planner_node)
     graph.add_node("search", search_node)
     graph.add_node("summarizer", summarizer_node)
+    graph.add_node("verifier", verifier_node)
     graph.add_node("critic", critic_node)
     graph.add_node("synthesizer", synthesizer_node)
     graph.add_node("finalize", finalize_node)
@@ -300,7 +331,8 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
     graph.add_edge(START, "planner")
     graph.add_edge("planner", "search")
     graph.add_edge("search", "summarizer")
-    graph.add_edge("summarizer", "critic")
+    graph.add_edge("summarizer", "verifier")
+    graph.add_edge("verifier", "critic")
     graph.add_conditional_edges("critic", route_after_critic, {"planner": "planner", "synthesizer": "synthesizer"})
     graph.add_edge("synthesizer", "finalize")
     graph.add_edge("finalize", END)

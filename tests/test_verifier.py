@@ -1,0 +1,55 @@
+"""Verification Agent tests (Phase 2.3)."""
+from app.agents.verifier import verify_facts
+
+RESULTS = [
+    {
+        "url": "https://arxiv.org/abs/2005.11401",
+        "content": (
+            "Retrieval augmented generation retrieves external documents relevant to the "
+            "query and conditions generation on the retrieved evidence, reducing hallucination."
+        ),
+        "snippet": "",
+    },
+    {
+        "url": "https://en.wikipedia.org/wiki/RAG",
+        "snippet": "RAG grounds model outputs in sources.",
+    },
+]
+
+FACTS = [
+    {"claim": "RAG retrieves external documents before generating answers", "source": "https://arxiv.org/abs/2005.11401", "confidence": 0.9},
+    {"claim": "Photosynthesis converts sunlight into chemical energy inside chloroplasts", "source": "https://arxiv.org/abs/2005.11401", "confidence": 0.9},
+    {"claim": "RAG grounds outputs in cited sources", "source": "https://en.wikipedia.org/wiki/RAG", "confidence": 0.8},
+    {"claim": "Some claim from an unfetched source", "source": "https://www.iea.org/reports/x", "confidence": 0.8},
+]
+
+
+def test_supported_fact_passes_verification():
+    out = verify_facts(FACTS, RESULTS)
+    assert out[0]["verified"] is True
+    assert out[0]["verification_score"] >= 0.35
+
+
+def test_zero_overlap_fact_is_flagged_unverified():
+    out = verify_facts(FACTS, RESULTS)
+    assert out[1]["verified"] is False, "near-zero lexical overlap must fail"
+    assert "overlap" in out[1]["verification_reason"]
+
+
+def test_snippet_only_source_still_verifiable():
+    out = verify_facts(FACTS, RESULTS)
+    # Wikipedia snippet: "RAG grounds model outputs in sources."
+    assert out[2]["verification_score"] > 0.0
+
+
+def test_unavailable_source_content_is_unverified():
+    out = verify_facts(FACTS, RESULTS)
+    assert out[3]["verified"] is False
+    assert "unavailable" in out[3]["verification_reason"]
+
+
+def test_facts_kept_in_state_even_when_unverified():
+    """Transparency rule: verifier must not drop facts, only flag them."""
+    out = verify_facts(FACTS, RESULTS)
+    assert len(out) == len(FACTS)
+    assert all("verified" in f for f in out)
