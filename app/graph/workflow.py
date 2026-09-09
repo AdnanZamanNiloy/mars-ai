@@ -15,6 +15,7 @@ from app.agents.synthesizer import synthesizer_agent
 from app.agents.verifier import verify_facts
 from app.core.llm import LLMClient
 from app.core.confidence import compute_confidence
+from app.core.contradictions import find_contradictions
 from app.core import depth_controller
 from app.core.isolation import AgentContext, build_contexts
 from app.core.logging import get_logger
@@ -40,6 +41,7 @@ class ResearchState(TypedDict, total=False):
     verification_stats: Dict[str, Any]
     confidence_breakdown: Dict[str, Any]
     confidence_history: List[float]
+    contradictions: List[Dict[str, Any]]
 
 
 class PlannerUpdate(TypedDict):
@@ -57,6 +59,7 @@ class SummarizerUpdate(TypedDict):
 class VerifierUpdate(TypedDict):
     facts: List[Dict[str, Any]]
     verification_stats: Dict[str, Any]
+    contradictions: List[Dict[str, Any]]
 
 
 class CriticUpdate(TypedDict):
@@ -210,12 +213,28 @@ def build_markdown_report(state: ResearchState) -> str:
         "# Supporting Evidence",
         *evidence_lines,
         "",
+    ]
+
+    # Contradiction Engine (3.2): surface source conflicts explicitly.
+    contradictions = state.get("contradictions", [])
+    if contradictions:
+        contradiction_lines = []
+        for c in contradictions[:5]:
+            contradiction_lines.append(
+                f"- \"{c.get('claim_a', '')[:140]}\" ({c.get('source_a', '')})"
+            )
+            contradiction_lines.append(
+                f"  conflicts with \"{c.get('claim_b', '')[:140]}\" ({c.get('source_b', '')})"
+            )
+        lines.extend(["# Contradictions", *contradiction_lines, ""])
+
+    lines.extend([
         "# Limitations",
         *[f"- {item}" for item in limitations],
         "",
         "# Confidence Score",
         f"{confidence:.2f}",
-    ]
+    ])
     return "\n".join(lines)
 
 
@@ -290,7 +309,14 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
                 result["content"] = ""
 
         logger.info("verifier_done", **stats)
-        return {"facts": verified, "verification_stats": stats}
+
+        # Contradiction Engine (3.2): flag topically-similar claims with
+        # conflicting figures from different sources.
+        contradictions = find_contradictions(verified)
+        if contradictions:
+            logger.info("contradictions_found", count=len(contradictions))
+
+        return {"facts": verified, "verification_stats": stats, "contradictions": contradictions}
 
     async def critic_node(state: ResearchState) -> CriticUpdate:
         next_iteration = int(state.get("iteration", 0)) + 1
@@ -300,6 +326,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
             facts=state.get("facts", []),
             iteration=next_iteration,
             max_iterations=int(state.get("max_iterations", 3)),
+            contradictions=state.get("contradictions", []),
         )
 
         # Confidence Engine (Phase 2.4) replaces the inline weighted formula.

@@ -83,6 +83,7 @@ async def critic_agent(
     facts: List[Dict[str, Any]],
     iteration: int,
     max_iterations: int,
+    contradictions: List[Dict[str, Any]] | None = None,
 ) -> Dict[str, Any]:
     quality_facts = dedupe_semantic_facts(filter_facts_by_domain(facts))
     if not quality_facts:
@@ -93,10 +94,23 @@ async def critic_agent(
             "confidence": 0.2,
         }
 
+    contradiction_block = ""
+    if contradictions:
+        listed = "\n".join(
+            f"  - \"{c.get('claim_a', '')[:120]}\" ({c.get('source_a', '')}) vs "
+            f"\"{c.get('claim_b', '')[:120]}\" ({c.get('source_b', '')})"
+            for c in contradictions[:3]
+        )
+        contradiction_block = (
+            f"\nKnown contradictions between sources (acknowledge these in your "
+            f"reason — do NOT silently ignore them):\n{listed}\n"
+        )
+
     user_prompt = (
         f"Main query: {query}\n"
         f"Current iteration: {iteration}/{max_iterations}\n"
-        f"Extracted reliable facts: {quality_facts[:10]}\n\n"
+        f"Extracted reliable facts: {quality_facts[:10]}\n"
+        f"{contradiction_block}\n"
         "Evaluate using these criteria:\n"
         "1) Is the answer complete?\n"
         "2) Is there enough material to write a clear definition?\n"
