@@ -24,6 +24,7 @@
 }
 
 .brand { display: flex; align-items: center; gap: 12px; padding: 2px 6px 0; }
+.brand-mark { justify-content: center; padding: 4px 0 2px; }
 .brand-name { font-size: 17px; font-weight: 800; letter-spacing: 5px; }
 .brand-sub { font-size: 10.5px; line-height: 1.5; color: var(--t3); margin-top: 3px; }
 
