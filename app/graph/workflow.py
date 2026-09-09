@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, List, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -15,6 +16,7 @@ from app.agents.verifier import verify_facts
 from app.core.llm import LLMClient
 from app.core.confidence import compute_confidence
 from app.core import depth_controller
+from app.core.isolation import AgentContext, build_contexts
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -244,11 +246,31 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
         return {"search_results": results}
 
     async def summarizer_node(state: ResearchState) -> SummarizerUpdate:
-        fresh_facts = await summarizer_agent(
-            llm=llm,
-            query=state["query"],
+        # Agent Context Isolation (2.9): each sub-question worker sees only
+        # its own AgentContext — own contract + own results, never the full
+        # ResearchState or another sub-question's raw content.
+        contexts = build_contexts(
+            sub_questions=state.get("sub_questions", []),
             search_results=state.get("search_results", []),
         )
+
+        async def _summarize_context(ctx: AgentContext) -> List[Dict[str, Any]]:
+            if not ctx.own_results:
+                return []
+            return await summarizer_agent(
+                llm=llm,
+                query=state["query"],
+                search_results=ctx.own_results,
+            )
+
+        results = await asyncio.gather(*(_summarize_context(ctx) for ctx in contexts if ctx.own_results))
+
+        # Raw content is discarded once each sub-question's summarization
+        # completes — it must not persist in shared state past this point.
+        for ctx in contexts:
+            ctx.release_raw_content()
+
+        fresh_facts = [fact for facts in results for fact in facts]
         merged = dedupe_semantic_facts([*state.get("facts", []), *fresh_facts])
         logger.info("summarizer_done", fresh_facts=len(fresh_facts), total_facts=len(merged))
         return {"facts": merged}
