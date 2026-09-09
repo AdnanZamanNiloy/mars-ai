@@ -1,102 +1,61 @@
 from typing import Any, Dict, List
 
+import logging
+
 from app.agents.evidence_utils import dedupe_semantic_facts, filter_facts_by_domain
 from app.core.llm import LLMClient, clamp_confidence
+
+logger = logging.getLogger(__name__)
 
 
 CRITIC_SYSTEM_PROMPT = """
 You are the Critic Agent in a multi-agent research pipeline.
 You are the quality gate. Your decision to pass or loop determines
 whether the Writer produces a complete, trustworthy report.
- 
+
 You must be demanding but fair:
   - Too strict → unnecessary loops, wasted API calls, slow output
   - Too lenient → shallow reports, missing perspectives, low confidence
- 
-━━━ EVALUATION CHECKLIST ━━━
- 
-Run all 5 checks. Count how many fail.
- 
-CHECK 1 — COVERAGE (weight: high)
-  Is overall_coverage from the Synthesizer ≥ 0.70?
-  Are there themes with coverage < 0.55?
-  FAIL if: overall_coverage < 0.70 OR any theme coverage < 0.55
- 
-CHECK 2 — CONFIDENCE (weight: high)
-  Compute average confidence across all facts in all themes.
-  FAIL if: average confidence < 0.65
- 
-CHECK 3 — AXIS BALANCE (weight: medium)
-  Does the synthesized knowledge cover at least 2 distinct axes?
-  Is any single axis dominating (> 60% of all facts)?
-  FAIL if: fewer than 2 axes covered OR one axis has > 60% of facts
- 
-CHECK 4 — CONTRADICTION RESOLUTION (weight: medium)
-  Are there themes with has_conflict = true?
-  If yes — are the conflicts acknowledged (not silently ignored)?
-  FAIL if: has_conflict = true AND no conflict_note provided
- 
-CHECK 5 — QUERY COMPLETENESS (weight: low)
-  Would a knowledgeable reader consider the query answered?
-  Are there obvious sub-questions the plan missed?
-  FAIL if: an obvious major angle of the original query is entirely absent
- 
+
+━━━ EVALUATION CRITERIA ━━━
+
+1) COMPLETENESS
+   Would a knowledgeable reader consider the original query answered?
+   Is any obvious major angle of the query entirely absent?
+
+2) SUBSTANTIVE MATERIAL
+   Is there enough reliable, non-redundant material to write a clear,
+   well-supported answer (e.g. a definition with mechanisms and
+   examples, not just fragments)?
+
+3) SOURCE RELIABILITY
+   Are the extracted facts backed by credible, authoritative sources?
+
+4) REDUNDANCY / FRAGMENTATION
+   Is the evidence mostly duplicated or too fragmented to synthesize?
+
 ━━━ DECISION RULES ━━━
- 
-  0 checks fail    → passed = true  (excellent research)
-  1 check fails    → passed = true  (acceptable, note the gap)
-  2 checks fail    → passed = false (loop with targeted queries)
-  3+ checks fail   → passed = false (loop with full re-plan signal)
- 
-  HARD RULE: Never loop more than MAX_ITERATIONS times total.
-  If iteration >= MAX_ITERATIONS: passed = true regardless of checks.
-  Write a limitations_note explaining what remains uncovered.
- 
-━━━ WHEN LOOPING: WRITE TARGETED QUERIES ━━━
- 
-Do NOT return vague suggestions like "search for more information about X".
-Each suggested_query must be a specific, search-ready string targeting
-the exact gap identified — same format as the Planner's sub-questions.
- 
-  BAD  → "Find more about knowledge types"
-  GOOD → "metacognitive knowledge definition examples learning research"
- 
+
+  - is_sufficient = true  ONLY if the evidence clearly supports a
+    complete answer for the original query.
+  - If insufficient, improved_queries must contain 1-3 specific,
+    search-ready strings targeting the exact gaps — never vague
+    suggestions like "search for more information about X".
+      BAD  → "Find more about knowledge types"
+      GOOD → "metacognitive knowledge definition examples learning research"
+  - Be conservative: when in doubt, mark insufficient and say what
+    is missing in the reason field.
+
 ━━━ OUTPUT FORMAT ━━━
- 
+
 Return ONLY valid JSON. No markdown fences. No text outside JSON.
- 
+
 {
-  "passed": <true|false>,
-  "iteration": <current iteration number>,
-  "checks": {
-    "coverage_pass":      <true|false>,
-    "confidence_pass":    <true|false>,
-    "axis_balance_pass":  <true|false>,
-    "contradiction_pass": <true|false>,
-    "completeness_pass":  <true|false>
-  },
-  "failed_count": <0–5>,
-  "issues": [
-    "<specific issue 1>",
-    "<specific issue 2>"
-  ],
-  "suggested_queries": [
-    "<targeted search query to fix gap 1>",
-    "<targeted search query to fix gap 2>"
-  ],
-  "confidence_score": <0.0–1.0>,
-  "limitations_note": "<empty string if passed cleanly, else note remaining gaps>"
+  "is_sufficient": <true|false>,
+  "reason": "<one or two sentences: what is complete or what is missing>",
+  "improved_queries": ["<targeted search query to fix gap 1>", "..."],
+  "confidence": <0.0 to 1.0, your confidence in the current evidence>
 }
-""".strip()
- 
- 
-CRITIC_USER_TEMPLATE = """
-Original query: {query}
-Current iteration: {iteration} of {max_iterations}
-Query type: {query_type}
- 
-Synthesized knowledge:
-{synthesized}
 """.strip()
  
 
@@ -132,7 +91,8 @@ async def critic_agent(
 
     try:
         payload = await llm.generate_json(CRITIC_SYSTEM_PROMPT, user_prompt)
-    except Exception:
+    except Exception as exc:
+        logger.warning("[Critic] LLM call failed, treating as insufficient", exc_info=exc)
         payload = {}
 
     is_sufficient = bool(payload.get("is_sufficient", False)) if isinstance(payload, dict) else False
