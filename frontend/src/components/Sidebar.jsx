@@ -82,7 +82,6 @@ export default function Sidebar({ view, onNavigate, missions, activeRunId, onOpe
       </div>
 
       <div className="side-foot">
-        <div className="motto">A CLEANER PLANET<br />A BRIGHTER TOMORROW</div>
         <div className="ver">MARS console · v2.0</div>
       </div>
     </aside>
