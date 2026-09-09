@@ -95,7 +95,7 @@ export default function Composer({
             </button>
           ) : (
             <button type="button" className="send-btn" onClick={submit} disabled={value.trim().length < 5} title="Send" aria-label="Send">
-              <IconSend size={16} />
+              <IconSend size={14} />
             </button>
           )}
         </div>
