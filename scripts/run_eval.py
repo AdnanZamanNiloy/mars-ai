@@ -148,6 +148,13 @@ async def main() -> int:
 
     with open(args.queries, encoding="utf-8") as fh:
         queries = json.load(fh)
+    if not isinstance(queries, list) or not all(
+        isinstance(q, dict) and isinstance(q.get("id"), str) and isinstance(q.get("query"), str)
+        and q.get("mode") in ("quick", "standard", "deep")
+        for q in queries
+    ):
+        print("queries file must be a list of {id, query, mode} objects", file=sys.stderr)
+        return 2
     if args.query_id:
         wanted = set(args.query_id)
         queries = [q for q in queries if q.get("id") in wanted]
@@ -161,7 +168,11 @@ async def main() -> int:
         print("no queries selected", file=sys.stderr)
         return 2
 
-    db_path = args.db or get_settings().database_url
+    try:
+        db_path = args.db or get_settings().database_url
+    except Exception as exc:
+        print(f"cannot load settings (missing API key in .env?): {exc}", file=sys.stderr)
+        return 2
     await init_db(db_path)
     batch = args.batch or datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     print(f"eval batch {batch}: {len(queries)} queries vs {args.server}")

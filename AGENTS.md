@@ -110,6 +110,17 @@ These are real bugs found by reading the code, not hypotheticals. Each one below
   still fail.
 ```
 
+[OPEN — found in Phase 4.1 calibration] app/api/routes.py (findings emission)
+  Findings NDJSON events are length-based (`len(facts) > emitted_findings`),
+  but verifier_node annotates facts in place (same list length) — so
+  `verified`/`verification_score` never re-emit on single-pass runs and
+  live `findings` events always read unverified. The claims table is
+  unaffected (saved post-critic), and the eval harness (4.1) scores
+  persisted trace truth for exactly this reason. A proper fix re-emits
+  facts when verification flags change; until then, do not trust
+  stream-observed `verified` in new UI features — read trace claims.
+```
+
 If you find a new instance of any of these patterns anywhere in the codebase while working on something else, fix it or flag it in your commit message — don't leave it for later just because it's outside your current task's file scope.
 
 ---

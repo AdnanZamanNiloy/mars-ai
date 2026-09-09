@@ -172,3 +172,18 @@ def test_run_one_reads_quality_metrics_from_trace():
     assert metrics["contradictions"] == 2
     assert metrics["confidence"] == 0.7
     assert metrics["cost"] == 0.0012
+
+
+def test_run_eval_rejects_malformed_queries_file(tmp_path):
+    """CLI validation fires before any network/DB touch — cheap subprocess."""
+    import subprocess
+    import sys
+
+    bad = tmp_path / "bad.json"
+    bad.write_text('[{"id": "x", "query": "too short to matter"}]', encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, "scripts/run_eval.py", "--queries", str(bad)],
+        capture_output=True, text=True, cwd=Path(__file__).parent.parent,
+    )
+    assert proc.returncode == 2
+    assert "must be a list" in proc.stderr
