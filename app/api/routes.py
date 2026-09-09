@@ -11,12 +11,22 @@ from slowapi.util import get_remote_address
 
 from app.core.config import get_settings
 from app.core.budget import BudgetTracker, current_budget
-from app.db.sqlite import save_report
-from app.core.logging import bind_request_context, unbind_request_context
+from app.db.sqlite import (
+    complete_research_run,
+    record_event,
+    save_agent_tasks,
+    save_claims,
+    save_report,
+    save_sources,
+    start_research_run,
+)
+from app.core.logging import bind_request_context, get_logger, unbind_request_context
 from app.graph.workflow import build_initial_state
 
 
 router = APIRouter()
+
+logger = get_logger(__name__)
 
 # Applied to the expensive research stream only; other routes stay open.
 limiter = Limiter(key_func=get_remote_address)
@@ -81,6 +91,52 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
             last_iteration = -1
             emitted_plan = False
             emitted_findings = 0
+            saved_facts = 0
+            saved_sources = False
+
+            async def _persist(coro):
+                """Memory persistence must never kill a research run — log and continue."""
+                try:
+                    await coro
+                except Exception as exc:
+                    logger.warning("persistence_failed", error=str(exc), exc_info=exc)
+
+            # Node-level event trail (2.10): stream_mode="values" yields full
+            # state after each node, so node completions are derived from the
+            # first snapshot in which each marker appears.
+            recorded_nodes: set = set()
+
+            async def _record_node_events(snapshot: Dict[str, Any]) -> None:
+                def _once(node: str) -> bool:
+                    if node in recorded_nodes:
+                        return False
+                    recorded_nodes.add(node)
+                    return True
+
+                if snapshot.get("sub_questions") and _once("planner"):
+                    payload_json = json.dumps({"sub_questions": len(snapshot["sub_questions"])})
+                    await _persist(record_event(settings.database_url, request_id, "planner", "end", payload=payload_json))
+                if snapshot.get("search_results") and _once("search"):
+                    payload_json = json.dumps({"results": len(snapshot["search_results"])})
+                    await _persist(record_event(settings.database_url, request_id, "search", "end", payload=payload_json))
+                facts = snapshot.get("facts", [])
+                if facts and _once("summarizer"):
+                    await _persist(record_event(settings.database_url, request_id, "summarizer", "end", payload=json.dumps({"facts": len(facts)})))
+                if facts and any("verified" in f for f in facts) and _once("verifier"):
+                    verified_count = sum(1 for f in facts if f.get("verified"))
+                    await _persist(record_event(settings.database_url, request_id, "verifier", "end", payload=json.dumps({"verified": verified_count, "total": len(facts)})))
+                if snapshot.get("synthesized_answer") and _once("synthesizer"):
+                    await _persist(record_event(settings.database_url, request_id, "synthesizer", "end", payload=""))
+                if snapshot.get("final_report") and _once("finalize"):
+                    await _persist(record_event(settings.database_url, request_id, "finalize", "end", payload=""))
+
+            await _persist(start_research_run(
+                settings.database_url,
+                request_id,
+                payload.query,
+                complexity=str(state.get("orchestration", {}).get("complexity_level", "unknown")),
+                agent_count=int(state.get("orchestration", {}).get("target_agents", 0)),
+            ))
 
             yield event_line("progress", request_id=request_id, message="Query received")
 
@@ -95,6 +151,8 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                         last_snapshot = snapshot
                         iteration = int(snapshot.get("iteration", 0))
 
+                        await _record_node_events(snapshot)
+
                         if snapshot.get("sub_questions") and not emitted_plan:
                             yield event_line(
                                 "plan",
@@ -102,18 +160,34 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                                 orchestration=snapshot.get("orchestration", {}),
                             )
                             emitted_plan = True
+                            await _persist(save_agent_tasks(
+                                settings.database_url,
+                                request_id,
+                                snapshot.get("sub_questions", []),
+                            ))
 
                         if snapshot.get("search_results"):
                             yield event_line(
                                 "search_progress",
                                 snippets=len(snapshot["search_results"]),
                             )
+                            if not saved_sources:
+                                saved_sources = True
+                                await _persist(save_sources(
+                                    settings.database_url,
+                                    request_id,
+                                    snapshot.get("search_results", []),
+                                ))
 
                         if iteration != last_iteration and iteration > 0:
                             critique = snapshot.get("critique", {})
                             reason = critique.get("reason", "No reason provided")
                             yield event_line("critic", iteration=iteration, reason=reason)
                             last_iteration = iteration
+                            await _persist(record_event(
+                                settings.database_url, request_id, "critic", "end",
+                                payload=json.dumps({"iteration": iteration, "is_sufficient": critique.get("is_sufficient", False)}),
+                            ))
 
                         facts = snapshot.get("facts", [])
                         if len(facts) > emitted_findings:
@@ -125,10 +199,27 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                             yield event_line("findings", items=findings)
                             emitted_findings = len(facts)
 
+                        if len(facts) > saved_facts and iteration > 0:
+                            # Persist new claims incrementally (post-verifier snapshots only).
+                            await _persist(save_claims(
+                                settings.database_url,
+                                request_id,
+                                facts[saved_facts:],
+                            ))
+                            saved_facts = len(facts)
+
                         if budget_tracker.total_tokens != last_budget_tokens:
                             last_budget_tokens = budget_tracker.total_tokens
                             yield event_line("budget", **budget_tracker.snapshot())
+                            await _persist(record_event(
+                                settings.database_url, request_id, "budget", "budget_check",
+                                payload=json.dumps(budget_tracker.snapshot()),
+                            ))
             except TimeoutError:
+                await _persist(complete_research_run(
+                    settings.database_url, request_id, "timeout",
+                    confidence=0.0, estimated_cost=budget_tracker.estimated_cost_usd,
+                ))
                 yield event_line(
                     "error",
                     message=(
@@ -138,6 +229,10 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 )
                 return
             except Exception as exc:
+                await _persist(complete_research_run(
+                    settings.database_url, request_id, "failed",
+                    confidence=0.0, estimated_cost=budget_tracker.estimated_cost_usd,
+                ))
                 message = str(exc)
                 if "No LLM provider configured" in message:
                     yield event_line(
@@ -154,6 +249,12 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
             final_state: Dict[str, Any] = last_snapshot
             report = str(final_state.get("final_report", ""))
             confidence = float(final_state.get("confidence", 0.0))
+
+            await _persist(complete_research_run(
+                settings.database_url, request_id, "completed",
+                confidence=confidence,
+                estimated_cost=budget_tracker.estimated_cost_usd,
+            ))
 
             if report:
                 await save_report(
