@@ -97,6 +97,25 @@ CREATE TABLE IF NOT EXISTS final_reports (
     confidence REAL,
     generated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS evaluation_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    eval_batch TEXT NOT NULL,
+    query_id TEXT NOT NULL,
+    query TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    run_id TEXT REFERENCES research_runs(id),
+    status TEXT NOT NULL,
+    confidence REAL,
+    claims INTEGER,
+    verified INTEGER,
+    sources INTEGER,
+    contradictions INTEGER,
+    recommended_option TEXT,
+    cost REAL,
+    checks_passed INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 SCHEMA_VERSION = 3
@@ -331,6 +350,68 @@ async def save_final_report(database_path: str, run_id: str, report_markdown: st
             (run_id, report_markdown, float(confidence), _now()),
         )
         await db.commit()
+
+
+async def save_evaluation_run(database_path: str, row: dict) -> None:
+    """Evaluation Lab (4.1): one row per eval query per batch run."""
+    async with aiosqlite.connect(database_path) as db:
+        await db.execute(
+            "INSERT INTO evaluation_runs (eval_batch, query_id, query, mode, run_id, status, "
+            "confidence, claims, verified, sources, contradictions, recommended_option, cost, "
+            "checks_passed, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(row.get("eval_batch", "")),
+                str(row.get("query_id", "")),
+                str(row.get("query", "")),
+                str(row.get("mode", "")),
+                row.get("run_id"),
+                str(row.get("status", "")),
+                row.get("confidence"),
+                row.get("claims"),
+                row.get("verified"),
+                row.get("sources"),
+                row.get("contradictions"),
+                row.get("recommended_option"),
+                row.get("cost"),
+                1 if row.get("passed") else 0,
+                _now(),
+            ),
+        )
+        await db.commit()
+
+
+async def latest_eval_batches(database_path: str, limit: int = 2) -> list:
+    """Most recent eval batch ids, newest first — for trend comparison."""
+    async with aiosqlite.connect(database_path) as db:
+        cur = await db.execute(
+            "SELECT DISTINCT eval_batch FROM evaluation_runs ORDER BY id DESC LIMIT ?",
+            (int(limit),),
+        )
+        return [r[0] for r in await cur.fetchall()]
+
+
+async def eval_batch_rows(database_path: str, eval_batch: str) -> list:
+    """All rows of one eval batch as plain dicts (for summarize_batch)."""
+    async with aiosqlite.connect(database_path) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT query_id, confidence, claims, verified, sources, contradictions, cost, "
+            "checks_passed FROM evaluation_runs WHERE eval_batch = ? ORDER BY id",
+            (eval_batch,),
+        )
+        return [
+            {
+                "query_id": r["query_id"],
+                "confidence": r["confidence"],
+                "claims": r["claims"],
+                "verified": r["verified"],
+                "sources": r["sources"],
+                "contradictions": r["contradictions"],
+                "cost": r["cost"],
+                "passed": bool(r["checks_passed"]),
+            }
+            for r in await cur.fetchall()
+        ]
 
 
 async def load_state_for_resume(database_path: str, run_id: str) -> dict | None:

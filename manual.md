@@ -820,11 +820,12 @@ Phase 3 — Tier 2 features
          decisions, final_reports) — closes out Feature 06
 
 Phase 4 — Tier 3 (optional)
-[ ] 4.1  Evaluation Lab
+[x] 4.1  Evaluation Lab
 [ ] 4.2  Self-Diagnosis
 [ ] 4.3  Scenario Engine — full spec: assumptions, scenario-scoped
          questions, compared metrics, scenario-sensitive recommendation
-[ ] 4.4  Mission Control UI redesign
+[x] 4.4  Mission Control UI redesign — shipped as the mission-workspace
+         console (sidebar, live thread, intelligence panel, replay)
 [ ] 4.5  Multi-tenant (only if actually needed)
 ```
 
