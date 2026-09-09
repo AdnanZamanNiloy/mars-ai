@@ -2,15 +2,15 @@
  * Dark premium research console. System font stack: no webfont dependency. */
 
 :root {
-  --bg: #09090b;
-  --bg-soft: #101013;
-  --side: #0e0e11;
-  --panel: #131316;
-  --card: #17171b;
-  --card-2: #1d1d22;
-  --line: #26262c;
-  --line-soft: #1b1b20;
-  --track: #232329;
+  --bg: #000000;
+  --bg-soft: #050506;
+  --side: #050506;
+  --panel: #0a0a0c;
+  --card: #0e0e11;
+  --card-2: #141417;
+  --line: #1f1f24;
+  --line-soft: #161619;
+  --track: #1c1c21;
 
   --t1: #fafafa;
   --t2: #d4d4d8;
