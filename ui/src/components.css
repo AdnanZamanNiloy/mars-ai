@@ -68,20 +68,7 @@
   padding: 20px 22px 22px;
   box-shadow: var(--shadow-card);
 }
-.answer-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.answer-top h2 { font-size: 17px; font-weight: 650; margin: 2px 0 0; }
-.conf-box {
-  flex: none;
-  min-width: 108px;
-  text-align: center;
-  border: 1px solid var(--line);
-  background: var(--card-2);
-  border-radius: 10px;
-  padding: 9px 14px;
-}
-.conf-box b { display: block; font-size: 17px; font-weight: 750; font-variant-numeric: tabular-nums; }
-.conf-box span { font-size: 10.5px; color: var(--t3); }
-.answer-lead { margin: 13px 0 0; font-size: 14.5px; line-height: 1.65; color: #c9c9d1; max-width: 74ch; white-space: pre-wrap; }
+.answer-lead { margin: 0; font-size: 14.5px; line-height: 1.65; color: #c9c9d1; max-width: 74ch; white-space: pre-wrap; }
 
 .reco {
   margin-top: 17px;

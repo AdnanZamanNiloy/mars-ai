@@ -6,22 +6,6 @@ import {
 /* Final report card — renders ONLY backend-produced content:
  * report markdown sections, findings events, decisions events. */
 
-function ConfidenceBox({ value }) {
-  if (typeof value !== "number" || Number.isNaN(value)) {
-    return (
-      <div className="conf-box">
-        <b>—</b><span>Confidence unknown</span>
-      </div>
-    );
-  }
-  const pct = Math.round(value * 100);
-  return (
-    <div className="conf-box">
-      <b>{pct}%</b><span>{confidenceLabel(value)} confidence</span>
-    </div>
-  );
-}
-
 function FindingRow({ item, index, selected, onSelect }) {
   const domain = extractDomain(item.source || "");
   const trust = trustOf(domain);
@@ -83,11 +67,6 @@ export default function AnswerCard({ run, selectedFinding, onSelectFinding }) {
 
   return (
     <div className="answer anim-rise">
-      <div className="answer-top">
-        <h2>Executive conclusion</h2>
-        <ConfidenceBox value={run.confidence} />
-      </div>
-
       {sections.finalAnswer ? (
         <p className="answer-lead">{sections.finalAnswer}</p>
       ) : (
