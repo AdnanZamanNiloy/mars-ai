@@ -332,10 +332,19 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
 async def resume_research(run_id: str, request: Request) -> StreamingResponse:
     """Durable checkpointing (3.3): resume a failed/timeout run from its
     persisted rows instead of re-running the whole pipeline."""
-    workflow = getattr(request.app.state, "workflow", None)
     settings = getattr(request.app.state, "settings", None)
-    if workflow is None or settings is None:
+    if settings is None:
         raise HTTPException(status_code=500, detail="Workflow is not initialized")
+
+    # A separate graph compiled with START → critic: continues from
+    # persisted evidence rather than re-running planner/search (3.3 DoD).
+    from app.agents.search import SearchClient
+    from app.core.llm import LLMClient
+    from app.graph.workflow import create_workflow as _create_workflow
+
+    llm = LLMClient(settings)
+    search_client = SearchClient(settings)
+    resume_workflow = _create_workflow(llm, search_client, entry_node="critic")
 
     # Rebuild state from durable rows; None means not resumable.
     state = await load_state_for_resume(settings.database_url, run_id)
@@ -360,6 +369,10 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
     async def resume_stream() -> AsyncGenerator[str, None]:
         bind_request_context(request_id=request_id, resumed=True)
         current_budget.set(budget_tracker)
+        # Depth controller + report builder read the tracker from state, not
+        # the ContextVar — without this, budget checks are silently skipped
+        # on the resume path.
+        state["budget_tracker"] = budget_tracker
         last_iteration = int(state.get("iteration", 0))
         emitted_findings = 0
         saved_facts = 0
@@ -380,7 +393,7 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
             last_snapshot: Dict[str, Any] = {}
             try:
                 async with asyncio.timeout(settings.research_timeout_sec):
-                    async for snapshot in workflow.astream(state, stream_mode="values"):
+                    async for snapshot in resume_workflow.astream(state, stream_mode="values"):
                         last_snapshot = snapshot
                         iteration = int(snapshot.get("iteration", 0))
 

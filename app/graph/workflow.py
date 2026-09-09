@@ -62,7 +62,6 @@ class SummarizerUpdate(TypedDict):
 class VerifierUpdate(TypedDict):
     facts: List[Dict[str, Any]]
     verification_stats: Dict[str, Any]
-    contradictions: List[Dict[str, Any]]
 
 
 class CriticUpdate(TypedDict):
@@ -71,6 +70,7 @@ class CriticUpdate(TypedDict):
     confidence: float
     critique_feedback: str
     confidence_breakdown: Dict[str, Any]
+    contradictions: List[Dict[str, Any]]
 
 
 class SynthesizerUpdate(TypedDict):
@@ -275,7 +275,16 @@ def build_markdown_report(state: ResearchState) -> str:
     return "\n".join(lines)
 
 
-def create_workflow(llm: LLMClient, search_client: SearchClient):
+def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str | None = None):
+    """Compile the research graph.
+
+    entry_node=None (default): START → planner (full pipeline).
+    entry_node="critic": START → critic — used by the resume endpoint (3.3)
+    so a failed/timeout run continues from persisted evidence instead of
+    re-running planner/search.
+    """
+    if entry_node is not None and entry_node != "critic":
+        raise ValueError(f"unsupported entry_node={entry_node!r} (only 'critic' is supported)")
     graph = StateGraph(ResearchState)
 
     async def planner_node(state: ResearchState) -> PlannerUpdate:
@@ -350,24 +359,25 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
                 result["content"] = ""
 
         logger.info("verifier_done", **stats)
-
-        # Contradiction Engine (3.2): flag topically-similar claims with
-        # conflicting figures from different sources.
-        contradictions = find_contradictions(verified)
-        if contradictions:
-            logger.info("contradictions_found", count=len(contradictions))
-
-        return {"facts": verified, "verification_stats": stats, "contradictions": contradictions}
+        return {"facts": verified, "verification_stats": stats}
 
     async def critic_node(state: ResearchState) -> CriticUpdate:
         next_iteration = int(state.get("iteration", 0)) + 1
+
+        # Contradiction Engine (3.2) computed HERE (not in verifier) so the
+        # resume path — which re-enters at critic with persisted facts —
+        # still feeds contradictions to the critic and the report.
+        contradictions = find_contradictions(state.get("facts", []))
+        if contradictions:
+            logger.info("contradictions_found", count=len(contradictions))
+
         critique = await critic_agent(
             llm=llm,
             query=state["query"],
             facts=state.get("facts", []),
             iteration=next_iteration,
             max_iterations=int(state.get("max_iterations", 3)),
-            contradictions=state.get("contradictions", []),
+            contradictions=contradictions,
         )
 
         # Confidence Engine (Phase 2.4) replaces the inline weighted formula.
@@ -391,6 +401,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
             "critique_feedback": critique_feedback,
             "confidence_breakdown": breakdown,
             "confidence_history": [*state.get("confidence_history", []), overall_conf],
+            "contradictions": contradictions,
         }
 
     async def synthesizer_node(state: ResearchState) -> SynthesizerUpdate:
@@ -436,7 +447,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
     graph.add_node("synthesizer", synthesizer_node)
     graph.add_node("finalize", finalize_node)
 
-    graph.add_edge(START, "planner")
+    graph.add_edge(START, entry_node if entry_node else "planner")
     graph.add_edge("planner", "search")
     graph.add_edge("search", "summarizer")
     graph.add_edge("summarizer", "verifier")

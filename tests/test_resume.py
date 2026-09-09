@@ -88,3 +88,66 @@ def test_resume_endpoint_rejects_unknown_run(tmp_path):
 
     response = asyncio.run(_call())
     assert response.status_code == 409
+
+
+def test_resume_reruns_critic_not_planner_or_search(tmp_path, monkeypatch):
+    """3.3 DoD: resume continues from persisted state instead of re-running
+    the whole pipeline — planner/search must never be invoked."""
+    db_path = str(tmp_path / "resume5.db")
+    _seed(db_path)
+
+    import app.graph.workflow as wf
+    from app.core.llm import LLMClient
+
+    visited = []
+    seen_tracker = {}
+
+    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None):
+        visited.append("critic")
+        # Not sufficient → forces route_after_critic through depth_controller.
+        return {"is_sufficient": False, "reason": "need more", "improved_queries": [], "confidence": 0.4}
+
+    def spy_decide(state):
+        # Depth controller + report builder read the tracker from state, not
+        # the ContextVar — resume must wire it in or budget checks are lost.
+        seen_tracker["present"] = state.get("budget_tracker") is not None
+        return "synthesizer"
+
+    async def fake_synthesizer(llm, query, facts=None):
+        visited.append("synthesizer")
+        return "resumed answer"
+
+    monkeypatch.setattr(wf, "critic_agent", fake_critic)
+    monkeypatch.setattr(wf.depth_controller, "decide", spy_decide)
+    monkeypatch.setattr(wf, "synthesizer_agent", fake_synthesizer)
+
+    from app.api.routes import router as api_router
+
+    app = FastAPI()
+    app.state.settings = Settings(groq_api_key="k", database_url=db_path, _env_file=None)
+    app.include_router(api_router, prefix="/api")
+
+    async def _call():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.post("/api/research/run-fail-1/resume")
+
+    response = asyncio.run(_call())
+    assert response.status_code == 200
+    assert visited == ["critic", "synthesizer"], visited
+    assert seen_tracker.get("present") is True, "budget_tracker missing from resume state"
+
+    # Run marked completed, report persisted.
+    import aiosqlite
+
+    async def _check():
+        async with aiosqlite.connect(db_path) as db:
+            cur = await db.execute("SELECT status FROM research_runs WHERE id = 'run-fail-1'")
+            status = (await cur.fetchone())[0]
+            cur = await db.execute("SELECT report_markdown FROM final_reports WHERE run_id = 'run-fail-1'")
+            report = (await cur.fetchone())[0]
+        return status, report
+
+    status, report = asyncio.run(_check())
+    assert status == "completed"
+    assert "# Final Answer" in report
