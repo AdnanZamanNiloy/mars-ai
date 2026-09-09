@@ -73,14 +73,6 @@ export default function AnswerCard({ run, selectedFinding, onSelectFinding }) {
         <p className="answer-lead">The final report did not include an executive summary.</p>
       )}
 
-      {recommended ? (
-        <div className="reco">
-          <div className="reco-head"><IconChart size={16} /> Recommended approach — Option {recommended.option_label}</div>
-          <p>{recommended.rationale || recommended.description}</p>
-          {recommended.risk_note ? <p className="risk">Risk: {recommended.risk_note}</p> : null}
-        </div>
-      ) : null}
-
       <div className="answer-cols">
         <div>
           <h3>Key findings</h3>
