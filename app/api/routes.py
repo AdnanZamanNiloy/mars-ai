@@ -10,6 +10,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.core.config import get_settings
+from app.core.budget import BudgetTracker, current_budget
 from app.db.sqlite import save_report
 from app.core.logging import bind_request_context, unbind_request_context
 from app.graph.workflow import build_initial_state
@@ -71,6 +72,12 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 deep_research=payload.deep_research,
                 max_parallel_agents=settings.max_parallel_agents,
             )
+            # Per-run cost governor; ContextVar-scoped so the shared LLM
+            # client records usage for THIS request only.
+            budget_tracker = BudgetTracker(settings)
+            state["budget_tracker"] = budget_tracker
+            current_budget.set(budget_tracker)
+            last_budget_tokens = -1
             last_iteration = -1
             emitted_plan = False
             emitted_findings = 0
@@ -117,6 +124,10 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                             ]
                             yield event_line("findings", items=findings)
                             emitted_findings = len(facts)
+
+                        if budget_tracker.total_tokens != last_budget_tokens:
+                            last_budget_tokens = budget_tracker.total_tokens
+                            yield event_line("budget", **budget_tracker.snapshot())
             except TimeoutError:
                 yield event_line(
                     "error",

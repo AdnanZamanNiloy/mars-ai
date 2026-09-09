@@ -14,6 +14,7 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from app.core.budget import get_current_budget
 from app.core.config import Settings
 
 logger = get_logger(__name__)
@@ -148,7 +149,25 @@ class LLMClient:
             response = await client.post(url, headers=headers, json=payload)
             response.raise_for_status()
             data = response.json()
+            self._record_usage_groq(data, request_chars=len(system_prompt) + len(user_prompt))
             return data["choices"][0]["message"]["content"]
+
+    def _record_usage_groq(self, data: Dict[str, Any], request_chars: int) -> None:
+        """Report real token usage from the Groq response payload when present."""
+        budget = get_current_budget()
+        if budget is None:
+            return
+        usage = data.get("usage") or {}
+        try:
+            model = str(data.get("model") or self.settings.groq_model)
+            budget.record_llm_call(
+                model=f"groq:{model}",
+                input_tokens=usage.get("prompt_tokens"),
+                output_tokens=usage.get("completion_tokens"),
+                request_chars=request_chars,
+            )
+        except (TypeError, ValueError) as exc:
+            logger.warning("[LLM] failed to record usage: %s", exc, exc_info=exc)
 
     @retry(
         reraise=True,
@@ -191,8 +210,22 @@ class LLMClient:
                 data = response.json()
 
                 if isinstance(data, list) and data and "generated_text" in data[0]:
+                    budget = get_current_budget()
+                    if budget is not None:
+                        budget.record_llm_call(
+                            model=f"hf:{model_name}",
+                            request_chars=len(system_prompt) + len(user_prompt),
+                            response_chars=len(data[0]["generated_text"]),
+                        )
                     return data[0]["generated_text"]
                 if isinstance(data, dict) and "generated_text" in data:
+                    budget = get_current_budget()
+                    if budget is not None:
+                        budget.record_llm_call(
+                            model=f"hf:{model_name}",
+                            request_chars=len(system_prompt) + len(user_prompt),
+                            response_chars=len(data["generated_text"]),
+                        )
                     return data["generated_text"]
                 if isinstance(data, dict) and "error" in data:
                     # Model can be valid but unavailable due to provider-side load.

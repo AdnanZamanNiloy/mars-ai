@@ -31,6 +31,7 @@ class ResearchState(TypedDict, total=False):
     confidence: float
     orchestration: Dict[str, Any]
     deep_research: bool
+    budget_tracker: Any
 
 
 class PlannerUpdate(TypedDict):
@@ -164,6 +165,10 @@ def build_markdown_report(state: ResearchState) -> str:
             if isinstance(item, str) and item.strip():
                 limitations.append(f"Potential follow-up search: {item.strip()}")
 
+    tracker = state.get("budget_tracker")
+    if tracker is not None and tracker.over_budget:
+        limitations.append(tracker.limitation_note())
+
     limitations = [
         *limitations,
         "Confidence is estimated from evidence quality and critic assessment, not formal verification.",
@@ -272,6 +277,14 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
 
         if is_sufficient:
             return "synthesizer"
+
+        # Cost Governor (2.2): over budget → stop expanding, finalize with
+        # a limitations note instead of exceeding the cap.
+        tracker = state.get("budget_tracker")
+        if tracker is not None and tracker.over_budget:
+            logger.info("budget_cutoff", cost=tracker.estimated_cost_usd, limit=tracker.limit_usd)
+            return "synthesizer"
+
         quality_ceiling = max(max_iterations, min_quality_iterations)
         if iteration >= quality_ceiling:
             return "synthesizer"

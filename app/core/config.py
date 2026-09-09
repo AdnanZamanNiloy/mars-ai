@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     # Rate limiting (Phase 1.7)
     rate_limit: str = "5/minute"
 
+    # Cost governor (Phase 2.2) — real provider rates, update when providers change
+    research_max_cost_usd: float = 0.50
+    # Groq llama-3.1-8b-instant: $0.05/1M input, $0.08/1M output
+    groq_cost_per_1k_input_tokens: float = 0.00005
+    groq_cost_per_1k_output_tokens: float = 0.00008
+    # HuggingFace serverless inference — approximate blended rate
+    hf_cost_per_1k_tokens: float = 0.0002
+
     @model_validator(mode="after")
     def _require_llm_provider(self) -> "Settings":
         if not (self.groq_api_key or self.huggingface_api_key):

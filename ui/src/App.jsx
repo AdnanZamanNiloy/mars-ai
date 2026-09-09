@@ -17,6 +17,7 @@ export default function App() {
   const [loops, setLoops] = useState([]);
   const [findings, setFindings] = useState([]);
   const [searchSnippets, setSearchSnippets] = useState(0);
+  const [budget, setBudget] = useState(null);
   const [report, setReport] = useState("");
   const [confidence, setConfidence] = useState(null);
   const [running, setRunning] = useState(false);
@@ -52,6 +53,7 @@ export default function App() {
     setLoops([]);
     setFindings([]);
     setSearchSnippets(0);
+    setBudget(null);
     setReport("");
     setConfidence(null);
     setActiveStep("planner");
@@ -103,6 +105,14 @@ export default function App() {
               setFindings((prev) => [...prev, ...evt.items]);
             }
             setActiveStep("summarizer");
+            break;
+          case "budget":
+            setBudget({
+              cost: typeof evt.estimated_cost === "number" ? evt.estimated_cost : null,
+              limit: typeof evt.limit === "number" ? evt.limit : null,
+              calls: typeof evt.llm_calls === "number" ? evt.llm_calls : null,
+              overBudget: Boolean(evt.over_budget),
+            });
             break;
           case "final_report":
             setReport(evt.report || "");
@@ -251,6 +261,14 @@ export default function App() {
               {running ? "Running" : "Idle"}
             </p>
             {searchSnippets > 0 ? <p className="meta">Snippets retrieved: {searchSnippets}</p> : null}
+            {budget && budget.cost != null ? (
+              <p className={`meta ${budget.overBudget ? "budget-over" : ""}`}>
+                Est. cost: ${budget.cost.toFixed(4)}
+                {budget.limit != null ? ` / $${budget.limit.toFixed(2)}` : ""}
+                {budget.calls ? ` · ${budget.calls} LLM calls` : ""}
+                {budget.overBudget ? " · budget reached" : ""}
+              </p>
+            ) : null}
           </SectionCard>
 
           <SectionCard title="Progress" rightMeta={`${progress.length} updates`}>
