@@ -307,6 +307,7 @@ export default function App() {
 
   return (
     <div className="shell">
+      <ErrorBoundary>
       <Sidebar
         view={view}
         onNavigate={setView}
@@ -318,6 +319,7 @@ export default function App() {
         onClose={() => setSidebarOpen(false)}
       />
       {sidebarOpen ? <button className="scrim" onClick={() => setSidebarOpen(false)} aria-label="Close menu" /> : null}
+      </ErrorBoundary>
 
       <div className="workspace-wrap">
         <ErrorBoundary>
