@@ -41,6 +41,8 @@ limiter = Limiter(key_func=get_remote_address)
 class ResearchRequest(BaseModel):
     query: str = Field(..., min_length=5, max_length=500)
     deep_research: bool = False
+    # Research Modes (3.7): quick | standard | deep
+    mode: str = Field(default="standard", pattern="^(quick|standard|deep)$")
 
 
 @router.get("/health")
@@ -100,6 +102,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 settings.max_iterations,
                 deep_research=payload.deep_research,
                 max_parallel_agents=settings.max_parallel_agents,
+                mode=payload.mode,
             )
             # Per-run cost governor; ContextVar-scoped so the shared LLM
             # client records usage for THIS request only.

@@ -106,6 +106,16 @@ LEVEL_TARGETS: Dict[str, int] = {
     "very_high": 6,
 }
 
+# Research Modes (Phase 3.7): presets consumed by the orchestrator and the
+# iteration logic. "deep" is the only mode that can exceed the default
+# MAX_PARALLEL_AGENTS cap (and only for very_high complexity queries).
+MODE_PRESETS: Dict[str, Dict[str, Any]] = {
+    "quick":    {"max_agents": 2, "max_iterations": 1, "deep_research": False},
+    "standard": {"max_agents": 3, "max_iterations": 3, "deep_research": False},
+    "deep":     {"max_agents": 5, "max_iterations": 5, "deep_research": True},
+}
+VALID_MODES = tuple(MODE_PRESETS.keys())
+
 
 @dataclass
 class OrchestrationPlan:
@@ -157,6 +167,22 @@ def orchestrate(
         max_parallel_agents=max_parallel_agents,
         notes=notes,
     )
+
+
+def apply_mode_preset(
+    query: str,
+    mode: str,
+    max_parallel_agents_setting: int,
+) -> OrchestrationPlan:
+    """Resolve a research mode into an effective orchestration plan."""
+    preset = MODE_PRESETS.get(mode, MODE_PRESETS["standard"])
+    plan = orchestrate(
+        query,
+        max_parallel_agents=min(max_parallel_agents_setting, preset["max_agents"]),
+        deep_research=preset["deep_research"],
+    )
+    plan.notes = [f"mode={mode}", *plan.notes]
+    return plan
 
 
 def plan_metadata_for_event(plan: OrchestrationPlan) -> Dict[str, Any]:

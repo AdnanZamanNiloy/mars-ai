@@ -23,6 +23,7 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [activeStep, setActiveStep] = useState("planner");
+  const [mode, setMode] = useState("standard");
   const activeController = useRef(null);
 
   const canSubmit = useMemo(() => query.trim().length >= 5 && !running, [query, running]);
@@ -62,7 +63,7 @@ export default function App() {
       const response = await fetch("/api/research/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: query.trim() }),
+        body: JSON.stringify({ query: query.trim(), mode }),
         signal: controller.signal,
       });
 
@@ -191,6 +192,20 @@ export default function App() {
                 placeholder="Ask a research question..."
                 rows={4}
               />
+
+              <div className="row mode-row">
+                <label className="label-title" htmlFor="mode">Mode</label>
+                <select
+                  id="mode"
+                  value={mode}
+                  onChange={(e) => setMode(e.target.value)}
+                  disabled={running}
+                >
+                  <option value="quick">Quick (2 agents, 1 pass)</option>
+                  <option value="standard">Standard (3 agents, up to 3 passes)</option>
+                  <option value="deep">Deep (5 agents, up to 5 passes)</option>
+                </select>
+              </div>
 
               <div className="row">
                 <button type="submit" className="run-search-btn" disabled={!canSubmit}>

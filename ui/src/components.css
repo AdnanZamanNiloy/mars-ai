@@ -239,3 +239,17 @@
   border-radius: 999px;
   transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
+.mode-row {
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mode-row select {
+  flex: 1;
+  padding: 0.4rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--border, #d0d5dd);
+  background: var(--surface, #fff);
+  color: inherit;
+}

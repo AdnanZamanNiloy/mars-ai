@@ -42,6 +42,7 @@ class ResearchState(TypedDict, total=False):
     confidence_breakdown: Dict[str, Any]
     confidence_history: List[float]
     contradictions: List[Dict[str, Any]]
+    mode: str
 
 
 class PlannerUpdate(TypedDict):
@@ -98,8 +99,27 @@ def build_initial_state(
     max_iterations: int,
     deep_research: bool = False,
     max_parallel_agents: int = 3,
+    mode: str = "standard",
 ) -> ResearchState:
-    effective_max_iterations = max(3, int(max_iterations))
+    """Build the run's initial state.
+
+    When `mode` is a valid preset (3.7), it overrides the raw parameters
+    with its (max_agents, max_iterations, deep_research) tuple.
+    """
+    from app.agents.orchestrator import MODE_PRESETS
+
+    preset = MODE_PRESETS.get(mode)
+    if preset is not None:
+        # A mode preset sets iterations explicitly — do NOT apply the
+        # max(3, ...) floor (GAP-8) or quick mode would be no quicker.
+        max_iterations = preset["max_iterations"]
+        deep_research = preset["deep_research"]
+        # The preset's agent cap REPLACES the setting default: deep is the
+        # only mode allowed to exceed MAX_PARALLEL_AGENTS (manual 3.7 DoD).
+        max_parallel_agents = preset["max_agents"]
+        effective_max_iterations = int(max_iterations)
+    else:
+        effective_max_iterations = max(3, int(max_iterations))
     plan = orchestrate(query, max_parallel_agents=max_parallel_agents, deep_research=deep_research)
     return {
         "query": query,
@@ -125,6 +145,7 @@ def build_initial_state(
         },
         "deep_research": plan.deep_research,
         "confidence_history": [],
+        "mode": mode if preset is not None else "standard",
     }
 
 
