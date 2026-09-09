@@ -822,7 +822,7 @@ Phase 3 — Tier 2 features
 Phase 4 — Tier 3 (optional)
 [x] 4.1  Evaluation Lab
 [x] 4.2  Self-Diagnosis (read-only report script, not a live agent)
-[ ] 4.3  Scenario Engine — full spec: assumptions, scenario-scoped
+[x] 4.3  Scenario Engine — full spec: assumptions, scenario-scoped
          questions, compared metrics, scenario-sensitive recommendation
 [x] 4.4  Mission Control UI redesign — shipped as the mission-workspace
          console (sidebar, live thread, intelligence panel, replay)

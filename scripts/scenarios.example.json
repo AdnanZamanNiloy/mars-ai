@@ -1,0 +1,10 @@
+[
+  {
+    "id": "low-price",
+    "assumption": "cloud GPU rental prices fall 50% by 2027"
+  },
+  {
+    "id": "hw-tariffs",
+    "assumption": "data-center hardware costs rise 40% due to import tariffs"
+  }
+]
