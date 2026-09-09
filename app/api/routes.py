@@ -20,6 +20,7 @@ from app.db.sqlite import (
     save_agent_tasks,
     save_claims,
     save_critic_review,
+    save_decisions,
     save_evidence,
     save_final_report,
     save_report,
@@ -302,6 +303,15 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 yield event_line("final_report", report=report, confidence=confidence)
             else:
                 yield event_line("final_report", report="No final report generated.", confidence=confidence)
+
+            # Decision Layer rows (3.5): one per strategic option.
+            decision_options = last_snapshot.get("decision_options") or []
+            if decision_options:
+                await _persist(save_decisions(settings.database_url, request_id, decision_options))
+                yield event_line("decisions", items=[
+                    {k: o.get(k) for k in ("option_label", "description", "is_recommended", "rationale", "risk_note")}
+                    for o in decision_options
+                ])
         finally:
             unbind_request_context()
 

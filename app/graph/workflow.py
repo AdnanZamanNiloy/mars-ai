@@ -16,6 +16,7 @@ from app.agents.verifier import verify_facts
 from app.core.llm import LLMClient
 from app.core.confidence import compute_confidence
 from app.core.contradictions import find_contradictions
+from app.core.decision import build_decision_layer
 from app.core import depth_controller
 from app.core.isolation import AgentContext, build_contexts
 from app.core.logging import get_logger
@@ -43,6 +44,7 @@ class ResearchState(TypedDict, total=False):
     confidence_history: List[float]
     contradictions: List[Dict[str, Any]]
     mode: str
+    decision_options: List[Dict[str, Any]]
 
 
 class PlannerUpdate(TypedDict):
@@ -77,6 +79,7 @@ class SynthesizerUpdate(TypedDict):
 
 class FinalizeUpdate(TypedDict):
     final_report: str
+    decision_options: List[Dict[str, Any]]
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -249,6 +252,19 @@ def build_markdown_report(state: ResearchState) -> str:
             )
         lines.extend(["# Contradictions", *contradiction_lines, ""])
 
+    # Decision Intelligence Layer (3.5, Feature 18): options → recommendation
+    # → rationale, structurally SEPARATE from the findings above.
+    decision_options = build_decision_layer(state)
+    decision_lines = []
+    for o in decision_options:
+        marker = " (RECOMMENDED)" if o.get("is_recommended") else ""
+        decision_lines.append(f"- Option {o.get('option_label', '?')}{marker}: {o.get('description', '')}")
+        if o.get("rationale"):
+            decision_lines.append(f"  Rationale: {o['rationale']}")
+        if o.get("risk_note"):
+            decision_lines.append(f"  Risk: {o['risk_note']}")
+    lines.extend(["# Decision Layer", *decision_lines, ""])
+
     lines.extend([
         "# Limitations",
         *[f"- {item}" for item in limitations],
@@ -389,7 +405,12 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
         return {"synthesized_answer": answer}
 
     async def finalize_node(state: ResearchState) -> FinalizeUpdate:
-        return {"final_report": build_markdown_report(state)}
+        report = build_markdown_report(state)
+        # Decision options ride in state so the route can persist them (3.5).
+        return {
+            "final_report": report,
+            "decision_options": build_decision_layer(state),
+        }
 
     def route_after_critic(state: ResearchState) -> str:
         critique = state.get("critique", {})

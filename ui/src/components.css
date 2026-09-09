@@ -253,3 +253,8 @@
   background: var(--surface, #fff);
   color: inherit;
 }
+
+.decision-recommended {
+  border-left: 3px solid #22a06b;
+  padding-left: 0.5rem;
+}

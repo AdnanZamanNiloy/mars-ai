@@ -24,6 +24,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [activeStep, setActiveStep] = useState("planner");
   const [mode, setMode] = useState("standard");
+  const [decisions, setDecisions] = useState([]);
   const activeController = useRef(null);
 
   const canSubmit = useMemo(() => query.trim().length >= 5 && !running, [query, running]);
@@ -55,6 +56,7 @@ export default function App() {
     setFindings([]);
     setSearchSnippets(0);
     setBudget(null);
+    setDecisions([]);
     setReport("");
     setConfidence(null);
     setActiveStep("planner");
@@ -114,6 +116,11 @@ export default function App() {
               calls: typeof evt.llm_calls === "number" ? evt.llm_calls : null,
               overBudget: Boolean(evt.over_budget),
             });
+            break;
+          case "decisions":
+            if (Array.isArray(evt.items)) {
+              setDecisions(evt.items);
+            }
             break;
           case "final_report":
             setReport(evt.report || "");
@@ -309,6 +316,23 @@ export default function App() {
               <p className="empty">No plan generated yet.</p>
             )}
           </SectionCard>
+
+          {decisions.length > 0 ? (
+            <SectionCard title="Decision Layer" rightMeta={`${decisions.length} options`}>
+              <ul className="list-plain">
+                {decisions.map((o, idx) => (
+                  <li key={`decision-${idx}`} className={o.is_recommended ? "decision-recommended" : ""}>
+                    <strong>
+                      Option {o.option_label}{o.is_recommended ? " (Recommended)" : ""}:
+                    </strong>{" "}
+                    {o.description}
+                    {o.rationale ? <em> — {o.rationale}</em> : null}
+                    {o.risk_note ? <span className="meta"> Risk: {o.risk_note}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            </SectionCard>
+          ) : null}
 
           <SectionCard title="Critique" initiallyCollapsed rightMeta={`${loops.length} loops`}>
             {loops.length > 0 ? (
