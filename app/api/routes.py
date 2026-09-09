@@ -91,6 +91,8 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                     yield event_line("findings", items=findings)
                     emitted_findings = len(facts)
         except Exception as exc:
+            # Don't leak the failed run's state snapshot.
+            RUNTIME_STATE.pop(request_id, None)
             message = str(exc)
             if "No LLM provider configured" in message:
                 yield event_line(
@@ -104,7 +106,8 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 yield event_line("error", message=f"Research workflow failed: {message}")
             return
 
-        final_state: Dict[str, Any] = RUNTIME_STATE.get(request_id, {})
+        # TODO(phase-1): replace RUNTIME_STATE global with local snapshot capture
+        final_state: Dict[str, Any] = RUNTIME_STATE.pop(request_id, {})
         report = str(final_state.get("final_report", ""))
         confidence = float(final_state.get("confidence", 0.0))
 
