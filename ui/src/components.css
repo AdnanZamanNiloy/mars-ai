@@ -251,14 +251,14 @@
 
 /* ---------- composer ---------- */
 
-.composer { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 15px 15px 12px; transition: border-color 0.15s; }
+.composer { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px 10px; transition: border-color 0.15s; }
 .composer:focus-within { border-color: #3a3a45; }
 .composer textarea {
   display: block;
   width: 100%;
   background: transparent; border: 0; outline: 0; resize: none;
-  color: var(--t1); font-family: inherit; font-size: 14.5px; line-height: 1.55;
-  padding: 2px; min-height: 52px; max-height: 140px;
+  color: var(--t1); font-family: inherit; font-size: 14px; line-height: 1.5;
+  padding: 2px; min-height: 40px; max-height: 140px;
 }
 .composer textarea::placeholder { color: var(--t4); }
 .composer-toolbar { display: flex; align-items: center; gap: 8px; margin-top: 10px; }

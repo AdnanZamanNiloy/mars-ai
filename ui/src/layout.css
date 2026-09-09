@@ -152,7 +152,7 @@
   padding: 10px 26px 16px;
   background: linear-gradient(180deg, transparent, var(--bg) 30%);
 }
-.composer-inner { max-width: 860px; margin: 0 auto; }
+.composer-inner { max-width: 720px; margin: 0 auto; }
 
 /* ---------- intelligence panel ---------- */
 
