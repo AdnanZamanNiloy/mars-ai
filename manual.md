@@ -783,15 +783,15 @@ Phase 0 — Critical fixes
 [x] 0.5  Verify/migrate duckduckgo-search dependency
 
 Phase 1 — Tier 0 Foundation
-[ ] 1.1  Retry + circuit breaker on LLM calls
-[ ] 1.2  Structured/validated LLM outputs (Pydantic schemas)
-[ ] 1.3  Per-request timeout
-[ ] 1.4  Bounded caching (search + summarizer)
-[ ] 1.5  SQLite WAL mode + schema_version table
-[ ] 1.6  Structured logging with request_id
-[ ] 1.7  Rate limiting on /api/research/stream
-[ ] 1.8  Test suite (pytest) — planner regression test is mandatory
-[ ] 1.9  Settings hardening (pydantic-settings, fail-fast validation)
+[x] 1.1  Retry + circuit breaker on LLM calls
+[x] 1.2  Structured/validated LLM outputs (Pydantic schemas)
+[x] 1.3  Per-request timeout
+[x] 1.4  Bounded caching (search + summarizer)
+[x] 1.5  SQLite WAL mode + schema_version table
+[x] 1.6  Structured logging with request_id
+[x] 1.7  Rate limiting on /api/research/stream
+[x] 1.8  Test suite (pytest) — planner regression test is mandatory
+[x] 1.9  Settings hardening (pydantic-settings, fail-fast validation)
 
 Phase 2 — Tier 1 features
 [ ] 2.1  Adaptive Orchestrator + MAX_PARALLEL_AGENTS hardware cap
