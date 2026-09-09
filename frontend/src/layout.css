@@ -36,7 +36,7 @@
   border-radius: 11px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: #fafafa;
-  color: #09090b;
+  color: #16181c;
   font-size: 13.5px;
   font-weight: 650;
   cursor: pointer;
@@ -61,8 +61,8 @@
   text-align: left;
   transition: background 0.13s, color 0.13s;
 }
-.side-nav button:hover { background: #16161d; color: var(--t1); }
-.side-nav button.active { background: #1b1b23; color: var(--t1); }
+.side-nav button:hover { background: #1e2127; color: var(--t1); }
+.side-nav button.active { background: #26292f; color: var(--t1); }
 .side-nav button.active svg { color: var(--mars-soft); }
 .side-nav svg { color: var(--t3); flex: none; }
 .side-nav .count {
@@ -99,8 +99,8 @@
   text-align: left;
   transition: background 0.13s;
 }
-.mission-row:hover { background: #16161d; }
-.mission-row.active { background: #1b1b23; }
+.mission-row:hover { background: #1e2127; }
+.mission-row.active { background: #26292f; }
 .mission-row .dot { margin-top: 5px; }
 .mission-row .body { flex: 1; min-width: 0; }
 .mission-row .name {
@@ -181,7 +181,7 @@
   color: var(--t3);
   cursor: pointer;
 }
-.icon-btn:hover { background: #1c1c24; color: #fff; }
+.icon-btn:hover { background: #26292f; color: #fff; }
 
 .intel-expand {
   position: absolute;
