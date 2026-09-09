@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from app.core.logging import get_logger
-import random
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Dict, List, Union
 from urllib.parse import quote, urlparse
 
 import httpx
@@ -14,6 +13,7 @@ from ddgs import DDGS
 
 from app.core.config import Settings
 from app.agents.evidence_utils import source_reliability_score
+from app.agents.planner import SubQuestion
 from app.core.cache import cache_key, get_cache
 
 logger = get_logger(__name__)
@@ -191,14 +191,21 @@ class SearchClient:
         self.settings = settings
         self.semaphore = asyncio.Semaphore(max(1, settings.max_parallel_search))
 
-    async def run_search(self, sub_questions):
+    async def run_search(self, sub_questions: List[Union[SubQuestion, str]]) -> List[Dict[str, Any]]:
+        """Search a batch of delegation-contract sub-questions (or raw strings)."""
         tasks = [self._search(q) for q in sub_questions]
         batches = await asyncio.gather(*tasks)
 
         results = []
-        for q, batch in zip(sub_questions, batches):
+        for contract, batch in zip(sub_questions, batches):
+            if isinstance(contract, str):
+                question_text = contract
+            else:
+                # The contract's question is what flows to the summarizer;
+                # minimum_sources/stop_condition stay with the contract owner.
+                question_text = str(contract.get("question", "")).strip() or str(contract)
             for r in batch:
-                r.sub_question = q
+                r.sub_question = question_text
                 results.append(r.to_dict())
 
         return results

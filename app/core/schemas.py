@@ -21,6 +21,8 @@ class SubQuestionModel(BaseModel):
     depends_on: List[int] = Field(default_factory=list)
     coverage_goal: str = ""
     domain: str = "general"
+    minimum_sources: int = Field(default=2, ge=1)
+    stop_condition: str = "sufficient evidence for this axis"
 
 
 class PlannerOutputModel(BaseModel):

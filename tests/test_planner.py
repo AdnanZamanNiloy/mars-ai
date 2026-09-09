@@ -74,6 +74,8 @@ async def test_planner_uses_llm_for_non_trivial_query():
             "depends_on": [],
             "coverage_goal": "cost comparison",
             "domain": "economics",
+            "minimum_sources": 2,
+            "stop_condition": "sufficient evidence for this axis",
         },
         {
             "id": 2,
@@ -84,6 +86,8 @@ async def test_planner_uses_llm_for_non_trivial_query():
             "depends_on": [],
             "coverage_goal": "financing details",
             "domain": "economics",
+            "minimum_sources": 2,
+            "stop_condition": "sufficient evidence for this axis",
         },
     ]
     assert llm.calls, "planner never called the LLM"

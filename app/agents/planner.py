@@ -15,6 +15,10 @@ logger = get_logger(__name__)
 # =========================
 
 class SubQuestion(TypedDict, total=False):
+    """Delegation Contract (Phase 2.6) — the single typed shape every
+    sub-question flowing through the pipeline must have. Validated by
+    app.core.schemas.PlannerOutputModel before agents ever see it."""
+
     id: int
     question: str
     axis: str
@@ -23,6 +27,12 @@ class SubQuestion(TypedDict, total=False):
     depends_on: List[int]
     coverage_goal: str
     domain: str
+    minimum_sources: int
+    stop_condition: str
+
+
+DEFAULT_MINIMUM_SOURCES = 2
+DEFAULT_STOP_CONDITION = "sufficient evidence for this axis"
 
 
 class PlannerOutput(TypedDict, total=False):
@@ -151,7 +161,9 @@ Return ONLY valid JSON. No markdown fences. No text outside JSON.
       "priority": 1,
       "depends_on": [],
       "coverage_goal": "<what this sub-question should establish>",
-      "domain": "<same enum as dominant_domain>"
+      "domain": "<same enum as dominant_domain>",
+      "minimum_sources": 2,
+      "stop_condition": "<when this sub-question's search can stop, e.g. 'sufficient evidence for this axis'>"
     }
   ],
   "coverage_note": "<one sentence: what would full coverage of this query require>"
@@ -176,6 +188,8 @@ def fallback_plan(query: str) -> List[Dict[str, Any]]:
             "depends_on": [],
             "coverage_goal": "core meaning",
             "domain": "general",
+            "minimum_sources": DEFAULT_MINIMUM_SOURCES,
+            "stop_condition": DEFAULT_STOP_CONDITION,
         },
         {
             "id": 2,
@@ -186,6 +200,8 @@ def fallback_plan(query: str) -> List[Dict[str, Any]]:
             "depends_on": [1],
             "coverage_goal": "internal working",
             "domain": "general",
+            "minimum_sources": DEFAULT_MINIMUM_SOURCES,
+            "stop_condition": DEFAULT_STOP_CONDITION,
         },
         {
             "id": 3,
@@ -196,6 +212,8 @@ def fallback_plan(query: str) -> List[Dict[str, Any]]:
             "depends_on": [1],
             "coverage_goal": "practical usage",
             "domain": "general",
+            "minimum_sources": DEFAULT_MINIMUM_SOURCES,
+            "stop_condition": DEFAULT_STOP_CONDITION,
         },
         {
             "id": 4,
@@ -206,6 +224,8 @@ def fallback_plan(query: str) -> List[Dict[str, Any]]:
             "depends_on": [2],
             "coverage_goal": "weaknesses",
             "domain": "general",
+            "minimum_sources": DEFAULT_MINIMUM_SOURCES,
+            "stop_condition": DEFAULT_STOP_CONDITION,
         },
     ]
 
@@ -281,6 +301,8 @@ Return JSON only.
             "depends_on": item.get("depends_on", []),
             "coverage_goal": item.get("coverage_goal", ""),
             "domain": normalize_domain(item.get("domain", "general")),
+            "minimum_sources": max(1, int(item.get("minimum_sources", DEFAULT_MINIMUM_SOURCES))),
+            "stop_condition": str(item.get("stop_condition", "")).strip() or DEFAULT_STOP_CONDITION,
         })
 
     # Deduplicate (semantic-ish)
