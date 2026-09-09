@@ -27,3 +27,6 @@ ui/dist/
 .DS_Store
 .vscode/
 .idea/
+
+# bounded diskcache directory (Phase 1.4)
+.cache/
