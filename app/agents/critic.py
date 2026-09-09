@@ -35,6 +35,22 @@ You must be demanding but fair:
 4) REDUNDANCY / FRAGMENTATION
    Is the evidence mostly duplicated or too fragmented to synthesize?
 
+━━━ RED TEAM QUESTIONS (adversarial) ━━━
+
+Before deciding, attack the evidence yourself:
+
+  RQ1 — What assumption in the current evidence is WEAKEST, i.e. most
+        likely to be wrong or unrepresentative?
+  RQ2 — What alternative explanation or competing claim would
+        INVALIDATE the current conclusion if true?
+  RQ3 — What important counter-evidence is conspicuously ABSENT from
+        the retrieved material?
+
+If is_sufficient is false, the reason field MUST explicitly name at
+least one weak assumption (RQ1), a potentially invalidating alternative
+(RQ2), or a missing counter-evidence (RQ3) — not just "insufficient
+coverage".
+
 ━━━ DECISION RULES ━━━
 
   - is_sufficient = true  ONLY if the evidence clearly supports a
@@ -86,6 +102,9 @@ async def critic_agent(
         "2) Is there enough material to write a clear definition?\n"
         "3) Are sources reliable?\n"
         "4) Is information redundant or fragmented?\n\n"
+        "Also run the Red Team checks from your instructions: name the weakest\n"
+        "assumption, a potentially invalidating alternative, and any missing\n"
+        "counter-evidence in your reason when the evidence is insufficient.\n\n"
         "Return JSON: "
         '{"is_sufficient": true/false, "reason": "...", "improved_queries": ["..."], "confidence": 0.0}'
     )
