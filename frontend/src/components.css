@@ -7,16 +7,16 @@
   flex: none;
   border-radius: 50%;
   background:
-    radial-gradient(ellipse 20% 14% at 62% 30%, rgba(46, 12, 6, 0.55), transparent 70%),
-    radial-gradient(ellipse 24% 16% at 42% 66%, rgba(46, 12, 6, 0.5), transparent 70%),
-    radial-gradient(ellipse 13% 10% at 72% 60%, rgba(46, 12, 6, 0.45), transparent 70%),
-    radial-gradient(ellipse 30% 24% at 38% 34%, rgba(255, 196, 156, 0.24), transparent 70%),
-    radial-gradient(circle at 35% 30%, #efa173 0%, #da7648 22%, #bd5732 45%, #8f3f27 66%, #5c291b 85%, #3a1911 100%);
+    radial-gradient(ellipse 20% 14% at 62% 30%, rgba(0, 0, 0, 0.55), transparent 70%),
+    radial-gradient(ellipse 24% 16% at 42% 66%, rgba(0, 0, 0, 0.5), transparent 70%),
+    radial-gradient(ellipse 13% 10% at 72% 60%, rgba(0, 0, 0, 0.45), transparent 70%),
+    radial-gradient(ellipse 30% 24% at 38% 34%, rgba(255, 255, 255, 0.2), transparent 70%),
+    radial-gradient(circle at 35% 30%, #e4e4e7 0%, #a1a1aa 22%, #71717a 45%, #3f3f46 66%, #27272a 85%, #131315 100%);
   box-shadow:
     inset -8px -11px 22px rgba(0, 0, 0, 0.62),
-    inset 4px 5px 12px rgba(255, 200, 160, 0.16),
+    inset 4px 5px 12px rgba(255, 255, 255, 0.14),
     0 4px 16px rgba(0, 0, 0, 0.5),
-    0 0 24px rgba(226, 110, 64, 0.16);
+    0 0 24px rgba(255, 255, 255, 0.07);
 }
 .planet::after {
   content: "";
@@ -29,7 +29,7 @@
   position: absolute;
   inset: -5px;
   border-radius: 50%;
-  border: 1.5px solid rgba(240, 162, 118, 0.35);
+  border: 1.5px solid rgba(228, 228, 231, 0.3);
   border-top-color: transparent;
   border-left-color: transparent;
   transform: rotate(-24deg);
@@ -79,8 +79,8 @@
 .finding-n {
   width: 26px; height: 26px; flex: none; margin-top: 2px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #a05133, #793824);
-  color: #f2c6ae;
+  background: #3f3f46;
+  color: #e4e4e7;
   font-size: 12.5px; font-weight: 650;
   display: flex; align-items: center; justify-content: center;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
@@ -88,7 +88,7 @@
 .finding-text { font-size: 13.5px; line-height: 1.58; color: #c2c2ca; margin: 0; }
 .finding.clickable { cursor: pointer; border-radius: 10px; padding: 8px; margin: 0 -8px 7px; transition: background 0.13s; }
 .finding.clickable:hover { background: rgba(255, 255, 255, 0.025); }
-.finding.clickable.selected { background: rgba(224, 115, 74, 0.07); outline: 1px solid rgba(224, 115, 74, 0.3); }
+.finding.clickable.selected { background: rgba(255, 255, 255, 0.04); outline: 1px solid #52525b; }
 .cite {
   display: inline-block;
   margin-left: 6px;
@@ -138,14 +138,14 @@
 
 .contradiction {
   margin-top: 18px;
-  border: 1px solid rgba(229, 165, 75, 0.3);
-  border-left: 3px solid var(--amber);
-  background: rgba(229, 165, 75, 0.05);
+  border: 1px solid var(--line);
+  border-left: 3px solid #71717a;
+  background: rgba(255, 255, 255, 0.02);
   border-radius: 11px;
   padding: 13px 16px;
   font-size: 13px;
   line-height: 1.6;
-  color: #d8cdbd;
+  color: var(--t2);
   white-space: pre-wrap;
 }
 
@@ -191,7 +191,7 @@
   background: #1d1d24;
   border: 1px solid #26262e;
   display: flex; align-items: center; justify-content: center;
-  color: #e08b62;
+  color: #d4d4d8;
 }
 .agent-main { flex: 1; min-width: 0; }
 .agent-top { display: flex; justify-content: space-between; gap: 10px; }
@@ -199,8 +199,8 @@
 .agent-status { font-size: 11px; font-weight: 600; flex: none; }
 .agent-desc { font-size: 11.5px; color: var(--t3); margin-top: 2px; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bar { height: 5px; border-radius: 3px; background: var(--track); overflow: hidden; }
-.bar > div { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--mars-deep), var(--mars-soft)); transition: width 0.4s ease; }
-.bar > div.green { background: linear-gradient(90deg, #2e9e6b, var(--mint)); }
+.bar > div { height: 100%; border-radius: 3px; background: #d4d4d8; transition: width 0.4s ease; }
+.bar > div.green { background: #a1a1aa; }
 
 .health-row { display: flex; align-items: center; gap: 11px; padding: 6.5px 2px; }
 .health-row svg { flex: none; }
@@ -253,18 +253,17 @@
   width: 32px; height: 32px; flex: none;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-bottom-color: rgba(0, 0, 0, 0.35);
-  background: linear-gradient(180deg, #ec8052 0%, #cf5f36 100%);
-  color: #fff; cursor: pointer;
-  box-shadow: 0 6px 18px var(--mars-glow), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #fafafa;
+  color: #09090b; cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
   transition: filter 0.15s, transform 0.1s, opacity 0.15s;
 }
-.send-btn:hover:not(:disabled) { filter: brightness(1.08); }
+.send-btn:hover:not(:disabled) { filter: brightness(0.92); }
 .send-btn:active:not(:disabled) { transform: translateY(1px); }
 .send-btn:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
 .send-btn.is-abort { background: #232329; border-color: #2e2e37; color: var(--t2); box-shadow: none; }
-.send-btn.is-abort:hover { color: var(--red); border-color: rgba(229, 96, 79, 0.5); }
+.send-btn.is-abort:hover { color: var(--red); border-color: rgba(205, 111, 99, 0.5); }
 .mode-wrap { position: relative; flex: none; }
 .mode-menu {
   position: absolute; bottom: calc(100% + 8px); right: 0;
@@ -335,17 +334,17 @@
   color: var(--t2); font-size: 13px; padding: 12px 16px; cursor: pointer; text-align: left;
   transition: border-color 0.15s, color 0.15s;
 }
-.hero-examples button:hover { border-color: rgba(224, 115, 74, 0.5); color: #fff; }
+.hero-examples button:hover { border-color: #52525b; color: #fff; }
 
 /* ---------- replay ---------- */
 
 .replay-banner {
   display: flex; align-items: center; gap: 10px;
-  border: 1px solid rgba(106, 168, 255, 0.3);
-  background: rgba(106, 168, 255, 0.06);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
   border-radius: var(--r-md);
   padding: 11px 15px; margin-bottom: 20px;
-  font-size: 12.5px; color: #b9cdf3;
+  font-size: 12.5px; color: var(--t2);
 }
 .replay-banner .spacer { flex: 1; }
 

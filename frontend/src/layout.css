@@ -4,9 +4,7 @@
   display: flex;
   height: 100vh;
   min-width: 0;
-  background:
-    radial-gradient(1100px 500px at 70% -10%, rgba(224, 115, 74, 0.05), transparent 60%),
-    var(--bg);
+  background: var(--bg);
   overflow: hidden;
 }
 
@@ -36,17 +34,16 @@
   margin-top: 16px;
   padding: 11px 0;
   border-radius: 11px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-bottom-color: rgba(0, 0, 0, 0.35);
-  background: linear-gradient(180deg, #d96f42 0%, #b9522f 100%);
-  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #fafafa;
+  color: #09090b;
   font-size: 13.5px;
   font-weight: 650;
   cursor: pointer;
-  box-shadow: 0 6px 18px rgba(200, 90, 50, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
   transition: filter 0.15s;
 }
-.new-btn:hover { filter: brightness(1.1); }
+.new-btn:hover { filter: brightness(0.92); }
 
 .side-nav { display: flex; flex-direction: column; gap: 2px; margin-top: 14px; }
 .side-nav button {
@@ -207,7 +204,7 @@
   cursor: pointer;
   white-space: nowrap;
 }
-.link-btn:hover { color: #f4ac86; }
+.link-btn:hover { color: #fff; }
 
 /* ---------- responsive ---------- */
 
