@@ -1,5 +1,7 @@
 from typing import Any, Dict, List
 
+import logging
+
 from app.agents.evidence_utils import (
     dedupe_semantic_facts,
     filter_search_results_by_domain,
@@ -7,6 +9,9 @@ from app.agents.evidence_utils import (
     source_reliability_score,
 )
 from app.core.llm import LLMClient, clamp_confidence
+from app.core.schemas import SummarizerFactsModel
+
+logger = logging.getLogger(__name__)
 
 
 SUMMARIZER_SYSTEM_PROMPT = """
@@ -106,9 +111,14 @@ async def summarizer_agent(
     )
 
     try:
-        payload = await llm.generate_json(SUMMARIZER_SYSTEM_PROMPT, user_prompt)
+        payload = await llm.generate_json(
+            SUMMARIZER_SYSTEM_PROMPT,
+            user_prompt,
+            response_model=SummarizerFactsModel,
+        )
         facts = payload.get("facts", []) if isinstance(payload, dict) else []
-    except Exception:
+    except Exception as exc:
+        logger.warning("[Summarizer] LLM call failed, using heuristic fallback", exc_info=exc)
         facts = []
 
     cleaned: List[Dict[str, Any]] = []

@@ -4,6 +4,7 @@ import logging
 
 from app.agents.evidence_utils import dedupe_semantic_facts, filter_facts_by_domain
 from app.core.llm import LLMClient, clamp_confidence
+from app.core.schemas import CriticVerdictModel
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,11 @@ async def critic_agent(
     )
 
     try:
-        payload = await llm.generate_json(CRITIC_SYSTEM_PROMPT, user_prompt)
+        payload = await llm.generate_json(
+            CRITIC_SYSTEM_PROMPT,
+            user_prompt,
+            response_model=CriticVerdictModel,
+        )
     except Exception as exc:
         logger.warning("[Critic] LLM call failed, treating as insufficient", exc_info=exc)
         payload = {}

@@ -4,9 +4,10 @@ import logging
 import random
 import re
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Type
 
 import httpx
+from pydantic import BaseModel
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -76,11 +77,27 @@ class LLMClient:
         # startup), is bounded, and resets on success — not per-request state.
         self.groq_breaker = CircuitBreaker(threshold=3, cooldown_sec=60.0)
 
-    async def generate_json(self, system_prompt: str, user_prompt: str, retries: int = 3) -> Dict[str, Any]:
+    async def generate_json(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        retries: int = 3,
+        response_model: Type[BaseModel] | None = None,
+    ) -> Dict[str, Any]:
+        """Call an LLM and return the parsed JSON as a dict.
+
+        When `response_model` is provided, the parsed payload is validated
+        against the Pydantic model; validation failures are treated like any
+        other failed attempt and trigger a retry instead of returning garbage.
+        """
         for attempt in range(retries):
             try:
                 text = await self._generate_with_fallback(system_prompt, user_prompt)
-                return self._extract_json(text)
+                payload = self._extract_json(text)
+                if response_model is not None:
+                    validated = response_model.model_validate(payload)
+                    return validated.model_dump()
+                return payload
             except Exception:
                 if attempt == retries - 1:
                     raise

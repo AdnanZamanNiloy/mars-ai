@@ -5,6 +5,7 @@ import re
 from typing import Any, Dict, List, TypedDict
 
 from app.core.llm import LLMClient
+from app.core.schemas import PlannerOutputModel
 
 logger = logging.getLogger(__name__)
 
@@ -246,9 +247,10 @@ Return JSON only.
         payload: PlannerOutput = await llm.generate_json(
             system_prompt=PLANNER_SYSTEM_PROMPT,
             user_prompt=user_prompt,
+            response_model=PlannerOutputModel,
         )
     except Exception as e:
-        logger.error(f"[Planner] LLM failed: {e}")
+        logger.error(f"[Planner] LLM failed: {e}", exc_info=e)
         return fallback_plan(query)
 
     sub_questions = payload.get("sub_questions", [])

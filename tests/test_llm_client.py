@@ -68,3 +68,56 @@ async def test_breaker_resets_on_success(client):
     assert client.groq_breaker.is_open()
     client.groq_breaker.record_success()
     assert not client.groq_breaker.is_open()
+
+
+async def test_malformed_output_rejected_and_retried(client):
+    """Phase 1.2: payload failing response_model validation triggers retry, not silent accept."""
+    from app.core.schemas import PlannerOutputModel
+
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post(GROQ_URL).mock(
+            side_effect=[
+                _groq_response(json.dumps({"no_sub_questions": True})),  # missing required key
+                _groq_response(
+                    json.dumps(
+                        {
+                            "sub_questions": [
+                                {"id": 1, "question": "what is retrieval augmented generation", "axis": "definition"}
+                            ]
+                        }
+                    )
+                ),
+            ]
+        )
+        # After Groq's two side effects (both invalid) are consumed, later
+        # attempts route through the HF fallback — which returns the valid
+        # payload. This asserts the malformed response was *rejected*, and
+        # the pipeline recovered on a later attempt.
+        mock.post(HF_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=[
+                    {
+                        "generated_text": json.dumps(
+                            {
+                                "sub_questions": [
+                                    {"id": 1, "question": "what is retrieval augmented generation", "axis": "definition"}
+                                ]
+                            }
+                        )
+                    }
+                ],
+            )
+        )
+        result = await client.generate_json("sp", "up", response_model=PlannerOutputModel)
+        assert result["sub_questions"][0]["question"].startswith("what is")
+        assert route.call_count == 2, "malformed response must be retried"
+
+
+async def test_validation_failure_after_all_retries_raises(client):
+    from app.core.schemas import PlannerOutputModel
+
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post(GROQ_URL).mock(return_value=_groq_response(json.dumps({"no_sub_questions": True})))
+        with pytest.raises(Exception):
+            await client.generate_json("sp", "up", response_model=PlannerOutputModel)

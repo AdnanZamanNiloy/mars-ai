@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Dict, List
 
 from app.agents.evidence_utils import dedupe_semantic_facts, filter_facts_by_domain
 from app.core.llm import LLMClient
+from app.core.schemas import SynthesizerAnswerModel
+
+logger = logging.getLogger(__name__)
 
 
 SYNTHESIZER_SYSTEM_PROMPT = """
@@ -58,8 +62,13 @@ async def synthesizer_agent(llm: LLMClient, query: str, facts: List[Dict[str, An
     )
 
     try:
-        payload = await llm.generate_json(SYNTHESIZER_SYSTEM_PROMPT, user_prompt)
-    except Exception:
+        payload = await llm.generate_json(
+            SYNTHESIZER_SYSTEM_PROMPT,
+            user_prompt,
+            response_model=SynthesizerAnswerModel,
+        )
+    except Exception as exc:
+        logger.warning("[Synthesizer] LLM call failed, using deterministic fallback", exc_info=exc)
         payload = {}
 
     answer = str(payload.get("answer", "")).strip() if isinstance(payload, dict) else ""
