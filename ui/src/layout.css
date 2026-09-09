@@ -13,7 +13,7 @@
 /* ---------- sidebar ---------- */
 
 .sidebar {
-  width: 264px;
+  width: 340px;
   flex: none;
   display: flex;
   flex-direction: column;
@@ -213,7 +213,7 @@
 
 @media (max-width: 1180px) {
   .intel { width: 300px; }
-  .sidebar { width: 224px; }
+  .sidebar { width: 300px; }
 }
 
 @media (max-width: 980px) {
