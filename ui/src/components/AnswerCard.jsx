@@ -7,7 +7,8 @@ import {
  * report markdown sections, findings events, decisions events. */
 
 function FindingRow({ item, index, selected, onSelect }) {
-  const domain = extractDomain(item.source || "");
+  const claim = item?.claim || "";
+  const domain = extractDomain(item?.source || "");
   const trust = trustOf(domain);
   return (
     <div
@@ -20,9 +21,9 @@ function FindingRow({ item, index, selected, onSelect }) {
     >
       <span className="finding-n">{index + 1}</span>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <p className="finding-text">{item.claim}</p>
+        <p className="finding-text">{claim}</p>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
-          {item.source ? (
+          {item?.source ? (
             <a
               className="src-link"
               href={item.source}
@@ -38,7 +39,7 @@ function FindingRow({ item, index, selected, onSelect }) {
           <span className={`tag tone-${trust.tone === "good" ? "good" : trust.tone === "bad" ? "bad" : "muted"}`}>
             {trust.label}
           </span>
-          {typeof item.verified === "boolean" ? (
+          {typeof item?.verified === "boolean" ? (
             <span className={`tag tone-${item.verified ? "good" : "bad"}`}>
               {item.verified ? "verified" : "unverified"}
             </span>
@@ -50,12 +51,14 @@ function FindingRow({ item, index, selected, onSelect }) {
 }
 
 export default function AnswerCard({ run, selectedFinding, onSelectFinding }) {
-  const sections = parseReport(run.report);
-  const recommended = run.decisions.find((d) => d.is_recommended);
-  const risks = run.decisions.flatMap((d) => (d.risk_note ? [{ option: d.option_label, note: d.risk_note }] : []));
+  const decisions = Array.isArray(run.decisions) ? run.decisions : [];
+  const findings = Array.isArray(run.findings) ? run.findings : [];
+  const sections = parseReport(run.report || "");
+  const recommended = decisions.find((d) => d && d.is_recommended);
+  const risks = decisions.flatMap((d) => (d && d.risk_note ? [{ option: d.option_label, note: d.risk_note }] : []));
 
-  const total = run.findings.length;
-  const verified = run.findings.filter((f) => f.verified === true).length;
+  const total = findings.length;
+  const verified = findings.filter((f) => f && f.verified === true).length;
   const conflicts = sections.contradictions ? sections.contradictions.split(/\n+/).filter((l) => l.trim()).length : 0;
 
   const stats = [
@@ -76,10 +79,10 @@ export default function AnswerCard({ run, selectedFinding, onSelectFinding }) {
       <div className="answer-cols">
         <div>
           <h3>Key findings</h3>
-          {run.findings.length > 0 ? (
-            run.findings.slice(0, 8).map((f, i) => (
+          {findings.length > 0 ? (
+            findings.slice(0, 8).map((f, i) => (
               <FindingRow
-                key={`${i}-${f.claim.slice(0, 24)}`}
+                key={`${i}-${(f?.claim || "").slice(0, 24)}`}
                 item={f}
                 index={i}
                 selected={selectedFinding === f}

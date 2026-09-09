@@ -6,6 +6,7 @@ import Composer from "./components/Composer";
 import { ErrorCard, LiveRunCard, MarsMessageShell, TypingRow, UserMessage } from "./components/Thread";
 import AnswerCard, { ReplayAnswerCard } from "./components/AnswerCard";
 import ClaimDrawer from "./components/ClaimDrawer";
+import ErrorBoundary from "./components/ErrorBoundary";
 import IntelligencePanel from "./components/IntelligencePanel";
 import MissionsView from "./components/MissionsView";
 import EvidenceView from "./components/EvidenceView";
@@ -319,6 +320,7 @@ export default function App() {
       {sidebarOpen ? <button className="scrim" onClick={() => setSidebarOpen(false)} aria-label="Close menu" /> : null}
 
       <div className="workspace-wrap">
+        <ErrorBoundary>
         <main className="workspace">
           <header className="topbar">
             <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
@@ -378,9 +380,10 @@ export default function App() {
             </div>
           ) : null}
         </main>
+        </ErrorBoundary>
 
         {view === "workspace" ? (
-          <>
+          <ErrorBoundary>
             <IntelligencePanel
               run={activeRun}
               traceLog={traceLog}
@@ -396,7 +399,7 @@ export default function App() {
                 <IconChevronLeft size={15} />
               </button>
             ) : null}
-          </>
+          </ErrorBoundary>
         ) : null}
       </div>
 
