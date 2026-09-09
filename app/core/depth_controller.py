@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal
 
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 
 DECISION = Literal["expand", "finalize"]
 
@@ -85,6 +85,12 @@ def _axes_below_threshold(state: Dict[str, Any], minimum_sources: int) -> List[s
     return [axis for axis, n in counts.items() if n < minimum_sources]
 
 
+def _axes_covered(state: Dict[str, Any], minimum_sources: int) -> List[str]:
+    """Planned axes that have at least `minimum_sources` verified facts."""
+    counts = _axis_coverage(state, minimum_sources)
+    return [axis for axis, n in counts.items() if n >= minimum_sources]
+
+
 def _axis_imbalance(state: Dict[str, Any]) -> bool:
     verified = _verified_facts(state)
     if not verified:
@@ -111,7 +117,7 @@ def _two_consecutive_stalls(history: List[float], min_gain: float) -> bool:
 
 def evaluate(state: Dict[str, Any], settings: Settings | None = None) -> Dict[str, Any]:
     """Return the decision inputs and which rules fired — pure and inspectable."""
-    settings = settings or Settings()
+    settings = settings or get_settings()
     critique = state.get("critique", {})
     iteration = int(state.get("iteration", 0))
     max_iterations = int(state.get("max_iterations", 3))
@@ -129,6 +135,7 @@ def evaluate(state: Dict[str, Any], settings: Settings | None = None) -> Dict[st
             break
 
     axes_below = _axes_below_threshold(state, minimum_sources)
+    axes_covered = _axes_covered(state, minimum_sources)
     sufficiency_met = (
         confidence >= settings.sufficiency_threshold
         and not axes_below
@@ -145,8 +152,15 @@ def evaluate(state: Dict[str, Any], settings: Settings | None = None) -> Dict[st
             and (tracker.limit_usd - tracker.estimated_cost_usd) / tracker.limit_usd < BUDGET_SAFETY_MARGIN
         ),
         "ceiling_reached": iteration >= ceiling,
-        "coverage_gap": bool(improved) and (len([a for a in _planned_axes(state) if a]) < MIN_AXES_COVERED or _axis_imbalance(state) or bool(axes_below)),
+        # Coverage-gap detection (manual 2.8): compare COVERED axes (verified
+        # facts via source attribution) against the axes the planner scoped.
+        "coverage_gap": bool(improved) and (
+            len(axes_covered) < MIN_AXES_COVERED
+            or _axis_imbalance(state)
+            or bool(axes_below)
+        ),
         "axes_below_threshold": axes_below,
+        "axes_covered": axes_covered,
     }
     return checks
 

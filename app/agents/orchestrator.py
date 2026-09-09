@@ -122,27 +122,39 @@ def orchestrate(
     max_parallel_agents: int,
     deep_research: bool = False,
 ) -> OrchestrationPlan:
-    """Map a query to a target agent count under the hardware cap."""
+    """Map a query to a target agent count under the hardware cap.
+
+    very_high complexity with an explicit deep_research=true request flag
+    may exceed the default cap (user opted in); without it, the clamp holds.
+    """
     complexity = score_complexity(query)
     raw_target = LEVEL_TARGETS[complexity.level]
     notes: List[str] = []
 
     effective_cap = max_parallel_agents
-    if complexity.level == "very_high" and not deep_research:
-        notes.append(
-            "very_high complexity clamped to MAX_PARALLEL_AGENTS; "
-            "pass deep_research=true to lift the cap"
-        )
+    if complexity.level == "very_high" and deep_research:
+        effective_cap = max(max_parallel_agents, raw_target)
 
     target_agents = min(raw_target, effective_cap)
     clamped = target_agents < raw_target
+    if clamped:
+        if complexity.level == "very_high" and not deep_research:
+            notes.append(
+                "very_high complexity clamped to MAX_PARALLEL_AGENTS; "
+                "pass deep_research=true to lift the cap"
+            )
+        else:
+            notes.append(
+                f"{complexity.level} complexity target {raw_target} clamped to "
+                f"MAX_PARALLEL_AGENTS={max_parallel_agents}"
+            )
 
     return OrchestrationPlan(
         complexity=complexity,
         target_agents=target_agents,
         clamped=clamped,
         deep_research=deep_research,
-        max_parallel_agents=effective_cap,
+        max_parallel_agents=max_parallel_agents,
         notes=notes,
     )
 

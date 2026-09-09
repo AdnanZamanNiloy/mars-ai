@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from difflib import SequenceMatcher
 from typing import Any, Dict, List
-from urllib.parse import urlparse
 
 from app.agents.evidence_utils import extract_domain, source_reliability_score
 

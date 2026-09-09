@@ -265,11 +265,6 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
 
         results = await asyncio.gather(*(_summarize_context(ctx) for ctx in contexts if ctx.own_results))
 
-        # Raw content is discarded once each sub-question's summarization
-        # completes — it must not persist in shared state past this point.
-        for ctx in contexts:
-            ctx.release_raw_content()
-
         fresh_facts = [fact for facts in results for fact in facts]
         merged = dedupe_semantic_facts([*state.get("facts", []), *fresh_facts])
         logger.info("summarizer_done", fresh_facts=len(fresh_facts), total_facts=len(merged))
@@ -284,6 +279,16 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
             "total": len(verified),
             "verified": sum(1 for f in verified if f.get("verified")),
         }
+
+        # Raw content is discarded once verification completes — verification
+        # is the last consumer of full page text (it checks claims against
+        # content, not just snippets); nothing downstream (critic, synthesizer,
+        # finalize, later iterations) needs it. Blank in place: these dict
+        # objects are shared with the contexts built in summarizer_node.
+        for result in state.get("search_results", []):
+            if isinstance(result, dict) and "content" in result:
+                result["content"] = ""
+
         logger.info("verifier_done", **stats)
         return {"facts": verified, "verification_stats": stats}
 
