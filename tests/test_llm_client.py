@@ -121,3 +121,26 @@ async def test_validation_failure_after_all_retries_raises(client):
         mock.post(GROQ_URL).mock(return_value=_groq_response(json.dumps({"no_sub_questions": True})))
         with pytest.raises(Exception):
             await client.generate_json("sp", "up", response_model=PlannerOutputModel)
+
+
+def test_env_file_precedence_real_key_beats_placeholder():
+    """.env must override .env.example placeholders (regression: settings
+    loaded 'your_groq_api_key_here' and every LLM call 401'd silently)."""
+    import os
+    from pathlib import Path
+
+    from app.core.config import Settings
+
+    project = Path(__file__).resolve().parents[1]
+    env_keys = {}
+    for name in (".env.example", ".env"):
+        path = project / name
+        if path.exists():
+            for line in path.read_text().splitlines():
+                if line.startswith("GROQ_API_KEY="):
+                    env_keys[name] = line.split("=", 1)[1]
+    if ".env" in env_keys and not env_keys[".env"].startswith("your_"):
+        settings = Settings()
+        assert not settings.groq_api_key.startswith("your_"), (
+            "placeholder from .env.example is overriding the real .env key"
+        )

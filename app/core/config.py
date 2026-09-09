@@ -6,7 +6,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(".env", ".env.example"),
+        # Last file wins: .env (real values) must override .env.example
+        # (placeholders). Real environment variables beat both.
+        env_file=(".env.example", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
         frozen=True,
@@ -14,7 +16,9 @@ class Settings(BaseSettings):
 
     # LLM providers
     groq_api_key: str = ""
-    groq_model: str = "llama-3.1-8b-instant"
+    # llama-3.1-8b-instant was decommissioned on Groq (2026); gpt-oss-20b is
+    # the verified replacement. Check console.groq.com if this 404s again.
+    groq_model: str = "openai/gpt-oss-20b"
     huggingface_api_key: str = ""
     huggingface_model: str = "Qwen/Qwen2.5-7B-Instruct"
     tavily_api_key: str = ""
