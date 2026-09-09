@@ -46,7 +46,7 @@ export default function Composer({
       <div className="composer">
         <textarea
           ref={areaRef}
-          rows={2}
+          rows={1}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {

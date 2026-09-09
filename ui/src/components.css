@@ -251,21 +251,21 @@
 
 /* ---------- composer ---------- */
 
-.composer { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px 10px; transition: border-color 0.15s; }
+.composer { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 10px 14px 8px; transition: border-color 0.15s; }
 .composer:focus-within { border-color: #3a3a45; }
 .composer textarea {
   display: block;
   width: 100%;
   background: transparent; border: 0; outline: 0; resize: none;
   color: var(--t1); font-family: inherit; font-size: 14px; line-height: 1.5;
-  padding: 2px; min-height: 40px; max-height: 140px;
+  padding: 2px; min-height: 28px; max-height: 140px;
 }
 .composer textarea::placeholder { color: var(--t4); }
-.composer-toolbar { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.composer-toolbar { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .toolbar-spacer { flex: 1; }
 .pill-btn {
   display: inline-flex; align-items: center; gap: 7px;
-  min-height: 34px; padding: 0 14px;
+  min-height: 32px; padding: 0 13px;
   border-radius: 10px;
   background: #1b1b21; border: 1px solid var(--line);
   color: #c9c9d1; font-size: 12.5px; font-weight: 600;
@@ -275,7 +275,7 @@
 .pill-btn:hover:not(:disabled) { border-color: #33333e; color: #fff; }
 .pill-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .send-btn {
-  width: 40px; height: 40px; flex: none;
+  width: 36px; height: 36px; flex: none;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: 11px;
   border: 1px solid rgba(255, 255, 255, 0.14);
