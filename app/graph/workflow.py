@@ -11,6 +11,9 @@ from app.agents.search import SearchClient
 from app.agents.summarizer import summarizer_agent
 from app.agents.synthesizer import synthesizer_agent
 from app.core.llm import LLMClient
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class ResearchState(TypedDict, total=False):
@@ -175,6 +178,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
             query=state["query"],
             critique_feedback=state.get("critique_feedback", ""),
         )
+        logger.info("planner_done", sub_questions=len(sub_questions))
         return {"sub_questions": sub_questions}
 
     async def search_node(state: ResearchState) -> SearchUpdate:
@@ -184,6 +188,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
         if not questions:
             questions = [state.get("query", "").strip()]
         results = await search_client.run_search(questions)
+        logger.info("search_done", results=len(results), sub_questions=len(questions))
         return {"search_results": results}
 
     async def summarizer_node(state: ResearchState) -> SummarizerUpdate:
@@ -193,6 +198,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
             search_results=state.get("search_results", []),
         )
         merged = dedupe_semantic_facts([*state.get("facts", []), *fresh_facts])
+        logger.info("summarizer_done", fresh_facts=len(fresh_facts), total_facts=len(merged))
         return {"facts": merged}
 
     async def critic_node(state: ResearchState) -> CriticUpdate:
@@ -231,6 +237,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
             query=state["query"],
             facts=state.get("facts", []),
         )
+        logger.info("synthesizer_done", answer_chars=len(answer))
         return {"synthesized_answer": answer}
 
     async def finalize_node(state: ResearchState) -> FinalizeUpdate:
