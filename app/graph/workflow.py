@@ -13,6 +13,7 @@ from app.agents.summarizer import summarizer_agent
 from app.agents.synthesizer import synthesizer_agent
 from app.agents.verifier import verify_facts
 from app.core.llm import LLMClient
+from app.core.confidence import compute_confidence
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -34,6 +35,7 @@ class ResearchState(TypedDict, total=False):
     deep_research: bool
     budget_tracker: Any
     verification_stats: Dict[str, Any]
+    confidence_breakdown: Dict[str, Any]
 
 
 class PlannerUpdate(TypedDict):
@@ -58,6 +60,7 @@ class CriticUpdate(TypedDict):
     iteration: int
     confidence: float
     critique_feedback: str
+    confidence_breakdown: Dict[str, Any]
 
 
 class SynthesizerUpdate(TypedDict):
@@ -264,13 +267,14 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
             max_iterations=int(state.get("max_iterations", 3)),
         )
 
-        current_facts = state.get("facts", [])
-        fact_scores = [_safe_float(item.get("confidence", 0.0)) for item in current_facts if item.get("confidence") is not None]
-        source_scores = [source_reliability_score(str(item.get("source", ""))) for item in current_facts if item.get("source")]
-        fact_conf = sum(fact_scores) / len(fact_scores) if fact_scores else 0.0
-        source_conf = sum(source_scores) / len(source_scores) if source_scores else 0.0
-        critic_conf = _safe_float(critique.get("confidence", 0.0))
-        overall_conf = max(0.0, min(1.0, (0.45 * fact_conf) + (0.35 * critic_conf) + (0.20 * source_conf)))
+        # Confidence Engine (Phase 2.4) replaces the inline weighted formula.
+        breakdown = compute_confidence(
+            facts=state.get("facts", []),
+            critique=critique,
+            iteration=next_iteration,
+            max_iterations=int(state.get("max_iterations", 3)),
+        )
+        overall_conf = breakdown["overall"]
 
         improved = critique.get("improved_queries", [])
         critique_feedback = critique.get("reason", "")
@@ -282,6 +286,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
             "iteration": next_iteration,
             "confidence": overall_conf,
             "critique_feedback": critique_feedback,
+            "confidence_breakdown": breakdown,
         }
 
     async def synthesizer_node(state: ResearchState) -> SynthesizerUpdate:
