@@ -807,16 +807,16 @@ Phase 2 — Tier 1 features
 [x] 2.10 Full Observability Persistence — agent_events table (Feature 14)
 
 Phase 3 — Tier 2 features
-[ ] 3.1  Specialized Agent Workforce (2-3 roles to start) — requires 2.9
+[x] 3.1  Specialized Agent Workforce (2-3 roles to start) — requires 2.9
          isolation to actually satisfy Feature 02/03, not just prompts
-[ ] 3.2  Contradiction Engine
-[ ] 3.3  Durable Checkpointing + resume endpoint
-[ ] 3.4  Research Replay (/trace endpoint) — now joins agent_events too
-[ ] 3.5  Executive Report Builder + Decision Intelligence Layer
+[x] 3.2  Contradiction Engine
+[x] 3.3  Durable Checkpointing + resume endpoint
+[x] 3.4  Research Replay (/trace endpoint) — now joins agent_events too
+[x] 3.5  Executive Report Builder + Decision Intelligence Layer
          (options / recommendation / rationale / risk — Feature 18)
-[ ] 3.6  Evidence Explorer / claim inspector UI
-[ ] 3.7  Research Modes (quick/standard/deep)
-[ ] 3.8  Complete Research Memory Persistence (evidence, critic_reviews,
+[x] 3.6  Evidence Explorer / claim inspector UI
+[x] 3.7  Research Modes (quick/standard/deep)
+[x] 3.8  Complete Research Memory Persistence (evidence, critic_reviews,
          decisions, final_reports) — closes out Feature 06
 
 Phase 4 — Tier 3 (optional)

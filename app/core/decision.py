@@ -20,18 +20,40 @@ MAX_OPTIONS = 4
 MIN_OPTIONS_COMPARATIVE = 2
 
 
+def _url_to_axis(state: Dict[str, Any]) -> Dict[str, str]:
+    """source URL -> axis via search result sub_question + planner contracts."""
+    contract_axis: Dict[str, str] = {}
+    for q in state.get("sub_questions", []):
+        if isinstance(q, dict):
+            question = str(q.get("question", "")).strip()
+            axis = str(q.get("axis", "")).strip()
+            if question and axis:
+                contract_axis[question] = axis
+    url_axis: Dict[str, str] = {}
+    for result in state.get("search_results", []) or []:
+        url = str(result.get("url", "")).strip()
+        sub_q = str(result.get("sub_question", "")).strip()
+        if url and sub_q in contract_axis:
+            url_axis[url] = contract_axis[sub_q]
+    return url_axis
+
+
 def _verified_supporting_claims(
     option_axis: str,
-    facts: List[Dict[str, Any]],
+    state: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
-    """Verified facts whose text relates to the option's axis/keywords."""
+    """Verified facts attributed to the option's axis (URL-based attribution,
+    falling back to keyword overlap)."""
+    facts = state.get("facts", [])
+    url_axis = _url_to_axis(state)
     keywords = set(option_axis.lower().split())
     supporting = []
     for f in facts:
         if not f.get("verified"):
             continue
+        attributed_axis = url_axis.get(str(f.get("source", "")).strip(), "")
         claim_words = set(str(f.get("claim", "")).lower().split())
-        if keywords & claim_words:
+        if attributed_axis == option_axis or keywords & claim_words:
             supporting.append(f)
     return supporting
 
@@ -86,7 +108,7 @@ def build_decision_layer(
     options: List[Dict[str, Any]] = []
     for idx, axis in enumerate(axes[:MAX_OPTIONS]):
         label = chr(ord("A") + idx)
-        supporting = _verified_supporting_claims(axis, facts)
+        supporting = _verified_supporting_claims(axis, state)
         support_score = len(supporting)
         risk = _contradiction_penalty(label, contradictions)
         top_claim = supporting[0]["claim"] if supporting else ""
