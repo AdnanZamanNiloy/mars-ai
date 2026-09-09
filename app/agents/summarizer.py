@@ -10,8 +10,12 @@ from app.agents.evidence_utils import (
 )
 from app.core.llm import LLMClient, clamp_confidence
 from app.core.schemas import SummarizerFactsModel
+from app.core.cache import cache_key, get_cache
 
 logger = logging.getLogger(__name__)
+
+PROMPT_VERSION = "summarizer-v1"
+CACHE_TTL_SEC = 3600
 
 
 SUMMARIZER_SYSTEM_PROMPT = """
@@ -110,16 +114,38 @@ async def summarizer_agent(
         ". Keep claims concise, source-grounded, and normalized. Ignore weak, promotional, or opinion-blog sources."
     )
 
+    cache = get_cache(llm.settings)
+    key = cache_key(
+        "summarize_facts",
+        PROMPT_VERSION,
+        query,
+        tuple(sorted(item.get("url", "") for item in compact_results)),
+    )
     try:
-        payload = await llm.generate_json(
-            SUMMARIZER_SYSTEM_PROMPT,
-            user_prompt,
-            response_model=SummarizerFactsModel,
-        )
-        facts = payload.get("facts", []) if isinstance(payload, dict) else []
+        cached = cache.get(key)
     except Exception as exc:
-        logger.warning("[Summarizer] LLM call failed, using heuristic fallback", exc_info=exc)
-        facts = []
+        logger.warning("[Summarizer] cache read failed: %s", exc, exc_info=exc)
+        cached = None
+
+    if cached is not None:
+        logger.info("[Summarizer] cache hit (%s)", PROMPT_VERSION)
+        facts = cached
+    else:
+        logger.info("[Summarizer] cache miss (%s)", PROMPT_VERSION)
+        try:
+            payload = await llm.generate_json(
+                SUMMARIZER_SYSTEM_PROMPT,
+                user_prompt,
+                response_model=SummarizerFactsModel,
+            )
+            facts = payload.get("facts", []) if isinstance(payload, dict) else []
+        except Exception as exc:
+            logger.warning("[Summarizer] LLM call failed, using heuristic fallback", exc_info=exc)
+            facts = []
+        try:
+            cache.set(key, facts, expire=CACHE_TTL_SEC)
+        except Exception as exc:
+            logger.warning("[Summarizer] cache write failed, continuing uncached: %s", exc, exc_info=exc)
 
     cleaned: List[Dict[str, Any]] = []
     for fact in facts:

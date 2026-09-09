@@ -10,12 +10,15 @@ from typing import Any
 from urllib.parse import quote, urlparse
 
 import httpx
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 from app.core.config import Settings
 from app.agents.evidence_utils import source_reliability_score
+from app.core.cache import cache_key, get_cache
 
 logger = logging.getLogger(__name__)
+
+SEARCH_CACHE_TTL_SEC = 3600  # repeated sub-questions across runs are common
 
 # =============================================================================
 # DATA STRUCTURE
@@ -175,8 +178,8 @@ async def _fetch_content(url: str):
             r = await client.get(url)
             if r.status_code == 200:
                 return _clean_html(r.text)
-    except Exception:
-        return ""
+    except Exception as exc:
+        logger.warning("[Search] content fetch failed for %s: %s", url[:80], exc, exc_info=exc)
     return ""
 
 
@@ -203,26 +206,50 @@ class SearchClient:
         return results
 
     async def _search(self, query):
-        collected = []
+        settings = self.settings
 
-        async with self.semaphore:
-            collected.extend(await self._ddg_text(query))
-            collected.extend(await self._ddg_news(query))
-            collected.extend(await self._wiki(query))
+        async def _uncached_search():
+            collected = []
 
-        if not collected:
-            return []
+            async with self.semaphore:
+                collected.extend(await self._ddg_text(query))
+                collected.extend(await self._ddg_news(query))
+                collected.extend(await self._wiki(query))
 
-        ranked = _deduplicate_and_rank(collected, query)
+            if not collected:
+                return []
 
-        # fetch content
-        for r in ranked[:3]:
-            content = await _fetch_content(r.url)
-            if content:
-                r.content = content
-                r.content_length = len(content)
-                r.is_content_fetched = True
+            ranked = _deduplicate_and_rank(collected, query)
 
+            # Fetch content for the top results concurrently (independent I/O).
+            async def _attach(r):
+                content = await _fetch_content(r.url)
+                if content:
+                    r.content = content
+                    r.content_length = len(content)
+                    r.is_content_fetched = True
+
+            await asyncio.gather(*(_attach(r) for r in ranked[:3]))
+            return ranked
+
+        key = cache_key("search_query", _normalize_text(query))
+        try:
+            get_cache(settings).get(key)  # warm the disk cache read path
+            cached = get_cache(settings).get(key)
+        except Exception as exc:
+            logger.warning("[Search] cache read failed: %s", exc, exc_info=exc)
+            cached = None
+
+        if cached is not None:
+            logger.info("[Search] cache hit for query: %s", query[:60])
+            return cached
+
+        logger.info("[Search] cache miss for query: %s", query[:60])
+        ranked = await _uncached_search()
+        try:
+            get_cache(settings).set(key, ranked, expire=SEARCH_CACHE_TTL_SEC)
+        except Exception as exc:
+            logger.warning("[Search] cache write failed, continuing uncached: %s", exc, exc_info=exc)
         return ranked
 
     # =========================
@@ -234,7 +261,11 @@ class SearchClient:
             with DDGS() as ddgs:
                 return list(ddgs.text(query, max_results=8))
 
-        rows = await asyncio.to_thread(_search)
+        try:
+            rows = await asyncio.to_thread(_search)
+        except Exception as exc:
+            logger.warning("[Search] DDG text failed for query %r: %s", query[:60], exc, exc_info=exc)
+            return []
 
         return [
             SearchResult(
@@ -251,7 +282,11 @@ class SearchClient:
             with DDGS() as ddgs:
                 return list(ddgs.news(query, max_results=6))
 
-        rows = await asyncio.to_thread(_search)
+        try:
+            rows = await asyncio.to_thread(_search)
+        except Exception as exc:
+            logger.warning("[Search] DDG news failed for query %r: %s", query[:60], exc, exc_info=exc)
+            return []
 
         return [
             SearchResult(
@@ -289,5 +324,6 @@ class SearchClient:
                 ))
 
             return results
-        except:
+        except Exception as exc:
+            logger.warning("[Search] Wikipedia failed for query %r: %s", query[:60], exc, exc_info=exc)
             return []
