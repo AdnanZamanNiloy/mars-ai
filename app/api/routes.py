@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 import json
 from typing import Any, AsyncGenerator, Dict
@@ -61,35 +62,49 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
         yield event_line("progress", request_id=request_id, message="Query received")
 
         try:
-            async for snapshot in workflow.astream(state, stream_mode="values"):
-                RUNTIME_STATE[request_id] = snapshot
-                iteration = int(snapshot.get("iteration", 0))
+            # Outer ceiling on total request time — individual LLM/search
+            # timeouts don't bound the planner→search→summarize→critic loop.
+            async with asyncio.timeout(settings.research_timeout_sec):
+                async for snapshot in workflow.astream(state, stream_mode="values"):
+                    RUNTIME_STATE[request_id] = snapshot
+                    iteration = int(snapshot.get("iteration", 0))
 
-                if snapshot.get("sub_questions") and not emitted_plan:
-                    yield event_line("plan", items=plan_items_for_event(snapshot.get("sub_questions", [])))
-                    emitted_plan = True
+                    if snapshot.get("sub_questions") and not emitted_plan:
+                        yield event_line("plan", items=plan_items_for_event(snapshot.get("sub_questions", [])))
+                        emitted_plan = True
 
-                if snapshot.get("search_results"):
-                    yield event_line(
-                        "search_progress",
-                        snippets=len(snapshot["search_results"]),
-                    )
+                    if snapshot.get("search_results"):
+                        yield event_line(
+                            "search_progress",
+                            snippets=len(snapshot["search_results"]),
+                        )
 
-                if iteration != last_iteration and iteration > 0:
-                    critique = snapshot.get("critique", {})
-                    reason = critique.get("reason", "No reason provided")
-                    yield event_line("critic", iteration=iteration, reason=reason)
-                    last_iteration = iteration
+                    if iteration != last_iteration and iteration > 0:
+                        critique = snapshot.get("critique", {})
+                        reason = critique.get("reason", "No reason provided")
+                        yield event_line("critic", iteration=iteration, reason=reason)
+                        last_iteration = iteration
 
-                facts = snapshot.get("facts", [])
-                if len(facts) > emitted_findings:
-                    new_facts = facts[emitted_findings : emitted_findings + 3]
-                    findings = [
-                        {"claim": f.get("claim", ""), "source": f.get("source", "")}
-                        for f in new_facts
-                    ]
-                    yield event_line("findings", items=findings)
-                    emitted_findings = len(facts)
+                    facts = snapshot.get("facts", [])
+                    if len(facts) > emitted_findings:
+                        new_facts = facts[emitted_findings : emitted_findings + 3]
+                        findings = [
+                            {"claim": f.get("claim", ""), "source": f.get("source", "")}
+                            for f in new_facts
+                        ]
+                        yield event_line("findings", items=findings)
+                        emitted_findings = len(facts)
+        except TimeoutError:
+            # Don't leak the timed-out run's state snapshot.
+            RUNTIME_STATE.pop(request_id, None)
+            yield event_line(
+                "error",
+                message=(
+                    f"Research timed out after {int(settings.research_timeout_sec)}s. "
+                    "Try a narrower query or raise RESEARCH_TIMEOUT_SEC."
+                ),
+            )
+            return
         except Exception as exc:
             # Don't leak the failed run's state snapshot.
             RUNTIME_STATE.pop(request_id, None)
