@@ -776,11 +776,11 @@ Multi-tenant (users/projects)
 
 ```text
 Phase 0 — Critical fixes
-[ ] 0.1  Fix undefined PLANNER_SYSTEM_PROMPT
-[ ] 0.2  Reconcile Critic prompt/schema mismatch
-[ ] 0.3  Fix RUNTIME_STATE memory leak
-[ ] 0.4  Untrack research.db from git
-[ ] 0.5  Verify/migrate duckduckgo-search dependency
+[x] 0.1  Fix undefined PLANNER_SYSTEM_PROMPT
+[x] 0.2  Reconcile Critic prompt/schema mismatch
+[x] 0.3  Fix RUNTIME_STATE memory leak
+[x] 0.4  Untrack research.db from git
+[x] 0.5  Verify/migrate duckduckgo-search dependency
 
 Phase 1 — Tier 0 Foundation
 [ ] 1.1  Retry + circuit breaker on LLM calls
