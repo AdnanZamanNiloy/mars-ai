@@ -1,424 +1,487 @@
-import { useMemo, useRef, useState } from "react";
-import ClaimInspector from "./components/ClaimInspector";
-import FinalAnswerCard from "./components/FinalAnswerCard";
-import PipelineBar from "./components/PipelineBar";
-import SectionCard from "./components/SectionCard";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { fetchTrace, resumeResearch, startResearch } from "./api";
+import { MODE_META, loadMissions, removeMission, upsertMission } from "./lib";
+import Sidebar, { Planet } from "./components/Sidebar";
+import Composer from "./components/Composer";
+import { ErrorCard, LiveRunCard, MarsMessageShell, TypingRow, UserMessage } from "./components/Thread";
+import AnswerCard, { ReplayAnswerCard } from "./components/AnswerCard";
+import ClaimDrawer from "./components/ClaimDrawer";
+import IntelligencePanel from "./components/IntelligencePanel";
+import MissionsView from "./components/MissionsView";
+import EvidenceView from "./components/EvidenceView";
+import { IconChevronLeft, IconMenu } from "./components/icons";
 
-const EXAMPLES = [
+const EXAMPLE_QUERIES = [
+  "Should Bangladesh invest in nuclear or solar energy?",
   "What are the most credible small-language-model benchmarks in 2026?",
   "Compare open-source speech-to-text models that run efficiently on CPU.",
-  "What are the practical limits of free-tier LLM APIs for research automation?",
 ];
 
-export default function App() {
-  const [query, setQuery] = useState(EXAMPLES[0]);
-  const [requestId, setRequestId] = useState("");
-  const [progress, setProgress] = useState([]);
-  const [plan, setPlan] = useState([]);
-  const [loops, setLoops] = useState([]);
-  const [findings, setFindings] = useState([]);
-  const [searchSnippets, setSearchSnippets] = useState(0);
-  const [budget, setBudget] = useState(null);
-  const [report, setReport] = useState("");
-  const [confidence, setConfidence] = useState(null);
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState("");
-  const [activeStep, setActiveStep] = useState("planner");
-  const [mode, setMode] = useState("standard");
-  const [decisions, setDecisions] = useState([]);
-  const [selectedFinding, setSelectedFinding] = useState(null);
-  const activeController = useRef(null);
+let seq = 1;
+const nid = () => `m${Date.now()}-${seq++}`;
 
-  const canSubmit = useMemo(() => query.trim().length >= 5 && !running, [query, running]);
-
-  const topFindings = useMemo(() => findings.slice(0, 7), [findings]);
-
-  const finalAnswer = useMemo(() => extractFinalAnswer(report), [report]);
-
-  const abortRun = () => {
-    if (activeController.current) {
-      activeController.current.abort();
-      activeController.current = null;
-    }
+function blankRun(query, mode) {
+  return {
+    tempId: nid(),
+    runId: null,
+    query,
+    mode,
+    modeLabel: MODE_META[mode]?.label || mode,
+    startedAt: new Date().toISOString(),
+    started: true,
+    plan: [],
+    orchestration: {},
+    snippets: 0,
+    findings: [],
+    verifiedCount: 0,
+    critiques: [],
+    budget: null,
+    decisions: [],
+    report: "",
+    confidence: null,
+    done: false,
+    error: "",
+    resumable: false,
+    resuming: false,
+    aborted: false,
   };
+}
 
-  const runResearch = async (event) => {
-    event.preventDefault();
-    if (!canSubmit) return;
+export default function App() {
+  const [view, setView] = useState("workspace");
+  const [missions, setMissions] = useState(() => loadMissions());
+  const [messages, setMessages] = useState([]);
+  const [composer, setComposer] = useState("");
+  const [mode, setMode] = useState("standard");
+  const [running, setRunning] = useState(false);
+  const [selectedFinding, setSelectedFinding] = useState(null);
+  const [traceLog, setTraceLog] = useState([]);
+  const [intelCollapsed, setIntelCollapsed] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [replaying, setReplaying] = useState(false);
 
-    const controller = new AbortController();
-    activeController.current = controller;
+  const controllerRef = useRef(null);
+  const threadRef = useRef(null);
+  const runRef = useRef(null); // tempId of the in-flight run
 
-    setRunning(true);
-    setError("");
-    setRequestId("");
-    setProgress(["Connecting..."]);
-    setPlan([]);
-    setLoops([]);
-    setFindings([]);
-    setSearchSnippets(0);
-    setBudget(null);
-    setDecisions([]);
-    setSelectedFinding(null);
-    setReport("");
-    setConfidence(null);
-    setActiveStep("planner");
+  const saveMissions = useCallback((list) => setMissions(list), []);
 
-    try {
-      const response = await fetch("/api/research/stream", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: query.trim(), mode }),
-        signal: controller.signal,
-      });
+  useEffect(() => {
+    const el = threadRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages]);
 
-      if (!response.ok || !response.body) {
-        throw new Error(`Request failed (${response.status})`);
+  const patchRun = useCallback((tempId, patch) => {
+    setMessages((prev) =>
+      prev.map((m) => (m.kind === "run" && m.run.tempId === tempId ? { ...m, run: { ...m.run, ...patch } } : m))
+    );
+  }, []);
+
+  const pushTrace = useCallback((entry) => {
+    setTraceLog((prev) => {
+      if (entry.key) {
+        const idx = prev.findIndex((t) => t.key === entry.key);
+        if (idx !== -1) {
+          const next = [...prev];
+          next[idx] = { ...next[idx], ...entry };
+          return next;
+        }
       }
+      return [...prev.slice(-60), { at: new Date().toISOString(), kind: "active", ...entry }];
+    });
+  }, []);
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder("utf-8");
-      let buffer = "";
-
-      const applyEvent = (evt) => {
-        switch (evt.type) {
-          case "progress":
-            if (evt.request_id) {
-              setRequestId(evt.request_id);
+  const handleEvent = useCallback((tempId, evt) => {
+    switch (evt.type) {
+      case "progress":
+        if (evt.request_id) {
+          patchRun(tempId, { runId: evt.request_id });
+          setMessages((prev) => {
+            const msg = prev.find((m) => m.kind === "run" && m.run.tempId === tempId);
+            if (msg) {
+              saveMissions(upsertMission({
+                runId: evt.request_id, query: msg.run.query, mode: msg.run.mode,
+                status: msg.run.resuming ? "running" : "running", confidence: null, cost: null,
+              }));
             }
-            if (evt.message) {
-              setProgress((prev) => [...prev, evt.message]);
-            }
-            break;
-          case "plan":
-            setPlan(Array.isArray(evt.items) ? evt.items : []);
-            setActiveStep("planner");
-            break;
-          case "search_progress":
-            if (typeof evt.snippets === "number") {
-              setSearchSnippets(evt.snippets);
-            }
-            setActiveStep("search");
-            break;
-          case "critic":
-            if (evt.iteration) {
-              setLoops((prev) => [...prev, { iteration: evt.iteration, reason: evt.reason || "" }]);
-            }
-            setActiveStep("critic");
-            break;
-          case "findings":
-            if (Array.isArray(evt.items)) {
-              setFindings((prev) => [...prev, ...evt.items]);
-            }
-            setActiveStep("summarizer");
-            break;
-          case "budget":
-            setBudget({
-              cost: typeof evt.estimated_cost === "number" ? evt.estimated_cost : null,
-              limit: typeof evt.limit === "number" ? evt.limit : null,
-              calls: typeof evt.llm_calls === "number" ? evt.llm_calls : null,
-              overBudget: Boolean(evt.over_budget),
-            });
-            break;
-          case "decisions":
-            if (Array.isArray(evt.items)) {
-              setDecisions(evt.items);
-            }
-            break;
-          case "final_report":
-            setReport(evt.report || "");
-            if (typeof evt.confidence === "number") {
-              setConfidence(evt.confidence);
-            }
-            setActiveStep("synthesizer");
-            break;
-          case "error":
-            setError(evt.message || "Unknown stream error");
-            break;
-          default:
-            break;
+            return prev;
+          });
         }
-      };
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) {
-          buffer += decoder.decode();
-          break;
+        if (evt.message) pushTrace({ text: evt.message, kind: "active" });
+        break;
+      case "plan":
+        patchRun(tempId, {
+          plan: Array.isArray(evt.items) ? evt.items : [],
+          orchestration: evt.orchestration || {},
+        });
+        pushTrace({ text: `Strategy created (${(evt.items || []).length} agents)`, kind: "done" });
+        break;
+      case "search_progress":
+        if (typeof evt.snippets === "number") patchRun(tempId, { snippets: evt.snippets });
+        pushTrace({ key: "search", text: `Evidence gathered (${evt.snippets ?? 0} sources)`, kind: "active" });
+        break;
+      case "critic":
+        if (evt.iteration) {
+          setMessages((prev) => prev.map((m) =>
+            m.kind === "run" && m.run.tempId === tempId
+              ? { ...m, run: { ...m.run, critiques: [...m.run.critiques, { iteration: evt.iteration, reason: evt.reason || "" }] } }
+              : m
+          ));
+          pushTrace({ text: `Critic pass ${evt.iteration}: ${evt.reason || "reviewed"}`, kind: "done" });
         }
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          try {
-            applyEvent(JSON.parse(trimmed));
-          } catch {
-            // Ignore malformed chunks to keep stream resilient.
+        break;
+      case "findings":
+        if (Array.isArray(evt.items)) {
+          setMessages((prev) => prev.map((m) => {
+            if (m.kind !== "run" || m.run.tempId !== tempId) return m;
+            const findings = [...m.run.findings, ...evt.items];
+            return { ...m, run: { ...m.run, findings, verifiedCount: findings.filter((f) => f.verified === true).length } };
+          }));
+          pushTrace({ key: "findings", text: "Claims extracted", kind: "active" });
+        }
+        break;
+      case "budget":
+        patchRun(tempId, {
+          budget: {
+            cost: typeof evt.estimated_cost === "number" ? evt.estimated_cost : null,
+            limit: typeof evt.limit === "number" ? evt.limit : null,
+            calls: typeof evt.llm_calls === "number" ? evt.llm_calls : null,
+            overBudget: Boolean(evt.over_budget),
+          },
+        });
+        pushTrace({
+          key: "budget",
+          text: `Budget $${(evt.estimated_cost ?? 0).toFixed(4)}${evt.limit != null ? ` / $${evt.limit.toFixed(2)}` : ""}`,
+          kind: evt.over_budget ? "warn" : "active",
+        });
+        break;
+      case "decisions":
+        if (Array.isArray(evt.items)) patchRun(tempId, { decisions: evt.items });
+        pushTrace({ text: `${(evt.items || []).length} options evaluated`, kind: "done" });
+        break;
+      case "final_report":
+        setMessages((prev) => prev.map((m) => {
+          if (m.kind !== "run" || m.run.tempId !== tempId) return m;
+          const run = {
+            ...m.run,
+            report: evt.report || "",
+            confidence: typeof evt.confidence === "number" ? evt.confidence : null,
+            done: true,
+            resuming: false,
+          };
+          if (run.runId) {
+            saveMissions(upsertMission({
+              runId: run.runId, query: run.query, mode: run.mode,
+              status: "completed", confidence: run.confidence, cost: run.budget?.cost ?? null,
+            }));
           }
-        }
+          return { ...m, run };
+        }));
+        pushTrace({ key: "findings", text: "Claims extracted", kind: "done" });
+        pushTrace({ text: "Final report delivered", kind: "done" });
+        break;
+      case "error": {
+        const message = evt.message || "Unknown stream error";
+        const noKey = /LLM key|GROQ_API_KEY|HUGGINGFACE/i.test(message);
+        const resumable = !noKey && /timed out|failed/i.test(message);
+        setMessages((prev) => prev.map((m) => {
+          if (m.kind !== "run" || m.run.tempId !== tempId) return m;
+          const run = { ...m.run, error: message, resuming: false, resumable };
+          if (run.runId) {
+            saveMissions(upsertMission({
+              runId: run.runId, query: run.query, mode: run.mode,
+              status: resumable ? "resumable" : "failed", confidence: null, cost: run.budget?.cost ?? null,
+            }));
+          }
+          return { ...m, run };
+        }));
+        pushTrace({ text: message.slice(0, 90), kind: "warn" });
+        break;
       }
+      default:
+        break;
+    }
+  }, [patchRun, pushTrace, saveMissions]);
 
-      const trailing = buffer.trim();
-      if (trailing) {
-        try {
-          applyEvent(JSON.parse(trailing));
-        } catch {
-          // Ignore malformed trailing chunk.
-        }
+  const launch = useCallback(async (queryText, { resumeRun = null } = {}) => {
+    if (running) return;
+    const controller = new AbortController();
+    controllerRef.current = controller;
+
+    let tempId;
+    if (resumeRun) {
+      tempId = resumeRun.tempId;
+      patchRun(tempId, {
+        error: "", resumable: false, resuming: true, done: false,
+        findings: [], verifiedCount: 0, budget: null,
+      });
+      pushTrace({ text: `Resuming run ${resumeRun.runId.slice(0, 8)} from checkpoint`, kind: "active" });
+    } else {
+      const run = blankRun(queryText, mode);
+      tempId = run.tempId;
+      const at = new Date().toISOString();
+      setMessages((prev) => [
+        ...prev,
+        { id: nid(), kind: "user", text: queryText, at },
+        { id: nid(), kind: "run", run, at },
+      ]);
+      setTraceLog([]);
+      setSelectedFinding(null);
+      setView("workspace");
+    }
+
+    runRef.current = tempId;
+    setRunning(true);
+    try {
+      if (resumeRun) {
+        await resumeResearch({ runId: resumeRun.runId, signal: controller.signal, onEvent: (e) => handleEvent(tempId, e) });
+      } else {
+        await startResearch({ query: queryText, mode, signal: controller.signal, onEvent: (e) => handleEvent(tempId, e) });
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        setProgress((prev) => [...prev, "Mission aborted by user."]);
+        setMessages((prev) => prev.map((m) => {
+          if (m.kind !== "run" || m.run.tempId !== tempId) return m;
+          const run = { ...m.run, aborted: true, resuming: false };
+          if (run.runId) {
+            saveMissions(upsertMission({
+              runId: run.runId, query: run.query, mode: run.mode,
+              status: "aborted", confidence: null, cost: run.budget?.cost ?? null,
+            }));
+          }
+          return { ...m, run };
+        }));
+        pushTrace({ text: "Mission aborted by user", kind: "warn" });
       } else {
-        setError(err instanceof Error ? err.message : "Unknown stream error");
+        handleEvent(tempId, { type: "error", message: err instanceof Error ? err.message : "Unknown stream error" });
       }
     } finally {
-      activeController.current = null;
+      controllerRef.current = null;
+      runRef.current = null;
       setRunning(false);
     }
-  };
+  }, [running, mode, patchRun, pushTrace, handleEvent, saveMissions]);
+
+  const submitQuery = useCallback((text) => {
+    const v = text.trim();
+    if (v.length < 5 || running) return;
+    setComposer("");
+    launch(v);
+  }, [launch, running]);
+
+  const abortRun = useCallback(() => {
+    controllerRef.current?.abort();
+  }, []);
+
+  const resumeRun = useCallback((run) => {
+    if (running || !run.runId) return;
+    launch("", { resumeRun: run });
+  }, [launch, running]);
+
+  const openReplay = useCallback(async (runId) => {
+    if (replaying) return;
+    setReplaying(true);
+    try {
+      const trace = await fetchTrace(runId);
+      const mission = loadMissions().find((m) => m.runId === runId);
+      setMessages((prev) => [...prev, { id: nid(), kind: "replay", runId, trace, query: mission?.query || trace.query || "Replay", at: new Date().toISOString() }]);
+      const events = (trace.events || []).map((e) => ({
+        at: e.ended_at || e.started_at || new Date().toISOString(),
+        kind: e.event_type === "end" ? "done" : "active",
+        text: `${e.node} · ${e.event_type}`,
+      }));
+      setTraceLog(events.length > 0 ? events : [{ at: new Date().toISOString(), kind: "done", text: "Trace loaded — no node events recorded" }]);
+      setView("workspace");
+    } catch (err) {
+      setMessages((prev) => [...prev, {
+        id: nid(), kind: "notice", text: `Could not load replay: ${err instanceof Error ? err.message : "unknown error"}`,
+        at: new Date().toISOString(),
+      }]);
+    } finally {
+      setReplaying(false);
+    }
+  }, [replaying]);
+
+  const activeRun = [...messages].reverse().find((m) => m.kind === "run")?.run || null;
 
   return (
-    <div className="app-shell">
-      <header className="hero">
-        <p className="eyebrow">MARS</p>
-        <h1>Multi Agent Research System</h1>
-        <p className="sub">Fast, low-resource, citation-grounded research streaming.</p>
-      </header>
+    <div className="shell">
+      <Sidebar
+        view={view}
+        onNavigate={setView}
+        missions={missions}
+        activeRunId={activeRun?.runId}
+        onOpenMission={openReplay}
+        onNew={() => { setView("workspace"); setComposer(""); }}
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+      />
+      {sidebarOpen ? <button className="scrim" onClick={() => setSidebarOpen(false)} aria-label="Close menu" /> : null}
 
-      <main className="layout-grid">
-        <div className="main-column">
-          <section className="card input-panel">
-            <form onSubmit={runResearch}>
-              <label htmlFor="query" className="label-title">Research query</label>
-              <textarea
-                id="query"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Ask a research question..."
-                rows={4}
-              />
-
-              <div className="row mode-row">
-                <label className="label-title" htmlFor="mode">Mode</label>
-                <select
-                  id="mode"
-                  value={mode}
-                  onChange={(e) => setMode(e.target.value)}
-                  disabled={running}
-                >
-                  <option value="quick">Quick (2 agents, 1 pass)</option>
-                  <option value="standard">Standard (3 agents, up to 3 passes)</option>
-                  <option value="deep">Deep (5 agents, up to 5 passes)</option>
-                </select>
+      <div className="workspace-wrap">
+        <main className="workspace">
+          <header className="topbar">
+            <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
+              <IconMenu size={17} />
+            </button>
+            <div>
+              <h1>{view === "missions" ? "Missions" : view === "evidence" ? "Evidence" : "Command Center"}</h1>
+              <div className="crumb">
+                {activeRun ? `${activeRun.query.slice(0, 64)}${activeRun.query.length > 64 ? "…" : ""}` : "Multi-Agent Research System"}
               </div>
-
-              <div className="row">
-                <button type="submit" className="run-search-btn" disabled={!canSubmit}>
-                  Run Search
-                </button>
-                <button type="button" className="abort-mission-btn" onClick={abortRun} disabled={!running}>
-                  Abort Mission
-                </button>
-              </div>
-            </form>
-
-            <div className="chips">
-              {EXAMPLES.map((item) => (
-                <button key={item} type="button" className="chip" onClick={() => setQuery(item)} disabled={running}>
-                  {item}
-                </button>
-              ))}
             </div>
+            <span className="spacer" />
+            {activeRun?.runId ? <span className="tag tone-muted">run {activeRun.runId.slice(0, 8)}</span> : null}
+            {running ? <span className="tag tone-blue"><span className="dot live" /> live</span> : null}
+          </header>
 
-            {error ? <p className="error">Error: {error}</p> : null}
-          </section>
+          <div className="thread" ref={threadRef}>
+            <div className="thread-inner">
+              {view === "missions" ? (
+                <MissionsView
+                  missions={missions}
+                  onOpen={openReplay}
+                  onRemove={(runId) => saveMissions(removeMission(runId))}
+                  onNew={() => setView("workspace")}
+                />
+              ) : view === "evidence" ? (
+                <EvidenceView messages={messages} onInspect={setSelectedFinding} />
+              ) : messages.length === 0 ? (
+                <WelcomeHero onPick={setComposer} />
+              ) : (
+                messages.map((m) => <ThreadMessage
+                  key={m.id}
+                  message={m}
+                  running={running}
+                  selectedFinding={selectedFinding}
+                  onSelectFinding={setSelectedFinding}
+                  onResume={resumeRun}
+                />)
+              )}
+            </div>
+          </div>
 
-          <PipelineBar activeStep={activeStep} />
-
-          <FinalAnswerCard answer={finalAnswer} confidence={confidence} running={running} />
-
-          <SectionCard title="Findings" rightMeta={`${topFindings.length} shown`}>
-            {topFindings.length > 0 ? (
-              <div className="findings-grid">
-                {topFindings.map((item, idx) => {
-                  const domain = extractDomain(item.source || "");
-                  const trust = sourceTrustLevel(domain);
-                  const rowConfidence = clampPercent((item.confidence ?? confidence ?? 0.62) * 100 - idx * 4);
-
-                  return (
-                    <article
-                      key={`finding-${idx}`}
-                      className={`finding-card finding-clickable ${selectedFinding === item ? "is-selected" : ""}`}
-                      onClick={() => setSelectedFinding(selectedFinding === item ? null : item)}
-                    >
-                      <p className="finding-claim">{item.claim}</p>
-                      <div className="finding-meta">
-                        {item.source ? (
-                          <a href={item.source} target="_blank" rel="noopener noreferrer" className="finding-domain finding-link" onClick={(e) => e.stopPropagation()}>
-                            {domain || "unknown source"}
-                          </a>
-                        ) : (
-                          <span className="finding-domain">{domain || "unknown source"}</span>
-                        )}
-                        <span className={`source-badge ${trust.className}`}>{trust.label}</span>
-                        {typeof item.verified === "boolean" ? (
-                          <span className={`source-badge ${item.verified ? "badge-high" : "badge-low"}`}>
-                            {item.verified ? "verified" : "unverified"}
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className="confidence-bar" aria-label="confidence">
-                        <div className="confidence-bar-fill" style={{ width: `${rowConfidence}%` }} />
-                      </div>
-                    </article>
-                  );
-                })}
+          {view === "workspace" ? (
+            <div className="composer-zone">
+              <div className="composer-inner">
+                <Composer
+                  value={composer}
+                  onChange={setComposer}
+                  onSubmit={submitQuery}
+                  running={running}
+                  onAbort={abortRun}
+                  mode={mode}
+                  onModeChange={setMode}
+                  placeholder={messages.length === 0 ? "Ask a research question… (Enter to send)" : "Ask a follow-up or challenge the conclusion…"}
+                />
               </div>
-            ) : (
-              <p className="empty">No findings extracted yet.</p>
-            )}
-            {selectedFinding ? (
-              <ClaimInspector
-                finding={selectedFinding}
-                onClose={() => setSelectedFinding(null)}
-              />
-            ) : null}
-          </SectionCard>
-        </div>
-
-        <aside className="stream-column">
-          <SectionCard
-            title="Status"
-            rightMeta={requestId ? `Request ${requestId.slice(0, 8)}` : null}
-          >
-            <p className="status-line">
-              <span className={`status-dot ${running ? "is-running" : "is-idle"}`} />
-              {running ? "Running" : "Idle"}
-            </p>
-            {searchSnippets > 0 ? <p className="meta">Snippets retrieved: {searchSnippets}</p> : null}
-            {budget && budget.cost != null ? (
-              <p className={`meta ${budget.overBudget ? "budget-over" : ""}`}>
-                Est. cost: ${budget.cost.toFixed(4)}
-                {budget.limit != null ? ` / $${budget.limit.toFixed(2)}` : ""}
-                {budget.calls ? ` · ${budget.calls} LLM calls` : ""}
-                {budget.overBudget ? " · budget reached" : ""}
-              </p>
-            ) : null}
-          </SectionCard>
-
-          <SectionCard title="Progress" rightMeta={`${progress.length} updates`}>
-            {progress.length > 0 ? (
-              <ul className="list-plain">
-                {progress.map((item, idx) => (
-                  <li key={`progress-${idx}`}>{item}</li>
-                ))}
-              </ul>
-            ) : (
-              <p className="empty">No progress events yet.</p>
-            )}
-          </SectionCard>
-
-          <SectionCard title="Plan" initiallyCollapsed rightMeta={`${plan.length} items`}>
-            {plan.length > 0 ? (
-              <ul className="list-plain">
-                {plan.map((item, idx) => (
-                  <li key={`plan-${idx}`}>{item}</li>
-                ))}
-              </ul>
-            ) : (
-              <p className="empty">No plan generated yet.</p>
-            )}
-          </SectionCard>
-
-          {decisions.length > 0 ? (
-            <SectionCard title="Decision Layer" rightMeta={`${decisions.length} options`}>
-              <ul className="list-plain">
-                {decisions.map((o, idx) => (
-                  <li key={`decision-${idx}`} className={o.is_recommended ? "decision-recommended" : ""}>
-                    <strong>
-                      Option {o.option_label}{o.is_recommended ? " (Recommended)" : ""}:
-                    </strong>{" "}
-                    {o.description}
-                    {o.rationale ? <em> — {o.rationale}</em> : null}
-                    {o.risk_note ? <span className="meta"> Risk: {o.risk_note}</span> : null}
-                  </li>
-                ))}
-              </ul>
-            </SectionCard>
+            </div>
           ) : null}
+        </main>
 
-          <SectionCard title="Critique" initiallyCollapsed rightMeta={`${loops.length} loops`}>
-            {loops.length > 0 ? (
-              <ul className="list-plain">
-                {loops.map((item, idx) => (
-                  <li key={`loop-${idx}`}>
-                    Iteration {item.iteration}: {item.reason}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="empty">No critique loops yet.</p>
-            )}
-          </SectionCard>
+        {view === "workspace" ? (
+          <>
+            <IntelligencePanel
+              run={activeRun}
+              traceLog={traceLog}
+              collapsed={intelCollapsed}
+              onCollapse={() => setIntelCollapsed(true)}
+              onExpand={() => setIntelCollapsed(false)}
+              onResume={() => activeRun && resumeRun(activeRun)}
+              onReplay={openReplay}
+              replaying={replaying}
+            />
+            {intelCollapsed ? (
+              <button className="icon-btn intel-expand" onClick={() => setIntelCollapsed(false)} title="Expand panel" aria-label="Expand panel">
+                <IconChevronLeft size={15} />
+              </button>
+            ) : null}
+          </>
+        ) : null}
+      </div>
 
-          {report ? (
-            <SectionCard title="Final Report (Raw)" rightMeta={typeof confidence === "number" ? `Confidence ${confidence.toFixed(2)}` : null}>
-              {typeof confidence === "number" ? <p className="meta">Confidence: {confidence.toFixed(2)}</p> : null}
-              <pre className="report-raw">{report}</pre>
-            </SectionCard>
-          ) : null}
-
-          {!report && findings.length === 0 && !running ? <p className="empty">No output yet. Submit a query to begin.</p> : null}
-        </aside>
-      </main>
+      <ClaimDrawer finding={selectedFinding} onClose={() => setSelectedFinding(null)} />
     </div>
   );
 }
 
-function extractFinalAnswer(reportText) {
-  if (!reportText) return "";
-  const marker = "# Final Answer";
-  const evidenceMarker = "# Supporting Evidence";
-
-  const start = reportText.indexOf(marker);
-  if (start === -1) return "";
-  const bodyStart = start + marker.length;
-  const end = reportText.indexOf(evidenceMarker, bodyStart);
-  const section = end === -1 ? reportText.slice(bodyStart) : reportText.slice(bodyStart, end);
-  return section.trim();
+function ThreadMessage({ message, running, selectedFinding, onSelectFinding, onResume }) {
+  if (message.kind === "user") {
+    return <UserMessage text={message.text} time={fmtTime(message.at)} />;
+  }
+  if (message.kind === "run") {
+    const { run } = message;
+    return (
+      <MarsMessageShell time={fmtTime(message.at)}>
+        {!run.done && !run.error && !run.aborted ? <LiveRunCard run={run} /> : null}
+        {run.aborted && !run.done ? (
+          <div className="error-box" style={{ borderColor: "var(--line)", background: "var(--card)" }}>
+            Mission aborted by user before completion.
+          </div>
+        ) : null}
+        {run.error ? (
+          <ErrorCard message={run.error} resumable={run.resumable} resuming={run.resuming} onResume={() => onResume(run)} />
+        ) : null}
+        {run.done && run.report ? (
+          <AnswerCard run={run} selectedFinding={selectedFinding} onSelectFinding={onSelectFinding} />
+        ) : null}
+        {run.done && !run.report && !run.error ? (
+          <div className="error-box">The run finished without producing a report.</div>
+        ) : null}
+        {running && !run.done && !run.error ? (
+          <div style={{ marginTop: 14 }}><TypingRow /></div>
+        ) : null}
+      </MarsMessageShell>
+    );
+  }
+  if (message.kind === "replay") {
+    const { trace } = message;
+    return (
+      <MarsMessageShell time={fmtTime(message.at)}>
+        <div className="replay-banner">
+          <span className="tag tone-blue">replay</span>
+          <span>Read-only record of “{message.query}” · status: {trace.status}{(trace.plan || []).length ? ` · ${(trace.plan || []).length} planned questions` : ""}</span>
+        </div>
+        {trace.final_report ? (
+          <ReplayAnswerCard trace={trace} />
+        ) : (
+          <div className="error-box">This run has no final report recorded.</div>
+        )}
+      </MarsMessageShell>
+    );
+  }
+  if (message.kind === "notice") {
+    return (
+      <MarsMessageShell time={fmtTime(message.at)}>
+        <div className="error-box">{message.text}</div>
+      </MarsMessageShell>
+    );
+  }
+  return null;
 }
 
-function extractDomain(url) {
-  if (!url) return "";
+function WelcomeHero({ onPick }) {
+  return (
+    <div className="hero-card anim-rise">
+      <Planet size={88} ring />
+      <h2>What should MARS <span className="accent">investigate</span>?</h2>
+      <p>
+        A team of research agents plans the inquiry, gathers sources, verifies claims,
+        challenges conclusions and synthesizes a cited report — streaming live to this console.
+      </p>
+      <div className="hero-examples">
+        {EXAMPLE_QUERIES.map((q) => (
+          <button key={q} type="button" onClick={() => onPick(q)}>{q}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function fmtTime(iso) {
   try {
-    const parsed = new URL(url);
-    return parsed.hostname.replace(/^www\./, "");
+    return new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
   } catch {
     return "";
   }
-}
-
-function sourceTrustLevel(domain) {
-  const host = (domain || "").toLowerCase();
-  const highTrust = ["wikipedia.org", "arxiv.org"];
-  const lowTrust = ["reddit.com", "medium.com", "quora.com"];
-
-  if (highTrust.some((d) => host === d || host.endsWith(`.${d}`))) {
-    return { label: "high", className: "source-badge-high" };
-  }
-  if (lowTrust.some((d) => host === d || host.endsWith(`.${d}`))) {
-    return { label: "low", className: "source-badge-low" };
-  }
-  return { label: "medium", className: "source-badge-medium" };
-}
-
-function clampPercent(value) {
-  const n = Number(value);
-  if (Number.isNaN(n)) return 0;
-  return Math.max(8, Math.min(100, Math.round(n)));
 }

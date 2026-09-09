@@ -1,0 +1,218 @@
+/* MARS theme — design tokens, base, shared controls.
+ * Dark premium research console. System font stack: no webfont dependency. */
+
+:root {
+  --bg: #0d0d11;
+  --bg-soft: #121218;
+  --side: #101016;
+  --panel: #15151c;
+  --card: #191920;
+  --card-2: #1e1e26;
+  --line: #26262f;
+  --line-soft: #1d1d25;
+  --track: #23232c;
+
+  --t1: #f0eef4;
+  --t2: #c6c6ce;
+  --t3: #8b8b95;
+  --t4: #5d5d67;
+
+  --mars: #e0734a;
+  --mars-soft: #f0a276;
+  --mars-deep: #b4522f;
+  --mars-glow: rgba(224, 115, 74, 0.28);
+  --mint: #4cc38a;
+  --amber: #e5a54b;
+  --red: #e5604f;
+  --blue: #6aa8ff;
+
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+
+  --shadow-card: 0 14px 38px rgba(0, 0, 0, 0.32);
+  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--t1);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  color-scheme: dark;
+}
+
+::selection { background: rgba(224, 115, 74, 0.38); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: #2a2a33;
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track { background: transparent; }
+
+a { color: var(--mars-soft); }
+button { font-family: inherit; }
+
+/* ---------- shared controls ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 10px;
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  color: var(--t2);
+  font-size: 12.5px;
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.1s;
+}
+.btn:hover:not(:disabled) { background: #24242e; color: var(--t1); border-color: #34343f; }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 18px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-bottom-color: rgba(0, 0, 0, 0.35);
+  background: linear-gradient(180deg, #ec8052 0%, #cf5f36 100%);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  box-shadow: 0 6px 18px var(--mars-glow), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  transition: filter 0.15s, transform 0.1s;
+  white-space: nowrap;
+}
+.btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+.btn-primary:active:not(:disabled) { transform: translateY(1px); }
+.btn-primary:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+
+.btn-danger-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 10px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--t3);
+  font-size: 12.5px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+.btn-danger-ghost:hover:not(:disabled) { color: var(--red); border-color: rgba(229, 96, 79, 0.5); background: rgba(229, 96, 79, 0.06); }
+.btn-danger-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.chip {
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--t3);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+.chip:hover:not(:disabled) { border-color: rgba(224, 115, 74, 0.55); color: #fff; background: rgba(224, 115, 74, 0.06); }
+.chip:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(224, 115, 74, 0.32);
+  background: rgba(224, 115, 74, 0.08);
+  color: var(--mars-soft);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tag.tone-good { border-color: rgba(76, 195, 138, 0.35); background: rgba(76, 195, 138, 0.08); color: #7fe0ac; }
+.tag.tone-bad { border-color: rgba(229, 96, 79, 0.4); background: rgba(229, 96, 79, 0.08); color: #f08578; }
+.tag.tone-muted { border-color: var(--line); background: rgba(255, 255, 255, 0.03); color: var(--t3); }
+.tag.tone-blue { border-color: rgba(106, 168, 255, 0.35); background: rgba(106, 168, 255, 0.08); color: #9cc2ff; }
+
+.dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.dot.live { background: var(--mars); box-shadow: 0 0 10px rgba(224, 115, 74, 0.9); animation: pulse 1.6s ease-in-out infinite; }
+.dot.done { background: var(--mint); }
+.dot.idle { background: #55555f; }
+.dot.warn { background: var(--amber); }
+.dot.bad { background: var(--red); }
+
+.empty {
+  margin: 0;
+  padding: 18px 16px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-md);
+  color: var(--t4);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.error-box {
+  border: 1px solid rgba(229, 96, 79, 0.4);
+  border-left: 3px solid var(--red);
+  background: rgba(229, 96, 79, 0.07);
+  border-radius: var(--r-md);
+  padding: 13px 15px;
+  font-size: 13px;
+  color: #f0b9b2;
+}
+
+/* ---------- motion ---------- */
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+.anim-rise { animation: rise 0.35s ease both; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
