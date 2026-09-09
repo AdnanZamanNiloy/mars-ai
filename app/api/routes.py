@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.budget import BudgetTracker, current_budget
 from app.db.sqlite import (
     complete_research_run,
+    get_run_trace,
     record_event,
     save_agent_tasks,
     save_claims,
@@ -40,6 +41,19 @@ class ResearchRequest(BaseModel):
 @router.get("/health")
 async def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@router.get("/research/{run_id}/trace")
+async def research_trace(run_id: str, request: Request) -> Dict[str, Any]:
+    """Research Replay (3.4): ordered, joinable reconstruction of one run."""
+    settings = getattr(request.app.state, "settings", None)
+    if settings is None:
+        raise HTTPException(status_code=500, detail="Workflow is not initialized")
+
+    trace = await get_run_trace(settings.database_url, run_id)
+    if trace is None:
+        raise HTTPException(status_code=404, detail=f"Unknown run_id: {run_id}")
+    return trace
 
 
 @router.post("/research/stream")

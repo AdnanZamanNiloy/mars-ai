@@ -211,3 +211,60 @@ async def record_event(
             (run_id, node, event_type, payload, started_at or _now(), ended_at or _now()),
         )
         await db.commit()
+
+
+async def get_run_trace(database_path: str, run_id: str) -> dict | None:
+    """Research Replay (Phase 3.4): read-only reconstruction of a run.
+
+    Joins agent_events (node timing, retries, budget checks, failures) with
+    agent_tasks / sources / claims so the trace answers "why did this report
+    reach this confidence", not just "what was the answer".
+    """
+    async with aiosqlite.connect(database_path) as db:
+        db.row_factory = aiosqlite.Row
+
+        cur = await db.execute("SELECT * FROM research_runs WHERE id = ?", (run_id,))
+        run_row = await cur.fetchone()
+        if run_row is None:
+            return None
+
+        async def _all(query: str, params: tuple = ()) -> list:
+            c = await db.execute(query, params)
+            return [dict(r) for r in await c.fetchall()]
+
+        tasks = await _all(
+            "SELECT id, question, axis, search_type, priority, created_at "
+            "FROM agent_tasks WHERE run_id = ? ORDER BY id",
+            (run_id,),
+        )
+        sources = await _all(
+            "SELECT id, url, reliability_score, fetched_at "
+            "FROM sources WHERE run_id = ? ORDER BY id",
+            (run_id,),
+        )
+        claims = await _all(
+            "SELECT id, claim, source_url, confidence, verified, created_at "
+            "FROM claims WHERE run_id = ? ORDER BY id",
+            (run_id,),
+        )
+        events = await _all(
+            "SELECT id, node, event_type, payload, started_at, ended_at "
+            "FROM agent_events WHERE run_id = ? ORDER BY id",
+            (run_id,),
+        )
+
+        return {
+            "run_id": run_id,
+            "query": run_row["query"],
+            "status": run_row["status"],
+            "complexity": run_row["complexity"],
+            "agent_count": run_row["agent_count"],
+            "confidence": run_row["confidence"],
+            "estimated_cost": run_row["estimated_cost"],
+            "created_at": run_row["created_at"],
+            "completed_at": run_row["completed_at"],
+            "plan": tasks,
+            "sources": sources,
+            "claims": claims,
+            "events": events,
+        }
