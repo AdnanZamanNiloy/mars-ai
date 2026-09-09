@@ -61,9 +61,45 @@ CREATE TABLE IF NOT EXISTS agent_events (
     started_at TEXT,
     ended_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS evidence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES research_runs(id),
+    source_id INTEGER REFERENCES sources(id),
+    raw_snippet TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS critic_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES research_runs(id),
+    iteration INTEGER NOT NULL,
+    is_sufficient INTEGER,
+    reason TEXT,
+    confidence REAL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES research_runs(id),
+    option_label TEXT NOT NULL,
+    description TEXT NOT NULL,
+    is_recommended INTEGER,
+    rationale TEXT,
+    risk_note TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS final_reports (
+    run_id TEXT PRIMARY KEY REFERENCES research_runs(id),
+    report_markdown TEXT NOT NULL,
+    confidence REAL,
+    generated_at TEXT NOT NULL
+);
 """
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 async def init_db(database_path: str) -> None:
@@ -213,6 +249,90 @@ async def record_event(
         await db.commit()
 
 
+async def save_evidence(database_path: str, run_id: str, search_results: list) -> None:
+    """Evidence = the raw material claims were derived from (distinct from
+    the rewritten claims): one row per source with its raw snippet."""
+    if not search_results:
+        return
+    async with aiosqlite.connect(database_path) as db:
+        for item in search_results:
+            url = str(item.get("url", "")).strip()
+            snippet = str(item.get("snippet", "")).strip()
+            if not url or not snippet:
+                continue
+            cur = await db.execute(
+                "SELECT id FROM sources WHERE run_id = ? AND url = ? LIMIT 1",
+                (run_id, url),
+            )
+            row = await cur.fetchone()
+            source_id = row[0] if row else None
+            await db.execute(
+                "INSERT INTO evidence (run_id, source_id, raw_snippet, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (run_id, source_id, snippet, _now()),
+            )
+        await db.commit()
+
+
+async def save_critic_review(database_path: str, run_id: str, iteration: int, critique: dict) -> None:
+    """Persist EVERY critic iteration (not just the final verdict) — Replay
+    needs the actual back-and-forth, not only the outcome."""
+    if not isinstance(critique, dict):
+        return
+    async with aiosqlite.connect(database_path) as db:
+        await db.execute(
+            "INSERT INTO critic_reviews (run_id, iteration, is_sufficient, reason, confidence, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                run_id,
+                int(iteration),
+                1 if critique.get("is_sufficient") else 0,
+                str(critique.get("reason", "")),
+                float(critique.get("confidence", 0.0) or 0.0),
+                _now(),
+            ),
+        )
+        await db.commit()
+
+
+async def save_decisions(database_path: str, run_id: str, options: list) -> None:
+    """One row per strategic option from the Decision Layer (3.5)."""
+    rows = [
+        (
+            run_id,
+            str(o.get("option_label", "")).strip(),
+            str(o.get("description", "")).strip(),
+            1 if o.get("is_recommended") else 0,
+            str(o.get("rationale", "")),
+            str(o.get("risk_note", "")),
+            _now(),
+        )
+        for o in options
+        if isinstance(o, dict) and str(o.get("option_label", "")).strip() and str(o.get("description", "")).strip()
+    ]
+    if not rows:
+        return
+    async with aiosqlite.connect(database_path) as db:
+        await db.executemany(
+            "INSERT INTO decisions (run_id, option_label, description, is_recommended, rationale, risk_note, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        await db.commit()
+
+
+async def save_final_report(database_path: str, run_id: str, report_markdown: str, confidence: float) -> None:
+    """Canonical report row keyed by run_id (research_reports stays for
+    backward compatibility)."""
+    async with aiosqlite.connect(database_path) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO final_reports (run_id, report_markdown, confidence, generated_at) "
+            "VALUES (?, ?, ?, ?)",
+            (run_id, report_markdown, float(confidence), _now()),
+        )
+        await db.commit()
+
+
 async def get_run_trace(database_path: str, run_id: str) -> dict | None:
     """Research Replay (Phase 3.4): read-only reconstruction of a run.
 
@@ -252,6 +372,26 @@ async def get_run_trace(database_path: str, run_id: str) -> dict | None:
             "FROM agent_events WHERE run_id = ? ORDER BY id",
             (run_id,),
         )
+        critic_reviews = await _all(
+            "SELECT id, iteration, is_sufficient, reason, confidence, created_at "
+            "FROM critic_reviews WHERE run_id = ? ORDER BY iteration, id",
+            (run_id,),
+        )
+        evidence = await _all(
+            "SELECT id, source_id, raw_snippet, created_at "
+            "FROM evidence WHERE run_id = ? ORDER BY id",
+            (run_id,),
+        )
+        decisions = await _all(
+            "SELECT id, option_label, description, is_recommended, rationale, risk_note, created_at "
+            "FROM decisions WHERE run_id = ? ORDER BY id",
+            (run_id,),
+        )
+        cur = await db.execute(
+            "SELECT report_markdown, confidence, generated_at FROM final_reports WHERE run_id = ?",
+            (run_id,),
+        )
+        final_report_row = await cur.fetchone()
 
         return {
             "run_id": run_id,
@@ -267,4 +407,8 @@ async def get_run_trace(database_path: str, run_id: str) -> dict | None:
             "sources": sources,
             "claims": claims,
             "events": events,
+            "critic_reviews": critic_reviews,
+            "evidence": evidence,
+            "decisions": decisions,
+            "final_report": dict(final_report_row) if final_report_row else None,
         }

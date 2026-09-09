@@ -17,6 +17,9 @@ from app.db.sqlite import (
     record_event,
     save_agent_tasks,
     save_claims,
+    save_critic_review,
+    save_evidence,
+    save_final_report,
     save_report,
     save_sources,
     start_research_run,
@@ -192,6 +195,11 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                                     request_id,
                                     snapshot.get("search_results", []),
                                 ))
+                                await _persist(save_evidence(
+                                    settings.database_url,
+                                    request_id,
+                                    snapshot.get("search_results", []),
+                                ))
 
                         if iteration != last_iteration and iteration > 0:
                             critique = snapshot.get("critique", {})
@@ -201,6 +209,11 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                             await _persist(record_event(
                                 settings.database_url, request_id, "critic", "end",
                                 payload=json.dumps({"iteration": iteration, "is_sufficient": critique.get("is_sufficient", False)}),
+                            ))
+                            # Every critic iteration is durable (3.8) — Replay
+                            # shows the back-and-forth, not only the outcome.
+                            await _persist(save_critic_review(
+                                settings.database_url, request_id, iteration, critique,
                             ))
 
                         facts = snapshot.get("facts", [])
@@ -277,6 +290,10 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                     report=report,
                     confidence=confidence,
                 )
+                # Canonical per-run report row (3.8).
+                await _persist(save_final_report(
+                    settings.database_url, request_id, report, confidence,
+                ))
                 yield event_line("final_report", report=report, confidence=confidence)
             else:
                 yield event_line("final_report", report="No final report generated.", confidence=confidence)
