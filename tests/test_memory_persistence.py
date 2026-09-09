@@ -49,7 +49,7 @@ async def test_memory_tables_populated_and_joinable(tmp_path, monkeypatch):
     async def fake_summarizer(llm, query, search_results=None):
         return facts
 
-    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3):
+    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None):
         return {"is_sufficient": True, "reason": "complete", "improved_queries": [], "confidence": 0.9}
 
     async def fake_synthesizer(llm, query, facts=None):

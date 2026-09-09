@@ -76,7 +76,7 @@ async def test_raw_content_dropped_after_summarization(monkeypatch):
         captured_results.extend(search_results or [])
         return [{"claim": "fact", "source": search_results[0]["url"], "confidence": 0.9}] if search_results else []
 
-    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3):
+    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None):
         return {"is_sufficient": True, "reason": "ok", "improved_queries": [], "confidence": 0.9}
 
     async def fake_planner(llm, query, critique_feedback=""):

@@ -67,7 +67,7 @@ async def test_budget_cutoff_stops_loop_and_notes_limitation(monkeypatch):
 
     critic_calls = {"n": 0}
 
-    async def fake_critic(llm, query, facts, iteration, max_iterations):
+    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None):
         critic_calls["n"] += 1
         return {"is_sufficient": False, "reason": "not done", "improved_queries": ["more"], "confidence": 0.4}
 
