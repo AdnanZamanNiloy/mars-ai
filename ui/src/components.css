@@ -68,7 +68,7 @@
   padding: 20px 22px 22px;
   box-shadow: var(--shadow-card);
 }
-.answer-lead { margin: 2px 0 0; font-size: 14.5px; line-height: 1.65; color: #c9c9d1; max-width: 74ch; white-space: pre-wrap; }
+.answer-lead { margin: 2px 0 0; font-size: 14.5px; line-height: 1.65; color: #c9c9d1; white-space: pre-wrap; }
 
 .answer-cols { display: grid; grid-template-columns: 1.04fr 1fr; gap: 0 30px; margin-top: 22px; }
 .answer-cols h3 { font-size: 15.5px; font-weight: 650; margin: 0 0 14px; }
