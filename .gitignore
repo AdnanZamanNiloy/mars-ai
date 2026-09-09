@@ -22,6 +22,7 @@ venv/
 # Node / Vite
 frontend/node_modules/
 frontend/dist/
+frontend/.vite/
 
 # OS / editor noise
 .DS_Store
