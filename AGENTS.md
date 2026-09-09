@@ -29,25 +29,25 @@ API:             app/api/routes.py (the /api/research/stream route)
 Core utilities:  app/core/*.py (config, llm client, and whatever you add
                  for caching/budget/confidence/isolation per manual.md)
 Persistence:     app/db/sqlite.py
-Frontend:        ui/src/App.jsx consumes the NDJSON stream; components
-                 in ui/src/components/
+Frontend:        frontend/src/App.jsx consumes the NDJSON stream; components
+                 in frontend/src/components/
 ```
 
 Commands:
 
 ```bash
-# Setup
+# Setup (repo root; backend lives in backend/, frontend in frontend/)
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # fill in GROQ_API_KEY at minimum
-cd ui && npm install && cd ..
+pip install -r backend/requirements.txt
+cp backend/.env.example backend/.env   # fill in GROQ_API_KEY at minimum
+cd frontend && npm install && cd ..
 
 # Run
-uvicorn main:app --host 127.0.0.1 --port 8000 --reload
-cd ui && npm run dev
+cd backend && uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+cd frontend && npm run dev
 
-# Test (once tests/ exists per manual.md 1.8 — add this the moment it does)
-pytest tests/ -v
+# Test
+cd backend && pytest tests/ -v
 
 # Lint/format — repo has none configured yet. If you add ruff/black/mypy
 # (recommended, not yet done), wire the exact commands here so future
@@ -255,7 +255,7 @@ New agents added per `manual.md` (verifier, orchestrator, depth controller, etc.
 
 ### 4.9 — New NDJSON event types need a frontend case in the same commit
 
-`app/api/routes.py`'s `event_line()` and `ui/src/App.jsx`'s `applyEvent()` switch are an implicit contract. `applyEvent` has a `default: break` — a backend event type with no matching `case` is silently dropped, not an error. If you add an event type (e.g. `budget`, per `manual.md` 2.2), add the frontend case in the same commit, or it will look like the feature does nothing.
+`app/api/routes.py`'s `event_line()` and `frontend/src/App.jsx`'s `applyEvent()` switch are an implicit contract. `applyEvent` has a `default: break` — a backend event type with no matching `case` is silently dropped, not an error. If you add an event type (e.g. `budget`, per `manual.md` 2.2), add the frontend case in the same commit, or it will look like the feature does nothing.
 
 ---
 
@@ -295,7 +295,7 @@ Apply this checklist to every task, whether it's from `manual.md` or ad hoc:
 [ ] Any new setting is in Settings + .env.example, not a raw os.getenv()
 [ ] Any new DB table uses CREATE TABLE IF NOT EXISTS and doesn't break
     existing readers
-[ ] Any new NDJSON event type has a matching case in ui/src/App.jsx
+[ ] Any new NDJSON event type has a matching case in frontend/src/App.jsx
 [ ] Independent I/O calls use asyncio.gather, not a sequential loop,
     unless there's a stated reason otherwise
 [ ] Tests added/updated and passing (pytest tests/ -v, once tests/

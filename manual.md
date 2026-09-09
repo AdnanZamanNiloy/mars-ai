@@ -62,47 +62,40 @@ Actual structure (verified by cloning the repo):
 
 ```text
 mars-ai/
-├── main.py                       # FastAPI app, CORS, lifespan init
-├── requirements.txt               # fastapi, uvicorn, langgraph, httpx,
-│                                   # pydantic, aiosqlite, duckduckgo-search,
-│                                   # python-dotenv — no tests, no retry libs,
-│                                   # no rate limiting, no caching libs yet
-├── .env.example
-├── app/
-│   ├── agents/
-│   │   ├── planner.py             # 226 lines
-│   │   ├── search.py              # 292 lines — DDG + Wikipedia, no Tavily
-│   │   ├── summarizer.py          # 145 lines
-│   │   ├── critic.py              # 178 lines
-│   │   ├── synthesizer.py         # 108 lines — exists, not in README
-│   │   └── evidence_utils.py      # 247 lines — source scoring, dedup,
-│   │                               # domain filtering — exists, not in README
-│   ├── api/routes.py              # 122 lines — the /api/research/stream route
-│   ├── core/
-│   │   ├── config.py              # 44 lines — dataclass Settings
-│   │   └── llm.py                 # 133 lines — Groq + HF client, JSON extraction
-│   ├── db/sqlite.py                # 30 lines — single research_reports table
-│   └── graph/workflow.py          # 268 lines — LangGraph state machine
-└── ui/
+├── backend/
+│   ├── main.py                   # FastAPI app, lifespan init
+│   ├── requirements.txt           # fastapi, uvicorn, langgraph, httpx,
+│   │                               # pydantic, tenacity, slowapi, diskcache …
+│   ├── .env.example
+│   ├── app/
+│   │   ├── agents/               # planner, search, summarizer, critic,
+│   │   │                           # synthesizer, verifier, orchestrator
+│   │   ├── api/routes.py          # /api/research/stream, /trace, /resume
+│   │   ├── core/                 # config, llm, cache, budget, confidence …
+│   │   ├── db/sqlite.py           # research memory tables
+│   │   └── graph/workflow.py      # LangGraph state machine
+│   ├── scripts/                  # run_eval.py, self_diagnose.py, run_scenarios.py
+│   └── tests/                    # pytest suite + eval_queries.json
+└── frontend/
     └── src/
-        ├── App.jsx                # NDJSON stream consumer, per-event UI
-        └── components/            # PipelineBar, FinalAnswerCard, SectionCard
+        ├── App.jsx                # mission workspace, NDJSON stream consumer
+        └── components/            # answer card, intel panel, composer …
 ```
 
 Setup:
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # then fill in GROQ_API_KEY at minimum
-cd ui && npm install && cd ..
+pip install -r backend/requirements.txt
+cp backend/.env.example backend/.env   # then fill in GROQ_API_KEY at minimum
+cd frontend && npm install && cd ..
 ```
 
 Run:
 
 ```bash
-uvicorn main:app --host 127.0.0.1 --port 8000 --reload
-cd ui && npm run dev   # http://127.0.0.1:5173
+cd backend && uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+cd frontend && npm run dev   # http://127.0.0.1:5173
 ```
 
 Smoke test:
@@ -842,11 +835,11 @@ curl -N -X POST http://127.0.0.1:8000/api/research/stream \
   -H "Content-Type: application/json" \
   -d '{"query": "Compare open-source speech-to-text models for CPU inference"}'
 
-# Test suite (from Phase 1 onward)
-pytest tests/ -v
+# Test suite (from Phase 1 onward; run from backend/)
+cd backend && pytest tests/ -v
 
 # Check WAL mode (from Phase 1.5 onward)
-sqlite3 research.db "PRAGMA journal_mode;"
+sqlite3 backend/research.db "PRAGMA journal_mode;"
 
 # Check no runaway RUNTIME_STATE growth (from Phase 0.3 onward)
 # Phase 1 removed RUNTIME_STATE entirely (local snapshot capture), so this
@@ -854,7 +847,7 @@ sqlite3 research.db "PRAGMA journal_mode;"
 python -c "from app.graph import workflow; assert not hasattr(workflow, 'RUNTIME_STATE'); print('OK: no RUNTIME_STATE global')"
 
 # Frontend build
-cd ui && npm run build
+cd frontend && npm run build
 ```
 
 ---

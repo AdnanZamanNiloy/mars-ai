@@ -67,24 +67,21 @@ Supporting components:
 
 ```
 mars/
-├── main.py                   # Application entrypoint
-├── requirements.txt
-├── .env.example
-├── app/
-│   ├── agents/
-│   │   ├── planner.py
-│   │   ├── search.py
-│   │   ├── summarizer.py
-│   │   └── critic.py
-│   ├── api/
-│   │   └── routes.py
-│   ├── core/
-│   ├── db/
-│   │   └── sqlite.py
-│   └── graph/
-│       └── workflow.py
-└── ui/
-    └── src/
+├── backend/
+│   ├── main.py               # Application entrypoint
+│   ├── requirements.txt
+│   ├── .env.example
+│   ├── app/
+│   │   ├── agents/           # planner, search, summarizer, critic,
+│   │   │                       # synthesizer, verifier, orchestrator
+│   │   ├── api/              # routes: stream, trace, resume
+│   │   ├── core/             # config, llm, budget, confidence …
+│   │   ├── db/               # sqlite.py (research memory)
+│   │   └── graph/            # workflow.py (LangGraph state machine)
+│   ├── scripts/              # eval lab, self-diagnosis, scenarios
+│   └── tests/                # pytest suite
+└── frontend/
+    └── src/                  # React mission-workspace console
 ```
 
 ---
@@ -115,8 +112,8 @@ cd mars
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate        # On Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env
+pip install -r backend/requirements.txt
+cp backend/.env.example backend/.env
 ```
 
 ### 3. Configure environment variables
@@ -139,13 +136,13 @@ See the full [Configuration Reference](#configuration-reference) below.
 ### 4. Start the backend server
 
 ```bash
-uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+cd backend && uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 ### 5. Start the frontend
 
 ```bash
-cd ui
+cd frontend
 npm install
 npm run dev
 ```
@@ -269,7 +266,7 @@ MARS is designed to operate efficiently in constrained environments:
 
 ## Development Notes
 
-- The Vite dev server proxies `/api` requests to `http://127.0.0.1:8000` — configured in `ui/vite.config.js`
+- The Vite dev server proxies `/api` requests to `http://127.0.0.1:8000` — configured in `frontend/vite.config.js`
 - CORS is enabled for `http://127.0.0.1:5173` and `http://localhost:5173`
 - Backend hot-reload is enabled by default via `--reload` flag in the `uvicorn` start command
 

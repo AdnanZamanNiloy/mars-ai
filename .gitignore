@@ -20,8 +20,8 @@ venv/
 *.sqlite3
 
 # Node / Vite
-ui/node_modules/
-ui/dist/
+frontend/node_modules/
+frontend/dist/
 
 # OS / editor noise
 .DS_Store
