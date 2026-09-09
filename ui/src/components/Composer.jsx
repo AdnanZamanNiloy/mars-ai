@@ -44,26 +44,26 @@ export default function Composer({
   return (
     <div>
       <div className="composer">
-        <div className="composer-row">
-          <textarea
-            ref={areaRef}
-            rows={1}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            placeholder={placeholder || "Ask a research question… (Enter to send)"}
-            disabled={running}
-            aria-label="Research question"
-          />
+        <textarea
+          ref={areaRef}
+          rows={2}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          placeholder={placeholder || "Ask the research…"}
+          disabled={running}
+          aria-label="Research question"
+        />
+        <div className="composer-toolbar">
           <div className="mode-wrap" ref={menuRef}>
             <button
               type="button"
-              className="mode-btn"
+              className="pill-btn"
               onClick={() => setOpen((o) => !o)}
               disabled={running}
               title="Research mode"
@@ -88,13 +88,14 @@ export default function Composer({
               </div>
             ) : null}
           </div>
+          <span className="toolbar-spacer" />
           {running ? (
-            <button type="button" className="btn-danger-ghost" onClick={onAbort}>
-              <IconStop size={13} /> Abort
+            <button type="button" className="send-btn is-abort" onClick={onAbort} title="Abort run" aria-label="Abort run">
+              <IconStop size={15} />
             </button>
           ) : (
-            <button type="button" className="btn-primary" onClick={submit} disabled={value.trim().length < 5}>
-              Send <IconSend size={14} />
+            <button type="button" className="send-btn" onClick={submit} disabled={value.trim().length < 5} title="Send" aria-label="Send">
+              <IconSend size={16} />
             </button>
           )}
         </div>
