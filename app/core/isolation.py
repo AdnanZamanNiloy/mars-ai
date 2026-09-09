@@ -17,6 +17,30 @@ from app.agents.planner import SubQuestion
 
 ALLOWED_TOOL_PERMISSIONS = frozenset({"web_search", "wikipedia", "content_fetch"})
 
+# Specialist domain routing (Phase 3.1): the summarizer gets a domain
+# prompt variant based on the contract's `domain` field.
+SPECIALIST_DOMAINS = {
+    "economics": "financial",
+    "machine_learning": "technical",
+    "software": "technical",
+    "science": "technical",
+}
+SPECIALIST_ROLES = frozenset({"financial", "technical", "market", "general"})
+
+
+def specialist_role_for_domain(domain: str) -> str:
+    """Map a delegation contract's domain to a specialist role.
+
+    Market covers news/statistical comparison work across domains;
+    everything unrouted stays general.
+    """
+    d = (domain or "").strip().lower()
+    if d in SPECIALIST_DOMAINS:
+        return SPECIALIST_DOMAINS[d]
+    if d == "general":
+        return "general"
+    return "general"
+
 
 @dataclass
 class AgentContext:
@@ -51,6 +75,13 @@ class AgentContext:
 
     def stop_condition(self) -> str:
         return str(self.contract.get("stop_condition", "")).strip()
+
+    def specialist_role(self) -> str:
+        """Role selected by this contract's domain (3.1)."""
+        return specialist_role_for_domain(str(self.contract.get("domain", "general")))
+
+    def domain(self) -> str:
+        return str(self.contract.get("domain", "general")).strip()
 
 
 def build_contexts(

@@ -276,10 +276,14 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
         async def _summarize_context(ctx: AgentContext) -> List[Dict[str, Any]]:
             if not ctx.own_results:
                 return []
+            # Specialist routing (3.1): role comes from THIS context's
+            # delegation contract — each specialist sees only its own
+            # scoped context, never the shared ResearchState (2.9).
             return await summarizer_agent(
                 llm=llm,
                 query=state["query"],
                 search_results=ctx.own_results,
+                specialist_role=ctx.specialist_role(),
             )
 
         results = await asyncio.gather(*(_summarize_context(ctx) for ctx in contexts if ctx.own_results))

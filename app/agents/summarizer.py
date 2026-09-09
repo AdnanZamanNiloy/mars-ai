@@ -16,6 +16,36 @@ logger = get_logger(__name__)
 
 PROMPT_VERSION = "summarizer-v1"
 
+# Specialist prompt additions (Phase 3.1): routed by the delegation
+# contract's domain via AgentContext.specialist_role(). Each specialist
+# is the generic summarizer plus a domain evidence-preference overlay —
+# same output contract, same fallback path (AGENTS.md 4.7 shape kept).
+SPECIALIST_PROMPT_ADDITIONS = {
+    "financial": (
+        "\n\nSPECIALIST FOCUS — FINANCIAL:\n"
+        "Prefer primary financial sources: central-bank releases, IMF/World Bank\n"
+        "data, audited filings, regulatory disclosures. Prioritize figures with\n"
+        "units, periods, and currency. Treat analyst opinions as low-confidence\n"
+        "unless backed by reported numbers. Flag when costs are nominal vs real,\n"
+        "and note the fiscal year of any monetary figure."
+    ),
+    "technical": (
+        "\n\nSPECIALIST FOCUS — TECHNICAL:\n"
+        "Prefer primary technical sources: papers, specs, benchmarks, official\n"
+        "docs, reproducible results. Include methodology details (setup,\n"
+        "dataset, version) when extracting performance claims. Treat marketing\n"
+        "benchmarks as low-confidence. Preserve version numbers and dates."
+    ),
+    "market": (
+        "\n\nSPECIALIST FOCUS — MARKET:\n"
+        "Prefer market-research firms, industry associations, and government\n"
+        "statistics over news aggregation. Distinguish market size, share, and\n"
+        "growth-rate claims, and keep their scope (region, segment, period)\n"
+        "attached to the number. Note when sources disagree on scope."
+    ),
+    "general": "",  # no overlay for unrouted domains
+}
+
 
 SUMMARIZER_SYSTEM_PROMPT = """
 You are the Summarizer Agent in a multi-agent research pipeline.
@@ -86,14 +116,23 @@ Source content:
 """.strip()
 
 
+def specialist_system_prompt(role: str = "general") -> str:
+    """Generic summarizer prompt + the role's domain overlay (3.1)."""
+    overlay = SPECIALIST_PROMPT_ADDITIONS.get(role, "")
+    return SUMMARIZER_SYSTEM_PROMPT + overlay
+
+
 async def summarizer_agent(
     llm: LLMClient,
     query: str,
     search_results: List[Dict[str, str]],
+    specialist_role: str = "general",
 ) -> List[Dict[str, Any]]:
     quality_results = filter_search_results_by_domain(search_results)
     if not quality_results:
         return []
+
+    system_prompt = specialist_system_prompt(specialist_role)
 
     compact_results = [
         {
@@ -133,7 +172,7 @@ async def summarizer_agent(
         logger.info("[Summarizer] cache miss (%s)", PROMPT_VERSION)
         try:
             payload = await llm.generate_json(
-                SUMMARIZER_SYSTEM_PROMPT,
+                system_prompt,
                 user_prompt,
                 response_model=SummarizerFactsModel,
             )

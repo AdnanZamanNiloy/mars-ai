@@ -60,7 +60,7 @@ async def test_budget_cutoff_stops_loop_and_notes_limitation(monkeypatch):
                  "priority": 1, "depends_on": [], "coverage_goal": "", "domain": "general",
                  "minimum_sources": 2, "stop_condition": "enough"}]
 
-    async def fake_summarizer(llm, query, search_results):
+    async def fake_summarizer(llm, query, search_results=None, specialist_role="general"):
         # One summarizer call costs ~$0.0065 — 6x the $0.001 budget.
         tracker.record_llm_call("groq:llama-3.1-8b-instant", **big_usage)
         return [{"claim": "RAG is retrieval augmented generation is here", "source": "https://arxiv.org/a", "confidence": 0.9}]

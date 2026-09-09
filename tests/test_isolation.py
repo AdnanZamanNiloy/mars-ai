@@ -72,7 +72,7 @@ async def test_raw_content_dropped_after_summarization(monkeypatch):
     """DoD: raw `content` fields never reach shared state past summarization."""
     captured_results = []
 
-    async def fake_summarizer(llm, query, search_results=None):
+    async def fake_summarizer(llm, query, search_results=None, specialist_role="general"):
         captured_results.extend(search_results or [])
         return [{"claim": "fact", "source": search_results[0]["url"], "confidence": 0.9}] if search_results else []
 

@@ -46,7 +46,7 @@ async def test_memory_tables_populated_and_joinable(tmp_path, monkeypatch):
     async def fake_planner(llm, query, critique_feedback=""):
         return sub_questions
 
-    async def fake_summarizer(llm, query, search_results=None):
+    async def fake_summarizer(llm, query, search_results=None, specialist_role="general"):
         return facts
 
     async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None):
