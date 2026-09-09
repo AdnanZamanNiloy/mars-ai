@@ -1,10 +1,12 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
+from starlette.responses import JSONResponse
 
 from app.agents.search import SearchClient
-from app.api.routes import router as api_router
+from app.api.routes import limiter, router as api_router
 from app.core.config import get_settings
 from app.core.llm import LLMClient
 from app.db.sqlite import init_db
@@ -31,6 +33,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.state.limiter = limiter
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
@@ -38,6 +42,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"detail": f"Rate limit exceeded ({exc.detail}). Try again shortly."},
+    )
 
 
 @app.get("/")

@@ -6,13 +6,19 @@ from typing import Any, AsyncGenerator, Dict
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
+from app.core.config import get_settings
 from app.db.sqlite import save_report
 from app.core.logging import bind_request_context, unbind_request_context
 from app.graph.workflow import RUNTIME_STATE, build_initial_state
 
 
 router = APIRouter()
+
+# Applied to the expensive research stream only; other routes stay open.
+limiter = Limiter(key_func=get_remote_address)
 
 
 class ResearchRequest(BaseModel):
@@ -25,6 +31,7 @@ async def health() -> Dict[str, str]:
 
 
 @router.post("/research/stream")
+@limiter.limit(get_settings().rate_limit)
 async def stream_research(request: Request, payload: ResearchRequest) -> StreamingResponse:
     workflow = getattr(request.app.state, "workflow", None)
     settings = getattr(request.app.state, "settings", None)
