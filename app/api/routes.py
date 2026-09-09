@@ -14,6 +14,8 @@ from app.core.budget import BudgetTracker, current_budget
 from app.db.sqlite import (
     complete_research_run,
     get_run_trace,
+    load_state_for_resume,
+    mark_run_resumable_reset,
     record_event,
     save_agent_tasks,
     save_claims,
@@ -301,3 +303,128 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
             unbind_request_context()
 
     return StreamingResponse(event_stream(), media_type="application/x-ndjson")
+
+
+@router.post("/research/{run_id}/resume")
+@limiter.limit(get_settings().rate_limit)
+async def resume_research(run_id: str, request: Request) -> StreamingResponse:
+    """Durable checkpointing (3.3): resume a failed/timeout run from its
+    persisted rows instead of re-running the whole pipeline."""
+    workflow = getattr(request.app.state, "workflow", None)
+    settings = getattr(request.app.state, "settings", None)
+    if workflow is None or settings is None:
+        raise HTTPException(status_code=500, detail="Workflow is not initialized")
+
+    # Rebuild state from durable rows; None means not resumable.
+    state = await load_state_for_resume(settings.database_url, run_id)
+    if state is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Run {run_id} is not resumable (unknown run_id or status is not failed/timeout)",
+        )
+
+    # If the report already exists, the run has nothing left to do.
+    if state.get("final_report"):
+        raise HTTPException(status_code=409, detail=f"Run {run_id} already has a final report")
+
+    await mark_run_resumable_reset(settings.database_url, run_id)
+
+    request_id = run_id  # resume continues the SAME run identity
+    budget_tracker = BudgetTracker(settings)
+
+    def event_line(event_type: str, **data: Any) -> str:
+        return json.dumps({"type": event_type, **data}, ensure_ascii=True) + "\n"
+
+    async def resume_stream() -> AsyncGenerator[str, None]:
+        bind_request_context(request_id=request_id, resumed=True)
+        current_budget.set(budget_tracker)
+        last_iteration = int(state.get("iteration", 0))
+        emitted_findings = 0
+        saved_facts = 0
+        try:
+            yield event_line("progress", request_id=request_id, message=f"Resuming run {request_id[:8]}")
+
+            # Resume skips planner/search: sub-questions and sources already
+            # exist for this run, so re-enter at critic with existing evidence.
+            # Re-verify first — loaded facts may predate verification.
+            if not any("verified" in f for f in state.get("facts", [])):
+                from app.agents.verifier import verify_facts
+                state["facts"] = verify_facts(
+                    facts=state.get("facts", []),
+                    search_results=state.get("search_results", []),
+                )
+                await _persist_save(settings.database_url, request_id, state.get("facts", []))
+
+            last_snapshot: Dict[str, Any] = {}
+            try:
+                async with asyncio.timeout(settings.research_timeout_sec):
+                    async for snapshot in workflow.astream(state, stream_mode="values"):
+                        last_snapshot = snapshot
+                        iteration = int(snapshot.get("iteration", 0))
+
+                        facts = snapshot.get("facts", [])
+                        if len(facts) > emitted_findings:
+                            emitted_findings = len(facts)
+
+                        if iteration != last_iteration and iteration > last_iteration:
+                            critique = snapshot.get("critique", {})
+                            yield event_line("critic", iteration=iteration, reason=critique.get("reason", ""))
+                            last_iteration = iteration
+                            await _persist_record(settings.database_url, request_id, iteration, critique)
+
+                        if budget_tracker.total_tokens > 0:
+                            yield event_line("budget", **budget_tracker.snapshot())
+            except TimeoutError:
+                await _persist_complete(settings.database_url, request_id, "timeout", 0.0, budget_tracker.estimated_cost_usd)
+                yield event_line("error", message="Resumed run timed out. Try again or raise RESEARCH_TIMEOUT_SEC.")
+                return
+            except Exception as exc:
+                await _persist_complete(settings.database_url, request_id, "failed", 0.0, budget_tracker.estimated_cost_usd)
+                yield event_line("error", message=f"Resumed run failed: {exc}")
+                return
+
+            final_state = last_snapshot
+            report = str(final_state.get("final_report", ""))
+            confidence = float(final_state.get("confidence", 0.0))
+            await _persist_complete(settings.database_url, request_id, "completed", confidence, budget_tracker.estimated_cost_usd)
+            if report:
+                await _persist_report(settings.database_url, request_id, str(state.get("query", "")), report, confidence)
+                yield event_line("final_report", report=report, confidence=confidence)
+            else:
+                yield event_line("final_report", report="No final report generated.", confidence=confidence)
+        finally:
+            current_budget.set(None)
+            unbind_request_context()
+
+    return StreamingResponse(resume_stream(), media_type="application/x-ndjson")
+
+
+async def _persist_save(db: str, run_id: str, facts: list) -> None:
+    from app.db.sqlite import save_claims as _sc
+    try:
+        await _sc(db, run_id, facts)
+    except Exception as exc:
+        logger.warning("persistence_failed", error=str(exc), exc_info=exc)
+
+
+async def _persist_record(db: str, run_id: str, iteration: int, critique: dict) -> None:
+    try:
+        await record_event(db, run_id, "critic", "end", payload=json.dumps({"iteration": iteration}))
+        await save_critic_review(db, run_id, iteration, critique)
+    except Exception as exc:
+        logger.warning("persistence_failed", error=str(exc), exc_info=exc)
+
+
+async def _persist_complete(db: str, run_id: str, status: str, confidence: float, cost: float) -> None:
+    try:
+        await complete_research_run(db, run_id, status, confidence=confidence, estimated_cost=cost)
+    except Exception as exc:
+        logger.warning("persistence_failed", error=str(exc), exc_info=exc)
+
+
+async def _persist_report(db: str, run_id: str, query: str, report: str, confidence: float) -> None:
+    try:
+        await save_report(db, query, report, confidence)  # legacy table kept in sync
+        await save_final_report(db, run_id, report, confidence)  # canonical
+    except Exception as exc:
+        logger.warning("persistence_failed", error=str(exc), exc_info=exc)
