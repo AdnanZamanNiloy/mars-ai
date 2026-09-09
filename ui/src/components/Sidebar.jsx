@@ -26,8 +26,12 @@ const DOT = {
 export default function Sidebar({ view, onNavigate, missions, activeRunId, onOpenMission, onNew, open, onClose }) {
   return (
     <aside className={`sidebar${open ? " open" : ""}`}>
-      <div className="brand brand-mark">
+      <div className="brand">
         <Planet size={44} />
+        <div>
+          <div className="brand-name">MARS</div>
+          <div className="brand-sub">Multi-Agent Research System</div>
+        </div>
       </div>
 
       <button className="new-btn" onClick={() => { onNew(); onClose?.(); }}>

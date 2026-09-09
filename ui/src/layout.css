@@ -24,7 +24,6 @@
 }
 
 .brand { display: flex; align-items: center; gap: 12px; padding: 2px 6px 0; }
-.brand-mark { justify-content: center; padding: 4px 0 2px; }
 .brand-name { font-size: 17px; font-weight: 800; letter-spacing: 5px; }
 .brand-sub { font-size: 10.5px; line-height: 1.5; color: var(--t3); margin-top: 3px; }
 
@@ -153,7 +152,7 @@
   padding: 10px 26px 16px;
   background: linear-gradient(180deg, transparent, var(--bg) 30%);
 }
-.composer-inner { max-width: 1100px; margin: 0 auto; }
+.composer-inner { max-width: 860px; margin: 0 auto; }
 
 /* ---------- intelligence panel ---------- */
 
