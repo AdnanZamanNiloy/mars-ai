@@ -227,6 +227,8 @@ class SearchClient:
             ranked = _deduplicate_and_rank(collected, query)
 
             # Fetch content for the top results concurrently (independent I/O).
+            # Depth is setting-driven (search_fetch_top_n); fetched text is
+            # consumed by the summarizer, which releases it afterwards.
             async def _attach(r):
                 content = await _fetch_content(r.url)
                 if content:
@@ -234,7 +236,8 @@ class SearchClient:
                     r.content_length = len(content)
                     r.is_content_fetched = True
 
-            await asyncio.gather(*(_attach(r) for r in ranked[:3]))
+            fetch_n = max(1, int(getattr(settings, "search_fetch_top_n", 3) or 3))
+            await asyncio.gather(*(_attach(r) for r in ranked[:fetch_n]))
             return ranked
 
         key = cache_key("search_query", _normalize_text(query))

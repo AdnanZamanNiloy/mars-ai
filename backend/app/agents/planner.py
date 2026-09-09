@@ -113,8 +113,16 @@ RULE 1 — QUESTIONS, NOT TOPIC LABELS
   BAD  → "energy"
   GOOD → "cost per megawatt-hour of nuclear vs solar energy 2024"
 
-RULE 2 — COVER MULTIPLE AXES
-  Generate 3-5 sub_questions covering at least 2 distinct axes:
+RULE 2 — COVER IN PHASES, NOT JUST AXES
+  Plan as a researcher would: survey first, then drill down.
+  Phase A (survey): 1 question establishing landscape/definition.
+  Phase B (dimensions): 1-2 questions on the distinct angles the survey
+  would reveal (mechanism, application, history, outlook).
+  Phase C (evidence): at least 1 statistical question hunting numbers,
+  measurements, or official data — never leave a plan without one.
+  Phase D (challenge): at least 1 criticism question seeking limitations,
+  counter-evidence, or risks — this feeds the contradiction engine.
+  Cover at least 2 distinct axes overall:
   definition | mechanism | application | criticism | comparison |
   evidence | history | outlook
   Do not restate the same angle twice.
@@ -131,6 +139,11 @@ RULE 4 — PRIORITY AND DEPENDENCIES
   priority 1 → essential, must be searched first
   priority 2 → important, strengthens the answer
   priority 3 → nice to have
+  Priority is survival: the plan may be truncated to the top priorities
+  (small runs keep only 2-3 questions). Assign priority 1 to the survey
+  question AND the statistical question, priority 2 to criticism and key
+  dimensions, priority 3 to the rest — so truncation keeps evidence and
+  challenge angles, never just background.
   Use depends_on to list ids of sub-questions this one builds on.
 
 RULE 5 — RESPECT CRITIQUE FEEDBACK
@@ -143,6 +156,18 @@ RULE 6 — CLASSIFY THE QUERY
   query_scope:   narrow | broad
   domain must be one of: machine_learning | software | philosophy |
   economics | science | general
+
+RULE 7 — CONCRETE QUESTIONS ONLY
+  Every question must name a searchable noun AND the evidence it seeks.
+  BAD  → "overview of solar energy"
+  GOOD → "utility-scale solar installation costs per MW 2023-2025"
+  A question that could be answered from general knowledge alone is a
+  bad question — rewrite it to demand external evidence.
+
+RULE 8 — COVERAGE NOTE WITH TEETH
+  coverage_note must name the single most important angle the plan
+  does NOT cover and why it was deprioritized — or state "full
+  coverage: no major angle omitted" if that is genuinely true.
 
 ━━━ OUTPUT FORMAT ━━━
 
@@ -240,14 +265,11 @@ async def planner_agent(
     critique_feedback: str = ""
 ) -> List[Dict[str, Any]]:
 
-    normalized = normalize_text(query)
-
-    # =========================
-    # Fast Path
-    # =========================
-    if normalized.startswith(("what is", "define", "explain")) and not critique_feedback:
-        logger.info("[Planner] Using fast-path")
-        return fallback_plan(normalized)
+    # No fast-path bypass: every query goes through LLM planning with the
+    # methodology prompt above. The per-run cost governor caps spend, so the
+    # old "what is" shortcut only saved pennies while guaranteeing generic
+    # plans on the most common query shape. fallback_plan remains the
+    # failure fallback below — determinism on errors, never on bypass.
 
     # =========================
     # LLM Planning

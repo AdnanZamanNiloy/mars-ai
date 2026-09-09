@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     max_parallel_search: int = 2
     max_parallel_agents: int = 3  # hardware cap (8GB host) — raise only after load-testing
     max_iterations: int = 3
+    # Retrieval depth: how many top-ranked results per sub-question get full
+    # content fetched (was hardcoded 3). Each fetch is ~6KB cleaned text kept
+    # only until summarization — raise gradually, watching research latency.
+    search_fetch_top_n: int = 5
 
     # Timeouts (seconds)
     llm_timeout_sec: float = 25.0

@@ -113,3 +113,20 @@ def test_fallback_plan_structure():
     plan = fallback_plan("what is retrieval augmented generation")
     assert len(plan) == 4
     assert {q["axis"] for q in plan} == {"definition", "mechanism", "application", "criticism"}
+
+
+async def test_planner_uses_llm_for_what_is_query():
+    """No fast-path bypass: definitional queries get methodology-planned
+    questions, not the fixed template (the cost governor caps spend)."""
+    llm = FakeLLM(LLM_PLAN)
+    result = await planner_agent(llm, "What is retrieval augmented generation?")
+    assert result != fallback_plan("What is retrieval augmented generation?")
+    assert llm.calls, "planner bypassed the LLM on a definitional query"
+    assert len(result) == 2
+
+
+def test_planner_prompt_has_methodology_teeth():
+    prompt = planner_mod.PLANNER_SYSTEM_PROMPT
+    for marker in ("statistical", "criticism", "coverage_note", "CONCRETE"):
+        assert marker in prompt, f"methodology marker missing: {marker}"
+    assert "PLANNER_SYSTEM_PROMPT" not in prompt
