@@ -1,12 +1,22 @@
 import asyncio
 import json
+import logging
+import random
 import re
+import time
 from typing import Any, Dict, List
 
 import httpx
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 
 from app.core.config import Settings
 
+logger = logging.getLogger(__name__)
 
 HF_FALLBACK_MODELS: List[str] = [
     "Qwen/Qwen2.5-7B-Instruct",
@@ -15,9 +25,56 @@ HF_FALLBACK_MODELS: List[str] = [
 ]
 
 
+class CircuitBreakerOpen(RuntimeError):
+    """Raised when a provider is skipped because its circuit breaker is open."""
+
+
+class CircuitBreaker:
+    """Per-provider failure counter with a cooldown window.
+
+    After `threshold` consecutive failures the provider is skipped for
+    `cooldown_sec` instead of being retried on every call.
+    """
+
+    def __init__(self, threshold: int = 3, cooldown_sec: float = 60.0):
+        self.threshold = threshold
+        self.cooldown_sec = cooldown_sec
+        self._consecutive_failures = 0
+        self._opened_at: float | None = None
+
+    def is_open(self) -> bool:
+        if self._opened_at is None:
+            return False
+        if (time.monotonic() - self._opened_at) >= self.cooldown_sec:
+            # Cooldown elapsed — allow one probe attempt through.
+            self._reset()
+            return False
+        return True
+
+    def record_success(self) -> None:
+        self._reset()
+
+    def record_failure(self) -> None:
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= self.threshold and self._opened_at is None:
+            self._opened_at = time.monotonic()
+            logger.warning(
+                "[LLM] circuit breaker OPEN after %d consecutive failures (cooldown %.0fs)",
+                self._consecutive_failures,
+                self.cooldown_sec,
+            )
+
+    def _reset(self) -> None:
+        self._consecutive_failures = 0
+        self._opened_at = None
+
+
 class LLMClient:
     def __init__(self, settings: Settings):
         self.settings = settings
+        # Breaker state lives on the client instance (created once at app
+        # startup), is bounded, and resets on success — not per-request state.
+        self.groq_breaker = CircuitBreaker(threshold=3, cooldown_sec=60.0)
 
     async def generate_json(self, system_prompt: str, user_prompt: str, retries: int = 3) -> Dict[str, Any]:
         for attempt in range(retries):
@@ -31,17 +88,33 @@ class LLMClient:
         return {}
 
     async def _generate_with_fallback(self, system_prompt: str, user_prompt: str) -> str:
-        if self.settings.groq_api_key:
+        if self.settings.groq_api_key and not self.groq_breaker.is_open():
             try:
-                return await self._call_groq(system_prompt, user_prompt)
-            except Exception:
-                pass
+                text = await self._call_groq(system_prompt, user_prompt)
+                self.groq_breaker.record_success()
+                return text
+            except CircuitBreakerOpen:
+                raise
+            except Exception as exc:
+                self.groq_breaker.record_failure()
+                logger.warning(
+                    "[LLM] Groq call failed (breaker failures=%d), falling back: %s",
+                    self.groq_breaker._consecutive_failures,
+                    exc,
+                    exc_info=exc,
+                )
 
         if self.settings.huggingface_api_key:
             return await self._call_huggingface(system_prompt, user_prompt)
 
         raise RuntimeError("No LLM provider configured. Set GROQ_API_KEY or HUGGINGFACE_API_KEY.")
 
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(3),
+        wait=wait_exponential_jitter(initial=0.4, max=3),
+        retry=retry_if_exception_type((httpx.HTTPError, RuntimeError)),
+    )
     async def _call_groq(self, system_prompt: str, user_prompt: str) -> str:
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {
@@ -56,12 +129,20 @@ class LLMClient:
                 {"role": "user", "content": user_prompt},
             ],
         }
+        # Per-attempt timeout is llm_timeout_sec; the decorator bounds retries
+        # so total wait stays a small multiple of one attempt.
         async with httpx.AsyncClient(timeout=self.settings.llm_timeout_sec) as client:
             response = await client.post(url, headers=headers, json=payload)
             response.raise_for_status()
             data = response.json()
             return data["choices"][0]["message"]["content"]
 
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(2),
+        wait=wait_exponential_jitter(initial=0.4, max=2),
+        retry=retry_if_exception_type((httpx.HTTPError, RuntimeError)),
+    )
     async def _call_huggingface(self, system_prompt: str, user_prompt: str) -> str:
         headers = {
             "Authorization": f"Bearer {self.settings.huggingface_api_key}",
