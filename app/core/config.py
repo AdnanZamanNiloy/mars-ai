@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     # HuggingFace serverless inference — approximate blended rate
     hf_cost_per_1k_tokens: float = 0.0002
 
+    # Dynamic Research Depth (Phase 2.8)
+    sufficiency_threshold: float = 0.75
+    min_marginal_gain: float = 0.03
+    # Hard ceiling on expansion depth; 0 means "use MAX_ITERATIONS".
+    max_research_depth: int = 0
+
     @model_validator(mode="after")
     def _require_llm_provider(self) -> "Settings":
         if not (self.groq_api_key or self.huggingface_api_key):

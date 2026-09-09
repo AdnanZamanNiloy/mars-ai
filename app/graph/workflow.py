@@ -14,6 +14,7 @@ from app.agents.synthesizer import synthesizer_agent
 from app.agents.verifier import verify_facts
 from app.core.llm import LLMClient
 from app.core.confidence import compute_confidence
+from app.core import depth_controller
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -36,6 +37,7 @@ class ResearchState(TypedDict, total=False):
     budget_tracker: Any
     verification_stats: Dict[str, Any]
     confidence_breakdown: Dict[str, Any]
+    confidence_history: List[float]
 
 
 class PlannerUpdate(TypedDict):
@@ -117,6 +119,7 @@ def build_initial_state(
             "notes": plan.notes,
         },
         "deep_research": plan.deep_research,
+        "confidence_history": [],
     }
 
 
@@ -187,6 +190,11 @@ def build_markdown_report(state: ResearchState) -> str:
     tracker = state.get("budget_tracker")
     if tracker is not None and tracker.over_budget:
         limitations.append(tracker.limitation_note())
+
+    # Dynamic Research Depth (2.8): name an early stop on marginal gain.
+    early_stop_note = depth_controller.stop_reason(state)
+    if early_stop_note:
+        limitations.append(early_stop_note)
 
     limitations = [
         *limitations,
@@ -287,6 +295,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
             "confidence": overall_conf,
             "critique_feedback": critique_feedback,
             "confidence_breakdown": breakdown,
+            "confidence_history": [*state.get("confidence_history", []), overall_conf],
         }
 
     async def synthesizer_node(state: ResearchState) -> SynthesizerUpdate:
@@ -306,24 +315,18 @@ def create_workflow(llm: LLMClient, search_client: SearchClient):
     def route_after_critic(state: ResearchState) -> str:
         critique = state.get("critique", {})
         is_sufficient = bool(critique.get("is_sufficient", False))
-        min_quality_iterations = 3
-        max_iterations = int(state.get("max_iterations", 3))
-        iteration = int(state.get("iteration", 0))
 
         if is_sufficient:
             return "synthesizer"
 
-        # Cost Governor (2.2): over budget → stop expanding, finalize with
-        # a limitations note instead of exceeding the cap.
-        tracker = state.get("budget_tracker")
-        if tracker is not None and tracker.over_budget:
-            logger.info("budget_cutoff", cost=tracker.estimated_cost_usd, limit=tracker.limit_usd)
-            return "synthesizer"
-
-        quality_ceiling = max(max_iterations, min_quality_iterations)
-        if iteration >= quality_ceiling:
-            return "synthesizer"
-        return "planner"
+        # Dynamic Research Depth (2.8) replaces the old two-condition check:
+        # decides expand vs finalize from axis coverage, marginal confidence
+        # gain, remaining budget, and the iteration/depth ceiling.
+        decision = depth_controller.decide(state)
+        logger.info("depth_decision", decision=decision, iteration=int(state.get("iteration", 0)))
+        if decision == "expand":
+            return "planner"
+        return "synthesizer"
 
     graph.add_node("planner", planner_node)
     graph.add_node("search", search_node)
