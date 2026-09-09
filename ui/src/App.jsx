@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import ClaimInspector from "./components/ClaimInspector";
 import FinalAnswerCard from "./components/FinalAnswerCard";
 import PipelineBar from "./components/PipelineBar";
 import SectionCard from "./components/SectionCard";
@@ -25,6 +26,7 @@ export default function App() {
   const [activeStep, setActiveStep] = useState("planner");
   const [mode, setMode] = useState("standard");
   const [decisions, setDecisions] = useState([]);
+  const [selectedFinding, setSelectedFinding] = useState(null);
   const activeController = useRef(null);
 
   const canSubmit = useMemo(() => query.trim().length >= 5 && !running, [query, running]);
@@ -57,6 +59,7 @@ export default function App() {
     setSearchSnippets(0);
     setBudget(null);
     setDecisions([]);
+    setSelectedFinding(null);
     setReport("");
     setConfidence(null);
     setActiveStep("planner");
@@ -248,17 +251,26 @@ export default function App() {
                   const rowConfidence = clampPercent((item.confidence ?? confidence ?? 0.62) * 100 - idx * 4);
 
                   return (
-                    <article key={`finding-${idx}`} className="finding-card">
+                    <article
+                      key={`finding-${idx}`}
+                      className={`finding-card finding-clickable ${selectedFinding === item ? "is-selected" : ""}`}
+                      onClick={() => setSelectedFinding(selectedFinding === item ? null : item)}
+                    >
                       <p className="finding-claim">{item.claim}</p>
                       <div className="finding-meta">
                         {item.source ? (
-                          <a href={item.source} target="_blank" rel="noopener noreferrer" className="finding-domain finding-link">
+                          <a href={item.source} target="_blank" rel="noopener noreferrer" className="finding-domain finding-link" onClick={(e) => e.stopPropagation()}>
                             {domain || "unknown source"}
                           </a>
                         ) : (
                           <span className="finding-domain">{domain || "unknown source"}</span>
                         )}
                         <span className={`source-badge ${trust.className}`}>{trust.label}</span>
+                        {typeof item.verified === "boolean" ? (
+                          <span className={`source-badge ${item.verified ? "badge-high" : "badge-low"}`}>
+                            {item.verified ? "verified" : "unverified"}
+                          </span>
+                        ) : null}
                       </div>
                       <div className="confidence-bar" aria-label="confidence">
                         <div className="confidence-bar-fill" style={{ width: `${rowConfidence}%` }} />
@@ -270,6 +282,12 @@ export default function App() {
             ) : (
               <p className="empty">No findings extracted yet.</p>
             )}
+            {selectedFinding ? (
+              <ClaimInspector
+                finding={selectedFinding}
+                onClose={() => setSelectedFinding(null)}
+              />
+            ) : null}
           </SectionCard>
         </div>
 

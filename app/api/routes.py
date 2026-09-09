@@ -226,7 +226,16 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                         if len(facts) > emitted_findings:
                             new_facts = facts[emitted_findings : emitted_findings + 3]
                             findings = [
-                                {"claim": f.get("claim", ""), "source": f.get("source", "")}
+                                {
+                                    "claim": f.get("claim", ""),
+                                    "source": f.get("source", ""),
+                                    # Claim Inspector (3.6) detail fields —
+                                    # harmless when absent pre-verification.
+                                    "verified": f.get("verified"),
+                                    "verification_score": f.get("verification_score"),
+                                    "verification_reason": f.get("verification_reason"),
+                                    "confidence": f.get("confidence"),
+                                }
                                 for f in new_facts
                             ]
                             yield event_line("findings", items=findings)

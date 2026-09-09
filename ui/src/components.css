@@ -258,3 +258,55 @@
   border-left: 3px solid #22a06b;
   padding-left: 0.5rem;
 }
+
+.finding-clickable {
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.finding-clickable:hover {
+  border-color: var(--accent, #4f6df5);
+}
+
+.finding-clickable.is-selected {
+  border-color: var(--accent, #4f6df5);
+  box-shadow: 0 0 0 1px var(--accent, #4f6df5);
+}
+
+.claim-inspector {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border, #d0d5dd);
+  border-radius: 8px;
+  background: var(--surface-alt, #f8fafc);
+}
+
+.claim-inspector-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.claim-inspector-close {
+  background: none;
+  border: none;
+  font-size: 1.1rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.claim-inspector-claim {
+  margin: 0.25rem 0 0.5rem;
+  font-weight: 500;
+}
+
+.claim-verification.is-verified {
+  color: #22a06b;
+  font-weight: 600;
+}
+
+.claim-verification.is-unverified {
+  color: #d97706;
+  font-weight: 600;
+}
