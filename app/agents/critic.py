@@ -1,12 +1,12 @@
 from typing import Any, Dict, List
 
-import logging
+from app.core.logging import get_logger
 
 from app.agents.evidence_utils import dedupe_semantic_facts, filter_facts_by_domain
 from app.core.llm import LLMClient, clamp_confidence
 from app.core.schemas import CriticVerdictModel
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 CRITIC_SYSTEM_PROMPT = """

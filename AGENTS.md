@@ -67,7 +67,7 @@ curl -N -X POST http://127.0.0.1:8000/api/research/stream \
 These are real bugs found by reading the code, not hypotheticals. Each one below is turned into a standing rule in Section 4. Keep this list updated — when you fix a bug or find a new one, add it here with the same format, so the next session doesn't reintroduce it.
 
 ```text
-[FIXED or FIXING per manual.md 0.1] app/agents/planner.py
+[FIXED — Phase 0 task 0.1, commit f225b3c] app/agents/planner.py
   PLANNER_SYSTEM_PROMPT was referenced but never defined. Every LLM
   planning call raised NameError, caught by a broad `except Exception`,
   silently falling back to a fixed 4-question template. The planner
@@ -75,17 +75,18 @@ These are real bugs found by reading the code, not hypotheticals. Each one below
   nothing detected it. Root cause: no import-time check, no test, and
   an exception handler broad enough to hide a NameError.
 
-[FIXED or FIXING per manual.md 0.2] app/agents/critic.py
+[FIXED — Phase 0 task 0.2, commit d878d07] app/agents/critic.py
   CRITIC_SYSTEM_PROMPT described one JSON schema; the code that parsed
   the LLM's response read a different, incompatible schema. Root
   cause: the prompt and the parser were edited independently and never
   cross-checked against each other.
 
-[FIXED or FIXING per manual.md 0.3] app/graph/workflow.py, app/api/routes.py
+[FIXED — Phase 0 task 0.3; fully removed in Phase 1] app/graph/workflow.py, app/api/routes.py
   RUNTIME_STATE, a module-level dict keyed by request_id, was written
   to on every request and never cleaned up — an unbounded memory leak.
   Root cause: global mutable state used for what should have been a
-  local/scoped value.
+  local/scoped value. Phase 1 replaced it with a local `last_snapshot`
+  variable in event_stream(); the global no longer exists.
 
 [GAP per manual.md 0.5] app/agents/search.py
   Multiple bare `except: return []` / `except: return ""` blocks

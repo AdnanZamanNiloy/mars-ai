@@ -1,7 +1,6 @@
 import asyncio
 import json
-import logging
-import random
+from app.core.logging import get_logger
 import re
 import time
 from typing import Any, Dict, List, Type
@@ -17,17 +16,13 @@ from tenacity import (
 
 from app.core.config import Settings
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 HF_FALLBACK_MODELS: List[str] = [
     "Qwen/Qwen2.5-7B-Instruct",
     "HuggingFaceH4/zephyr-7b-beta",
     "mistralai/Mixtral-8x7B-Instruct-v0.1",
 ]
-
-
-class CircuitBreakerOpen(RuntimeError):
-    """Raised when a provider is skipped because its circuit breaker is open."""
 
 
 class CircuitBreaker:
@@ -98,9 +93,12 @@ class LLMClient:
                     validated = response_model.model_validate(payload)
                     return validated.model_dump()
                 return payload
-            except Exception:
+            except Exception as exc:
                 if attempt == retries - 1:
                     raise
+                logger.warning(
+                    "[LLM] attempt %d/%d failed, retrying: %s", attempt + 1, retries, exc, exc_info=exc
+                )
                 await asyncio.sleep(0.7 * (attempt + 1))
         return {}
 
@@ -110,8 +108,6 @@ class LLMClient:
                 text = await self._call_groq(system_prompt, user_prompt)
                 self.groq_breaker.record_success()
                 return text
-            except CircuitBreakerOpen:
-                raise
             except Exception as exc:
                 self.groq_breaker.record_failure()
                 logger.warning(

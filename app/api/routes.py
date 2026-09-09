@@ -12,7 +12,7 @@ from slowapi.util import get_remote_address
 from app.core.config import get_settings
 from app.db.sqlite import save_report
 from app.core.logging import bind_request_context, unbind_request_context
-from app.graph.workflow import RUNTIME_STATE, build_initial_state
+from app.graph.workflow import build_initial_state
 
 
 router = APIRouter()
@@ -74,9 +74,12 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
             try:
                 # Outer ceiling on total request time — individual LLM/search
                 # timeouts don't bound the planner→search→summarize→critic loop.
+                # `last_snapshot` is scoped to this request's coroutine — no
+                # module-level state, so nothing to leak.
+                last_snapshot: Dict[str, Any] = {}
                 async with asyncio.timeout(settings.research_timeout_sec):
                     async for snapshot in workflow.astream(state, stream_mode="values"):
-                        RUNTIME_STATE[request_id] = snapshot
+                        last_snapshot = snapshot
                         iteration = int(snapshot.get("iteration", 0))
 
                         if snapshot.get("sub_questions") and not emitted_plan:
@@ -105,8 +108,6 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                             yield event_line("findings", items=findings)
                             emitted_findings = len(facts)
             except TimeoutError:
-                # Don't leak the timed-out run's state snapshot.
-                RUNTIME_STATE.pop(request_id, None)
                 yield event_line(
                     "error",
                     message=(
@@ -116,8 +117,6 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 )
                 return
             except Exception as exc:
-                # Don't leak the failed run's state snapshot.
-                RUNTIME_STATE.pop(request_id, None)
                 message = str(exc)
                 if "No LLM provider configured" in message:
                     yield event_line(
@@ -131,8 +130,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                     yield event_line("error", message=f"Research workflow failed: {message}")
                 return
 
-            # TODO(phase-1): replace RUNTIME_STATE global with local snapshot capture
-            final_state: Dict[str, Any] = RUNTIME_STATE.pop(request_id, {})
+            final_state: Dict[str, Any] = last_snapshot
             report = str(final_state.get("final_report", ""))
             confidence = float(final_state.get("confidence", 0.0))
 

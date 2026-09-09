@@ -1,0 +1,84 @@
+"""Route-level behavior: per-request timeout (1.3) and rate limiting (1.7)."""
+import asyncio
+
+import httpx
+import pytest
+from fastapi import FastAPI
+
+from app.api.routes import limiter, router as api_router
+from app.core.config import Settings
+
+
+class StubSlowWorkflow:
+    """A workflow that hangs longer than the request timeout."""
+
+    def __init__(self, delay: float):
+        self.delay = delay
+
+    async def astream(self, state, stream_mode=None):
+        await asyncio.sleep(self.delay)
+        yield {}
+
+
+class StubFastWorkflow:
+    async def astream(self, state, stream_mode=None):
+        yield {"final_report": "# Final Answer\nok", "confidence": 0.5}
+
+
+def _build_app(workflow, settings: Settings) -> FastAPI:
+    app = FastAPI()
+    app.state.workflow = workflow
+    app.state.settings = settings
+    app.state.limiter = limiter
+    app.include_router(api_router, prefix="/api")
+    return app
+
+
+@pytest.fixture(autouse=True)
+def _reset_limiter():
+    """The route decorator captures the module limiter's closure, so its
+    in-memory storage is shared across tests — reset it before each test."""
+    limiter.reset()
+    yield
+    limiter.reset()
+
+
+async def _post_stream(client, query):
+    return await client.post("/api/research/stream", json={"query": query})
+
+
+async def test_timeout_emits_clean_error_event():
+    """1.3 DoD: a run exceeding RESEARCH_TIMEOUT_SEC yields an error NDJSON event, not a hang."""
+    settings = Settings(groq_api_key="test-key", research_timeout_sec=0.2, _env_file=None)
+    app = _build_app(StubSlowWorkflow(delay=5.0), settings)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await _post_stream(client, "valid research query here")
+    lines = [line for line in response.text.splitlines() if line.strip()]
+    error_events = [line for line in lines if '"error"' in line]
+    assert error_events, f"expected an error event, got: {lines}"
+    assert "timed out" in error_events[0]
+
+
+async def test_rate_limit_returns_429_after_fifth_request():
+    """1.7 DoD: more than RATE_LIMIT requests in a minute get a 429 on the expensive route."""
+    settings = Settings(groq_api_key="test-key", rate_limit="5/minute", _env_file=None)
+    app = _build_app(StubFastWorkflow(), settings)
+    transport = httpx.ASGITransport(app=app)
+    statuses = []
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        for i in range(6):
+            response = await _post_stream(client, f"rate limit probe {i}")
+            statuses.append(response.status_code)
+    assert statuses[:5] == [200] * 5, statuses
+    assert statuses[5] == 429, statuses
+
+
+async def test_normal_run_completes_within_timeout():
+    settings = Settings(groq_api_key="test-key", research_timeout_sec=5.0, _env_file=None)
+    app = _build_app(StubFastWorkflow(), settings)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await _post_stream(client, "valid research query here")
+    lines = [line for line in response.text.splitlines() if line.strip()]
+    assert any('"final_report"' in line for line in lines), lines

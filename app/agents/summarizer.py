@@ -1,6 +1,6 @@
 from typing import Any, Dict, List
 
-import logging
+from app.core.logging import get_logger
 
 from app.agents.evidence_utils import (
     dedupe_semantic_facts,
@@ -12,10 +12,9 @@ from app.core.llm import LLMClient, clamp_confidence
 from app.core.schemas import SummarizerFactsModel
 from app.core.cache import cache_key, get_cache
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 PROMPT_VERSION = "summarizer-v1"
-CACHE_TTL_SEC = 3600
 
 
 SUMMARIZER_SYSTEM_PROMPT = """
@@ -143,7 +142,7 @@ async def summarizer_agent(
             logger.warning("[Summarizer] LLM call failed, using heuristic fallback", exc_info=exc)
             facts = []
         try:
-            cache.set(key, facts, expire=CACHE_TTL_SEC)
+            cache.set(key, facts, expire=llm.settings.cache_ttl_sec)
         except Exception as exc:
             logger.warning("[Summarizer] cache write failed, continuing uncached: %s", exc, exc_info=exc)
 

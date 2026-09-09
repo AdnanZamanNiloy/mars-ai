@@ -57,10 +57,6 @@ class FinalizeUpdate(TypedDict):
     final_report: str
 
 
-# Lightweight in-memory runtime state store (per request id).
-RUNTIME_STATE: Dict[str, Dict[str, Any]] = {}
-
-
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import logging
+from app.core.logging import get_logger
 import re
 from typing import Any, Dict, List, TypedDict
 
 from app.core.llm import LLMClient
 from app.core.schemas import PlannerOutputModel
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # =========================

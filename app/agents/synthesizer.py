@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import logging
+from app.core.logging import get_logger
 import re
 from typing import Any, Dict, List
 
@@ -8,7 +8,7 @@ from app.agents.evidence_utils import dedupe_semantic_facts, filter_facts_by_dom
 from app.core.llm import LLMClient
 from app.core.schemas import SynthesizerAnswerModel
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 SYNTHESIZER_SYSTEM_PROMPT = """

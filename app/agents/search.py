@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+from app.core.logging import get_logger
 import random
 import re
 import time
@@ -16,9 +16,7 @@ from app.core.config import Settings
 from app.agents.evidence_utils import source_reliability_score
 from app.core.cache import cache_key, get_cache
 
-logger = logging.getLogger(__name__)
-
-SEARCH_CACHE_TTL_SEC = 3600  # repeated sub-questions across runs are common
+logger = get_logger(__name__)
 
 # =============================================================================
 # DATA STRUCTURE
@@ -234,7 +232,6 @@ class SearchClient:
 
         key = cache_key("search_query", _normalize_text(query))
         try:
-            get_cache(settings).get(key)  # warm the disk cache read path
             cached = get_cache(settings).get(key)
         except Exception as exc:
             logger.warning("[Search] cache read failed: %s", exc, exc_info=exc)
@@ -247,7 +244,7 @@ class SearchClient:
         logger.info("[Search] cache miss for query: %s", query[:60])
         ranked = await _uncached_search()
         try:
-            get_cache(settings).set(key, ranked, expire=SEARCH_CACHE_TTL_SEC)
+            get_cache(settings).set(key, ranked, expire=settings.cache_ttl_sec)
         except Exception as exc:
             logger.warning("[Search] cache write failed, continuing uncached: %s", exc, exc_info=exc)
         return ranked

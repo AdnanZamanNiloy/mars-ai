@@ -848,7 +848,9 @@ pytest tests/ -v
 sqlite3 research.db "PRAGMA journal_mode;"
 
 # Check no runaway RUNTIME_STATE growth (from Phase 0.3 onward)
-python -c "from app.graph.workflow import RUNTIME_STATE; print(len(RUNTIME_STATE))"
+# Phase 1 removed RUNTIME_STATE entirely (local snapshot capture), so this
+# command now verifies the global no longer exists:
+python -c "from app.graph import workflow; assert not hasattr(workflow, 'RUNTIME_STATE'); print('OK: no RUNTIME_STATE global')"
 
 # Frontend build
 cd ui && npm run build

@@ -12,8 +12,6 @@ from diskcache import Cache
 
 from app.core.config import Settings
 
-logger = logging.getLogger(__name__)
-
 _cache: Optional[Cache] = None
 
 
@@ -34,26 +32,3 @@ def cache_key(*parts: Any) -> str:
     """Stable hash key from arbitrary JSON-serializable parts."""
     serialized = json.dumps(parts, sort_keys=True, default=str)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
-
-
-async def cached(key: str, factory, settings: Settings, ttl_sec: Optional[int] = None):
-    """Get-or-set with TTL. `factory` must be an awaitable-returning callable.
-
-    Returns the cached value on hit, or the factory's value on miss (and
-    stores it). Cache errors never break the pipeline — they log and bypass.
-    """
-    cache = get_cache(settings)
-    try:
-        hit = cache.get(key)
-        if hit is not None:
-            logger.debug("[Cache] hit key=%s", key[:12])
-            return hit
-    except Exception as exc:
-        logger.warning("[Cache] get failed, bypassing: %s", exc, exc_info=exc)
-
-    value = await factory()
-    try:
-        cache.set(key, value, expire=(ttl_sec if ttl_sec is not None else settings.cache_ttl_sec))
-    except Exception as exc:
-        logger.warning("[Cache] set failed, continuing uncached: %s", exc, exc_info=exc)
-    return value
