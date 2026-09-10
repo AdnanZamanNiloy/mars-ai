@@ -8,7 +8,7 @@ from langgraph.graph import END, START, StateGraph
 from app.agents.evidence_utils import dedupe_semantic_facts, filter_facts_by_domain, source_reliability_score
 from app.agents.critic import critic_agent
 from app.agents.orchestrator import orchestrate
-from app.agents.planner import planner_agent
+from app.agents.planner import normalize_text, planner_agent
 from app.agents.search import SearchClient
 from app.agents.summarizer import summarizer_agent
 from app.agents.synthesizer import synthesizer_agent
@@ -95,6 +95,41 @@ def _extract_question_text(item: Any) -> str:
     if isinstance(item, dict):
         return str(item.get("question", "")).strip()
     return ""
+
+
+def _merge_questions(existing: List[Any], new: List[Any]) -> List[Any]:
+    """Append-only plan growth for expansion passes: keep every researched
+    question, add genuinely new ones with continuing ids. Prevents the
+    full-replan pattern where expansion discards the working plan."""
+    seen = {normalize_text(_extract_question_text(q)) for q in existing or []} - {""}
+    merged = list(existing or [])
+    used_ids = [int(q.get("id", 0)) for q in merged if isinstance(q, dict)]
+    next_id = max(used_ids) if used_ids else 0
+    for item in new or []:
+        text = normalize_text(_extract_question_text(item))
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        next_id += 1
+        merged.append({**item, "id": next_id} if isinstance(item, dict) else item)
+    return merged
+
+
+def _unanswered_questions(sub_questions: List[Any], search_results: List[Any]) -> List[str]:
+    """Question texts with no results yet — expansion passes search only
+    these instead of re-running the whole plan. NOTE: resume-rebuilt
+    results lack sub_question keys, so a post-resume expansion re-searches
+    once (safe fallback, not a loop — fresh results carry the key)."""
+    answered = set()
+    for r in search_results or []:
+        if isinstance(r, dict):
+            q = normalize_text(str(r.get("sub_question", "")))
+            if q:
+                answered.add(q)
+    return [
+        text for text in (_extract_question_text(i) for i in sub_questions or [])
+        if text and normalize_text(text) not in answered
+    ]
 
 
 def build_initial_state(
@@ -288,27 +323,55 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
     graph = StateGraph(ResearchState)
 
     async def planner_node(state: ResearchState) -> PlannerUpdate:
+        existing = state.get("sub_questions", []) or []
+        feedback = state.get("critique_feedback", "")
+        expanding = bool(existing) and int(state.get("iteration", 0)) > 0
+        if expanding:
+            already = "; ".join(
+                _extract_question_text(q) for q in existing if _extract_question_text(q)
+            )
+            feedback = (
+                feedback
+                + "\nAlready researched (do not repeat — only add gap-closing questions): "
+                + already
+            ).strip()
         sub_questions = await planner_agent(
             llm=llm,
             query=state["query"],
-            critique_feedback=state.get("critique_feedback", ""),
+            critique_feedback=feedback,
         )
         # Hardware guardrail: cap the plan at the orchestrated target agents.
         orchestration = state.get("orchestration", {})
         target = int(orchestration.get("target_agents", 5) or 5)
-        sub_questions = sub_questions[: max(1, target)]
-        logger.info("planner_done", sub_questions=len(sub_questions))
+        if expanding:
+            # Per-axis expansion: keep researched history, cap only the NEW
+            # additions at target so per-pass load stays bounded.
+            merged = _merge_questions(existing, sub_questions)
+            added = merged[len(existing):][: max(1, target)]
+            sub_questions = [*existing, *added]
+        else:
+            sub_questions = sub_questions[: max(1, target)]
+        logger.info("planner_done", sub_questions=len(sub_questions), expanding=expanding)
         return {"sub_questions": sub_questions}
 
     async def search_node(state: ResearchState) -> SearchUpdate:
-        raw_questions = state.get("sub_questions", [])[:5]
-        questions = [_extract_question_text(item) for item in raw_questions]
-        questions = [q for q in questions if q]
-        if not questions:
-            questions = [state.get("query", "").strip()]
-        results = await search_client.run_search(questions)
-        logger.info("search_done", results=len(results), sub_questions=len(questions))
-        return {"search_results": results}
+        previous = [r for r in state.get("search_results", []) or [] if isinstance(r, dict)]
+        # Per-axis expansion: search only questions with no results yet.
+        # Accumulated results stay bounded (passes × ~10 snippets) and the
+        # verifier still releases raw content after each pass.
+        fresh = _unanswered_questions(state.get("sub_questions", []), previous)[:5]
+        if not fresh:
+            if previous:
+                return {"search_results": previous}
+            fallback = state.get("query", "").strip()
+            if not fallback:
+                return {"search_results": previous}
+            fresh = [fallback]
+        results = await search_client.run_search(fresh)
+        seen_urls = {r.get("url") for r in previous if r.get("url")}
+        merged = [*previous, *(r for r in results if r.get("url") not in seen_urls)]
+        logger.info("search_done", results=len(merged), fresh=len(fresh))
+        return {"search_results": merged}
 
     async def summarizer_node(state: ResearchState) -> SummarizerUpdate:
         # Agent Context Isolation (2.9): each sub-question worker sees only
