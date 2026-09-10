@@ -34,11 +34,10 @@ export default function Sidebar({ view, onNavigate, missions, activeRunId, onOpe
         </div>
       </div>
 
-      <button className="new-btn" onClick={() => { onNew(); onClose?.(); }}>
-        <IconPlus size={16} /> New Research
-      </button>
-
       <nav className="side-nav" aria-label="Primary">
+        <button className="new-btn" onClick={() => { onNew(); onClose?.(); }}>
+          <IconPlus size={16} /> New Research
+        </button>
         {NAV.map((item) => (
           <button
             key={item.id}
