@@ -324,10 +324,11 @@
 
 /* ---------- welcome hero ---------- */
 
-.hero-card { text-align: center; padding: 60px 20px 40px; }
+.hero-card { text-align: center; padding: 60px 20px 0; }
 .hero-card h2 { font-size: 24px; font-weight: 750; letter-spacing: -0.3px; margin: 22px 0 0; }
 .hero-card h2 .accent { color: var(--mars-soft); }
 .hero-card p { color: var(--t3); font-size: 13.5px; max-width: 52ch; margin: 10px auto 0; line-height: 1.65; }
+.hero-composer { max-width: 720px; margin: 28px auto 0; text-align: left; }
 
 /* ---------- replay ---------- */
 

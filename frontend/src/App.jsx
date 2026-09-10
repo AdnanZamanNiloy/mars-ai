@@ -340,7 +340,20 @@ export default function App() {
               ) : view === "evidence" ? (
                 <EvidenceView messages={messages} onInspect={setSelectedFinding} />
               ) : messages.length === 0 ? (
-                <WelcomeHero />
+                <WelcomeHero
+                  composer={
+                    <Composer
+                      value={composer}
+                      onChange={setComposer}
+                      onSubmit={submitQuery}
+                      running={running}
+                      onAbort={abortRun}
+                      mode={mode}
+                      onModeChange={setMode}
+                      placeholder="Ask a research question… (Enter to send)"
+                    />
+                  }
+                />
               ) : (
                 messages.map((m) => <ThreadMessage
                   key={m.id}
@@ -354,7 +367,7 @@ export default function App() {
             </div>
           </div>
 
-          {view === "workspace" ? (
+          {view === "workspace" && messages.length > 0 ? (
             <div className="composer-zone">
               <div className="composer-inner">
                 <Composer
@@ -365,7 +378,7 @@ export default function App() {
                   onAbort={abortRun}
                   mode={mode}
                   onModeChange={setMode}
-                  placeholder={messages.length === 0 ? "Ask a research question… (Enter to send)" : "Ask a follow-up or challenge the conclusion…"}
+                  placeholder="Ask a follow-up or challenge the conclusion…"
                 />
               </div>
             </div>
@@ -472,7 +485,7 @@ function ThreadMessage({ message, running, selectedFinding, onSelectFinding, onR
   return null;
 }
 
-function WelcomeHero() {
+function WelcomeHero({ composer }) {
   return (
     <div className="hero-card anim-rise">
       <Planet size={88} ring />
@@ -481,6 +494,7 @@ function WelcomeHero() {
         A team of research agents plans the inquiry, gathers sources, verifies claims,
         challenges conclusions and synthesizes a cited report — streaming live to this console.
       </p>
+      {composer ? <div className="hero-composer">{composer}</div> : null}
     </div>
   );
 }
