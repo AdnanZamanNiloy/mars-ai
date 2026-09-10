@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { MODE_META } from "../lib";
 import { IconCheck, IconChevronDown, IconSend, IconStop } from "./icons";
 
-const MODES = ["quick", "standard", "deep"];
+const MODES = ["quick", "standard", "deep", "executive", "audit", "redteam"];
 
 export default function Composer({
   value,

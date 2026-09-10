@@ -155,8 +155,9 @@ def build_initial_state(
         # max(3, ...) floor (GAP-8) or quick mode would be no quicker.
         max_iterations = preset["max_iterations"]
         deep_research = preset["deep_research"]
-        # The preset's agent cap REPLACES the setting default: deep is the
-        # only mode allowed to exceed MAX_PARALLEL_AGENTS (manual 3.7 DoD).
+        # The preset's agent cap REPLACES the setting default: deep and
+        # executive are the only modes allowed to exceed MAX_PARALLEL_AGENTS
+        # (vision §28: explicit opt-in via mode selection + governor check).
         max_parallel_agents = preset["max_agents"]
         effective_max_iterations = int(max_iterations)
     else:

@@ -43,8 +43,8 @@ limiter = Limiter(key_func=get_remote_address)
 class ResearchRequest(BaseModel):
     query: str = Field(..., min_length=5, max_length=500)
     deep_research: bool = False
-    # Research Modes (3.7): quick | standard | deep
-    mode: str = Field(default="standard", pattern="^(quick|standard|deep)$")
+    # Research Modes (3.7 + vision §28): quick | standard | deep | executive | audit | redteam
+    mode: str = Field(default="standard", pattern="^(quick|standard|deep|executive|audit|redteam)$")
 
 
 @router.get("/health")

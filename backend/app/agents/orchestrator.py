@@ -106,13 +106,24 @@ LEVEL_TARGETS: Dict[str, int] = {
     "very_high": 6,
 }
 
-# Research Modes (Phase 3.7): presets consumed by the orchestrator and the
-# iteration logic. "deep" is the only mode that can exceed the default
-# MAX_PARALLEL_AGENTS cap (and only for very_high complexity queries).
+# Research Modes (Phase 3.7 + vision §28): presets consumed by the
+# orchestrator and the iteration logic. "deep" and "executive" are the only
+# modes that can exceed the default MAX_PARALLEL_AGENTS cap (and only for
+# very_high complexity queries) — selecting them IS the explicit user
+# opt-in the vision demands, and the cost governor stays active throughout.
+# Resource profiles are distinct by design:
+#   executive keeps deep's full fan-out but caps passes for timely decisions
+#   on decision queries; audit adds a verification pass over standard
+#   breadth; redteam is a short adversarial burst at standard breadth
+#   (the critic's red-team checks run every run — this mode gives them
+#   a fast second pass).
 MODE_PRESETS: Dict[str, Dict[str, Any]] = {
-    "quick":    {"max_agents": 2, "max_iterations": 1, "deep_research": False},
-    "standard": {"max_agents": 3, "max_iterations": 3, "deep_research": False},
-    "deep":     {"max_agents": 5, "max_iterations": 5, "deep_research": True},
+    "quick":     {"max_agents": 2, "max_iterations": 1, "deep_research": False},
+    "standard":  {"max_agents": 3, "max_iterations": 3, "deep_research": False},
+    "deep":      {"max_agents": 5, "max_iterations": 5, "deep_research": True},
+    "executive": {"max_agents": 5, "max_iterations": 4, "deep_research": True},
+    "audit":     {"max_agents": 3, "max_iterations": 4, "deep_research": False},
+    "redteam":   {"max_agents": 3, "max_iterations": 2, "deep_research": False},
 }
 VALID_MODES = tuple(MODE_PRESETS.keys())
 
