@@ -253,9 +253,9 @@
   width: 32px; height: 32px; flex: none;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: #fafafa;
-  color: #09090b; cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  background: #E8794F;
+  color: #1c1009; cursor: pointer;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
   transition: filter 0.15s, transform 0.1s, opacity 0.15s;
 }

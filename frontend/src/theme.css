@@ -2,29 +2,28 @@
  * Dark premium research console. System font stack: no webfont dependency. */
 
 :root {
-  --bg: #16181c;
-  --bg-soft: #1a1d22;
-  --side: #1a1d22;
-  --panel: #1e2127;
-  --card: #22242a;
-  --card-2: #2a2d34;
-  --line: #34373f;
-  --line-soft: #26292f;
-  --track: #2e3138;
+  --bg: #121212;
+  --bg-soft: #191919;
+  --side: #191919;
+  --panel: #222222;
+  --card: #222222;
+  --card-2: #222222;
+  --line: #303030;
+  --line-soft: #303030;
+  --track: #2a2a2a;
 
-  --t1: #f4f5f6;
-  --t2: #d3d5d9;
-  --t3: #9ba0a8;
-  --t4: #5f646d;
+  --t1: #E8E8E8;
+  --t2: #9A9A9A;
+  --t3: #7d7d7d;
+  --t4: #666666;
 
-  /* Neutral monochrome: former accent vars now resolve to grays so every
-   * usage follows without per-site edits. Status meaning is carried by
-   * fill vs outline, never by hue — except failure states, which keep one
-   * muted brick red so errors stay recognizable. */
-  --mars: #d4d4d8;
-  --mars-soft: #f4f4f5;
-  --mars-deep: #71717a;
-  --mars-glow: rgba(255, 255, 255, 0.1);
+  /* Warm accent on neutral surfaces. Status meaning stays in fill vs
+   * outline, never hue — except failure states, which keep one muted
+   * brick red so errors stay recognizable. */
+  --mars: #E8794F;
+  --mars-soft: #E8794F;
+  --mars-deep: #b85c38;
+  --mars-glow: rgba(232, 121, 79, 0.22);
   --mint: #d4d4d8;
   --amber: #a1a1aa;
   --red: #cd6f63;
@@ -88,7 +87,7 @@ button { font-family: inherit; }
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.1s;
 }
-.btn:hover:not(:disabled) { background: #2e3138; color: var(--t1); border-color: #4a4f58; }
+.btn:hover:not(:disabled) { background: #24242e; color: var(--t1); border-color: #34343f; }
 .btn:active:not(:disabled) { transform: translateY(1px); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
@@ -99,9 +98,9 @@ button { font-family: inherit; }
   min-height: 36px;
   padding: 0 18px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: #fafafa;
-  color: #16181c;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  background: #E8794F;
+  color: #1c1009;
   font-size: 13px;
   font-weight: 650;
   cursor: pointer;
@@ -143,7 +142,7 @@ button { font-family: inherit; }
   transition: border-color 0.15s, color 0.15s, background 0.15s;
   white-space: nowrap;
 }
-.chip:hover:not(:disabled) { border-color: #4a4f58; color: #fff; background: rgba(255, 255, 255, 0.04); }
+.chip:hover:not(:disabled) { border-color: #52525b; color: #fff; background: rgba(255, 255, 255, 0.04); }
 .chip:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .tag {
@@ -159,13 +158,13 @@ button { font-family: inherit; }
   font-weight: 600;
   white-space: nowrap;
 }
-.tag.tone-good { background: #f4f5f6; border-color: #f4f5f6; color: #16181c; }
-.tag.tone-bad { border-color: #4a4f58; background: transparent; color: var(--t3); }
+.tag.tone-good { background: #e4e4e7; border-color: #e4e4e7; color: #09090b; }
+.tag.tone-bad { border-color: #52525b; background: transparent; color: var(--t3); }
 .tag.tone-muted { border-color: var(--line); background: rgba(255, 255, 255, 0.03); color: var(--t3); }
-.tag.tone-blue { border-color: #4a4f58; background: rgba(255, 255, 255, 0.05); color: var(--t1); }
+.tag.tone-blue { border-color: #52525b; background: rgba(255, 255, 255, 0.05); color: var(--t1); }
 
 .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-.dot.live { background: #fafafa; box-shadow: 0 0 10px rgba(255, 255, 255, 0.5); animation: pulse 1.6s ease-in-out infinite; }
+.dot.live { background: var(--mars); box-shadow: 0 0 10px var(--mars-glow); animation: pulse 1.6s ease-in-out infinite; }
 .dot.done { background: var(--mint); }
 .dot.idle { background: #55555f; }
 .dot.warn { background: var(--amber); }

@@ -53,7 +53,7 @@ export default function EvidenceView({ messages, onInspect }) {
                 key={k}
                 type="button"
                 className="chip"
-                style={filter === k ? { borderColor: "#4a4f58", color: "#fff", background: "rgba(255,255,255,.05)" } : undefined}
+                style={filter === k ? { borderColor: "#52525b", color: "#fff", background: "rgba(255,255,255,.05)" } : undefined}
                 onClick={() => setFilter(k)}
               >
                 {label}
