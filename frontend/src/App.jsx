@@ -428,6 +428,7 @@ export default function App() {
                   running={running}
                   onResume={resumeRun}
                   onChallenge={challengeRun}
+                  onRegenerate={submitQuery}
                 />)
               )}
             </div>
@@ -485,14 +486,19 @@ export default function App() {
   );
 }
 
-function ThreadMessage({ message, running, onResume, onChallenge }) {
+function ThreadMessage({ message, running, onResume, onChallenge, onRegenerate }) {
   if (message.kind === "user") {
-    return <UserMessage text={message.text} time={fmtTime(message.at)} />;
+    return <UserMessage text={message.text} />;
   }
   if (message.kind === "run") {
     const { run } = message;
     return (
-      <MarsMessageShell time={fmtTime(message.at)}>
+      <MarsMessageShell
+        id={message.id}
+        text={run.report || ""}
+        canRegenerate={run.done && !running && !run.error && run.query.length > 0}
+        onRegenerate={() => onRegenerate(run.query)}
+      >
         {!run.done && !run.error && !run.aborted ? <LiveRunCard run={run} /> : null}
         {run.aborted && !run.done ? (
           <div className="error-box" style={{ borderColor: "var(--line)", background: "var(--card)" }}>
@@ -525,8 +531,14 @@ function ThreadMessage({ message, running, onResume, onChallenge }) {
   }
   if (message.kind === "replay") {
     const { trace } = message;
+    const report = trace.final_report?.report_markdown || "";
     return (
-      <MarsMessageShell time={fmtTime(message.at)}>
+      <MarsMessageShell
+        id={message.id}
+        text={report}
+        canRegenerate={!running && message.query.length > 0}
+        onRegenerate={() => onRegenerate(message.query)}
+      >
         <div className="replay-banner">
           <span className="tag tone-blue">replay</span>
           <span>Read-only record of “{message.query}” · status: {trace.status}{(trace.plan || []).length ? ` · ${(trace.plan || []).length} planned questions` : ""}</span>
@@ -541,7 +553,7 @@ function ThreadMessage({ message, running, onResume, onChallenge }) {
   }
   if (message.kind === "notice") {
     return (
-      <MarsMessageShell time={fmtTime(message.at)}>
+      <MarsMessageShell id={message.id} text={message.text}>
         <div className="error-box">{message.text}</div>
       </MarsMessageShell>
     );
@@ -561,12 +573,4 @@ function WelcomeHero({ composer }) {
       {composer ? <div className="hero-composer">{composer}</div> : null}
     </div>
   );
-}
-
-function fmtTime(iso) {
-  try {
-    return new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  } catch {
-    return "";
-  }
 }

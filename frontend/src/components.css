@@ -39,25 +39,28 @@
 /* ---------- thread messages ---------- */
 
 .msg { display: flex; gap: 14px; margin-bottom: 26px; }
-.msg-avatar {
-  width: 40px; height: 40px; flex: none;
-  border-radius: 50%;
-  background: #232329;
-  border: 1px solid #2e2e37;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 12.5px; font-weight: 650; color: #cfcfd6; letter-spacing: 0.5px;
-}
 .msg-body { flex: 1; min-width: 0; }
-.msg-head { display: flex; align-items: baseline; gap: 8px; font-size: 13px; margin: 0 0 10px 2px; }
-.msg-head b { font-weight: 650; }
-.msg-head time { font-size: 11.5px; color: var(--t3); }
-.msg-user-card {
-  background: var(--card);
+
+.msg-user { display: flex; justify-content: flex-end; margin-bottom: 22px; }
+.bubble {
+  max-width: 75%;
+  background: var(--card-2);
   border: 1px solid var(--line);
-  border-radius: 13px;
-  padding: 13px 18px 15px;
+  border-radius: 15px;
+  padding: 9px 15px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--t1);
 }
-.msg-user-card p { margin: 6px 0 0; font-size: 14.5px; line-height: 1.55; color: #dcdce2; }
+
+.msg-mars { display: flex; gap: 12px; margin-bottom: 26px; }
+.sparkle { flex: none; color: var(--mars); margin-top: 2px; }
+.msg-mars .msg-body > :first-child { margin-top: 0; }
+
+.msg-actions { display: flex; align-items: center; gap: 2px; margin-top: 8px; }
+.msg-actions .icon-btn { color: var(--t4); width: 30px; height: 30px; }
+.msg-actions .icon-btn:hover { color: var(--t1); background: transparent; }
+.msg-actions .icon-btn.is-active { color: var(--t1); }
 
 /* ---------- answer card ---------- */
 

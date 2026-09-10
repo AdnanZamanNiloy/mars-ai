@@ -1,28 +1,110 @@
+import { useState } from "react";
 import { formatTime } from "../lib";
-import { Planet } from "./Sidebar";
-import { IconCheck, IconClock } from "./icons";
+import { IconCheck, IconClock, IconCopy, IconRefresh, IconSpark, IconSpeaker, IconThumbDown, IconThumbUp } from "./icons";
 
-/* Live pipeline card driven entirely by streamed backend events. */
+/* Chat-style thread: right-aligned user bubbles, plain MARS responses
+ * with a working action row (copy, read aloud, feedback, regenerate). */
 
 export function UserMessage({ text, time }) {
   return (
-    <div className="msg anim-rise">
-      <div className="msg-avatar">YOU</div>
-      <div className="msg-body">
-        <div className="msg-head"><b>You</b><time>{time}</time></div>
-        <div className="msg-user-card"><p>{text}</p></div>
-      </div>
+    <div className="msg-user anim-rise">
+      <div className="bubble" title={time}>{text}</div>
     </div>
   );
 }
 
-export function MarsMessageShell({ time, children }) {
+const FEEDBACK_KEY = "mars.feedback.v1";
+
+function readFeedback(id) {
+  try {
+    return (JSON.parse(localStorage.getItem(FEEDBACK_KEY) || {}))[id] || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeFeedback(id, value) {
+  try {
+    const all = JSON.parse(localStorage.getItem(FEEDBACK_KEY) || {});
+    if (value) all[id] = value; else delete all[id];
+    localStorage.setItem(FEEDBACK_KEY, JSON.stringify(all));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function MessageActions({ messageId, text, onRegenerate, canRegenerate }) {
+  const [vote, setVote] = useState(() => readFeedback(messageId));
+  const [copied, setCopied] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const area = document.createElement("textarea");
+      area.value = text;
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1400);
+  };
+
+  const toggleSpeak = () => {
+    if (!("speechSynthesis" in window)) return;
+    if (speaking) {
+      window.speechSynthesis.cancel();
+      setSpeaking(false);
+      return;
+    }
+    const utterance = new SpeechSynthesisUtterance(text.slice(0, 2000));
+    utterance.onend = () => setSpeaking(false);
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+    setSpeaking(true);
+  };
+
+  const rate = (value) => {
+    const next = vote === value ? null : value;
+    setVote(next);
+    writeFeedback(messageId, next);
+  };
+
   return (
-    <div className="msg anim-rise">
-      <Planet size={40} />
+    <div className="msg-actions" role="toolbar" aria-label="Message actions">
+      <button className="icon-btn" onClick={copy} title={copied ? "Copied" : "Copy"} aria-label="Copy">
+        {copied ? <IconCheck size={15} /> : <IconCopy size={15} />}
+      </button>
+      <button className="icon-btn" onClick={toggleSpeak} title={speaking ? "Stop" : "Read aloud"} aria-label="Read aloud">
+        <IconSpeaker size={15} />
+      </button>
+      <button className={`icon-btn${vote === "up" ? " is-active" : ""}`} onClick={() => rate("up")} title="Good response" aria-label="Good response" aria-pressed={vote === "up"}>
+        <IconThumbUp size={15} />
+      </button>
+      <button className={`icon-btn${vote === "down" ? " is-active" : ""}`} onClick={() => rate("down")} title="Bad response" aria-label="Bad response" aria-pressed={vote === "down"}>
+        <IconThumbDown size={15} />
+      </button>
+      {canRegenerate ? (
+        <button className="icon-btn" onClick={onRegenerate} title="Regenerate" aria-label="Regenerate">
+          <IconRefresh size={15} />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+export function MarsMessageShell({ id, text, onRegenerate, canRegenerate, children }) {
+  return (
+    <div className="msg-mars anim-rise">
+      <span className="sparkle" aria-hidden="true"><IconSpark size={22} /></span>
       <div className="msg-body">
-        <div className="msg-head"><b>MARS</b><time>{time}</time></div>
         {children}
+        {text ? (
+          <MessageActions messageId={id} text={text} onRegenerate={onRegenerate} canRegenerate={canRegenerate} />
+        ) : null}
       </div>
     </div>
   );
