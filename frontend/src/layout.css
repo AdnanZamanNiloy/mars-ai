@@ -22,7 +22,7 @@
 }
 
 .brand { display: flex; align-items: center; gap: 12px; padding: 2px 6px 0; }
-.brand-name { font-size: 17px; font-weight: 800; letter-spacing: 5px; color: #EAB308; }
+.brand-name { font-size: 17px; font-weight: 800; letter-spacing: 5px; color: #E8794F; }
 .brand-sub { font-size: 10.5px; line-height: 1.5; color: var(--t3); margin-top: 3px; }
 
 .new-btn {
