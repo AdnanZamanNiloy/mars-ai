@@ -271,6 +271,28 @@ export default function App() {
     controllerRef.current?.abort();
   }, []);
 
+  const startNew = useCallback(() => {
+    controllerRef.current?.abort();
+    controllerRef.current = null;
+    runRef.current = null;
+    setMessages((prev) => {
+      const active = [...prev].reverse().find((m) => m.kind === "run");
+      const run = active?.run;
+      if (run?.runId && !run.done && !run.error) {
+        saveMissions(upsertMission({
+          runId: run.runId, query: run.query, mode: run.mode,
+          status: "aborted", confidence: null, cost: run.budget?.cost ?? null,
+        }));
+      }
+      return [];
+    });
+    setTraceLog([]);
+    setSelectedFinding(null);
+    setComposer("");
+    setRunning(false);
+    setView("workspace");
+  }, []);
+
   const resumeRun = useCallback((run) => {
     if (running || !run.runId) return;
     launch("", { resumeRun: run });
@@ -312,7 +334,7 @@ export default function App() {
         missions={missions}
         activeRunId={activeRun?.runId}
         onOpenMission={openReplay}
-        onNew={() => { setView("workspace"); setComposer(""); }}
+        onNew={startNew}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />
@@ -335,7 +357,7 @@ export default function App() {
                   missions={missions}
                   onOpen={openReplay}
                   onRemove={(runId) => saveMissions(removeMission(runId))}
-                  onNew={() => setView("workspace")}
+                  onNew={startNew}
                 />
               ) : view === "evidence" ? (
                 <EvidenceView messages={messages} onInspect={setSelectedFinding} />
