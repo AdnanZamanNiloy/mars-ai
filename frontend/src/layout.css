@@ -28,21 +28,24 @@
 .new-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: flex-start;
+  gap: 11px;
   width: 100%;
   margin-top: 14px;
-  padding: 9px 10px;
+  padding: 9px 12px;
   border: 0;
   border-radius: 9px;
   background: transparent;
-  color: var(--t1);
+  color: var(--t2);
   font-size: 13.5px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   text-align: left;
-  transition: background 0.15s;
+  transition: background 0.13s, color 0.13s;
 }
-.new-btn:hover { background: rgba(255, 255, 255, 0.04); }
+.new-btn:hover { background: #16161d; color: var(--t1); }
+.new-btn svg { color: var(--t3); flex: none; }
+.new-btn:hover svg { color: var(--mars-soft); }
 
 .side-nav { display: flex; flex-direction: column; gap: 2px; margin-top: 14px; }
 .side-nav button {
