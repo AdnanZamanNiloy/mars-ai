@@ -63,18 +63,18 @@
 /* ---------- answer card ---------- */
 
 .answer {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  padding: 20px 22px 22px;
-  box-shadow: var(--shadow-card);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 4px 0 0;
+  box-shadow: none;
 }
 .answer-lead { margin: 2px 0 0; font-size: 14.5px; line-height: 1.65; color: #c9c9d1; white-space: pre-wrap; }
 
 .src-link { color: #9c9ca6; font-size: 12px; text-decoration: none; border-bottom: 1px dotted #44444e; }
 .src-link:hover { color: var(--mars-soft); border-bottom-color: var(--mars-soft); }
 
-.evidence-block { margin-top: 0; border-top: 0; padding-top: 0; }
+.evidence-block { margin-top: 24px; border-top: 0; padding-top: 0; }
 
 .evidence-block { margin-top: 24px; border-top: 1px solid var(--line-soft); padding-top: 19px; }
 .evidence-block .sub { font-size: 12.5px; color: var(--t3); margin: 6px 0 0; }
