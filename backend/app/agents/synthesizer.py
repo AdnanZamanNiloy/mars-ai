@@ -96,9 +96,9 @@ async def synthesizer_agent(llm: LLMClient, query: str, facts: List[Dict[str, An
 
     # Deterministic fallback keeps output coherent if LLM JSON parsing fails.
     # No boilerplate openers: lead with diverse evidence sentences (MMR
-    # threshold 0.40 splits observed paraphrase pairs (0.43-0.52) from
-    # cross-sense claims (~0.18)).
-    diverse = select_diverse(top_facts, k=3, max_similarity=0.40)
+    # overlap threshold 0.35 splits observed paraphrases (0.39-0.53) from
+    # cross-sense claims (0.10-0.18)).
+    diverse = select_diverse(top_facts, k=3, max_similarity=0.35)
     body_facts = [str(item.get("claim", "")).strip() for item in diverse if item.get("claim")]
     if not body_facts:
         return f"No reliable evidence was retrieved for {_normalize_query_concept(query)}."

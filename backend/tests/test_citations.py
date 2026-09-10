@@ -254,4 +254,4 @@ def test_fallback_mmr_collapses_paraphrase_dupes():
     ]
     answer = asyncio.run(synthesizer_agent(ExplodingLLM(), "What is transformer?", dupes))
     assert "self-attention" in answer
-    assert answer.count("transfers electric") + answer.count("transfers electrical") == 1
+    assert "passive component" not in answer

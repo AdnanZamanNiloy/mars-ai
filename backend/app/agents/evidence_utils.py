@@ -382,21 +382,34 @@ MIN_QUERY_OVERLAP = 0.15
 
 
 def select_diverse(
-    claims: List[Dict[str, Any]], k: int = 3, max_similarity: float = 0.75
+    claims: List[Dict[str, Any]], k: int = 3, max_similarity: float = 0.40
 ) -> List[Dict[str, Any]]:
     """Greedy maximal-marginal-relevance pick: highest confidence first,
     then each next claim must add novelty vs everything already picked.
-    Stops fallback answers reading the same definition three times."""
+    Stops fallback answers reading the same definition three times.
+
+    Novelty uses the overlap coefficient (|A∩B|/min(|A|,|B|)), not raw
+    similarity: it is robust to claim length, where blended similarity
+    dilutes (long paraphrases scored 0.36, cross-sense pairs ~0.14)."""
     ranked = sorted(claims or [], key=lambda f: float(f.get("confidence", 0.0) or 0.0), reverse=True)
     selected: List[Dict[str, Any]] = []
     for candidate in ranked:
         text = str(candidate.get("claim", "") or "")
         if not text:
             continue
-        if all(
-            _semantic_similarity(text, str(kept.get("claim", "") or "")) < max_similarity
-            for kept in selected
-        ):
+        candidate_tokens = _tokenize(text)
+        if not candidate_tokens:
+            continue
+        novel = True
+        for kept in selected:
+            kept_tokens = _tokenize(str(kept.get("claim", "") or ""))
+            if not kept_tokens:
+                continue
+            overlap = len(candidate_tokens & kept_tokens) / min(len(candidate_tokens), len(kept_tokens))
+            if overlap >= max_similarity:
+                novel = False
+                break
+        if novel:
             selected.append(candidate)
         if len(selected) >= k:
             break
