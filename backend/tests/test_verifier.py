@@ -53,3 +53,19 @@ def test_facts_kept_in_state_even_when_unverified():
     out = verify_facts(FACTS, RESULTS)
     assert len(out) == len(FACTS)
     assert all("verified" in f for f in out)
+
+
+def test_verifier_drops_truncated_fragments():
+    from app.agents.verifier import verify_facts
+
+    facts = [
+        {"claim": "Transfer learning reuses models learned from a large dat",
+         "source": "https://en.wikipedia.org/wiki/X", "confidence": 0.9},
+        {"claim": "Transfer learning reuses models trained before on related tasks.",
+         "source": "https://en.wikipedia.org/wiki/X", "confidence": 0.9},
+    ]
+    results = [{"url": "https://en.wikipedia.org/wiki/X",
+                "content": "Transfer learning reuses models trained before on related tasks and data"}]
+    out = verify_facts(facts, results)
+    assert len(out) == 1
+    assert "large dat" not in out[0]["claim"]

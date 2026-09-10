@@ -18,7 +18,9 @@ from app.core.degradation import record_fallback
 
 logger = get_logger(__name__)
 
-PROMPT_VERSION = "summarizer-v1"
+PROMPT_VERSION = "summarizer-v2"  # BUMP on any claim-shape change (cleaning,
+# fields, thresholds): the cache key embeds this, and stale entries would
+# otherwise serve pre-fix claims indefinitely (AGENTS.md 4.10).
 
 # Specialist prompt additions (Phase 3.1): routed by the delegation
 # contract's domain via AgentContext.specialist_role(). Each specialist

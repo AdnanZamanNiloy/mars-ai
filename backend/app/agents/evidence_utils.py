@@ -334,6 +334,19 @@ LINK_TEXT_RE = re.compile(r"\b(?:Learn|Read|Show|See|Click|Continue)\s+mo(?:r(?:
 MIN_CLEAN_CLAIM_CHARS = 50
 
 
+def looks_truncated(text: str) -> bool:
+    """True when a claim ends in a probable mid-word cut ("...from a large
+    dat"): no sentence-ending punctuation anywhere and a stub tail token.
+    Conservative by design — only flags the clear shape, never judges
+    content. (Rare casualty: legit ends like "...the US".)"""
+    stripped = re.sub(r"\s+", " ", (text or "")).strip()
+    if not stripped:
+        return True
+    if re.search(r"[.!?](?=\s|$)", stripped):
+        return False
+    return len(stripped.rsplit(None, 1)[-1]) <= 3
+
+
 def clean_snippet_text(snippet: str, max_chars: int = 300, min_chars: int = MIN_CLEAN_CLAIM_CHARS) -> str:
     """Turn a raw search snippet into a presentable claim sentence.
 

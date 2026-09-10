@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Iterable, List
 
-from app.agents.evidence_utils import source_reliability_score
+from app.agents.evidence_utils import looks_truncated, source_reliability_score
 
 # Overlap at or above this ratio means the claim's key terms are present
 # in the cited source's text.
@@ -67,6 +67,11 @@ def verify_facts(
     verified: List[Dict[str, Any]] = []
     for fact in facts:
         claim = str(fact.get("claim", ""))
+        # Last-chance fragment guard: no truncated claim may persist or be
+        # synthesized, regardless of which upstream path (or cache) let it
+        # through. See AGENTS.md stale-fact-cache entry.
+        if looks_truncated(claim):
+            continue
         source = str(fact.get("source", "")).strip()
         source_text = sources.get(source, "")
         claim_terms = _tokens(claim)

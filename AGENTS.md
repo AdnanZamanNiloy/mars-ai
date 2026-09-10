@@ -119,6 +119,13 @@ These are real bugs found by reading the code, not hypotheticals. Each one below
   persisted trace truth for exactly this reason. A proper fix re-emits
   facts when verification flags change; until then, do not trust
   stream-observed `verified` in new UI features — read trace claims.
+
+[FIXED — answer-quality audit] app/agents/summarizer.py (stale fact cache)
+  The summarizer cache key embeds PROMPT_VERSION, but the version was not
+  bumped when claim cleaning landed — live runs kept serving pre-cleaner
+  claims ("about tra" fragments) from cache for up to an hour, making the
+  fix look broken. Any change to claim shape, cleaning, fields, or
+  thresholds MUST bump PROMPT_VERSION, or verification will chase ghosts.
 ```
 
 If you find a new instance of any of these patterns anywhere in the codebase while working on something else, fix it or flag it in your commit message — don't leave it for later just because it's outside your current task's file scope.
