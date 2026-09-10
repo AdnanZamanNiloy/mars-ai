@@ -116,6 +116,7 @@ class LLMClient:
         # Breaker state lives on the client instance (created once at app
         # startup), is bounded, and resets on success — not per-request state.
         self.groq_breaker = CircuitBreaker(threshold=3, cooldown_sec=60.0)
+        self.custom_breaker = CircuitBreaker(threshold=3, cooldown_sec=60.0)
 
     async def generate_json(
         self,
@@ -150,6 +151,20 @@ class LLMClient:
     async def _generate_with_fallback(self, system_prompt: str, user_prompt: str) -> str:
         groq_key = _real_key(self.settings.groq_api_key)
         hf_key = _real_key(self.settings.huggingface_api_key)
+        custom = self._custom_config()
+        if custom and not self.custom_breaker.is_open():
+            try:
+                text = await self._call_custom(system_prompt, user_prompt, custom)
+                self.custom_breaker.record_success()
+                return text
+            except Exception as exc:
+                self.custom_breaker.record_failure()
+                logger.warning(
+                    "[LLM] Custom provider call failed (breaker failures=%d), falling back: %s",
+                    self.custom_breaker._consecutive_failures,
+                    exc,
+                    exc_info=exc,
+                )
         if groq_key and not self.groq_breaker.is_open():
             try:
                 text = await self._call_groq(system_prompt, user_prompt)
@@ -167,7 +182,48 @@ class LLMClient:
         if hf_key:
             return await self._call_huggingface(system_prompt, user_prompt)
 
-        raise RuntimeError("No LLM provider configured. Set GROQ_API_KEY or HUGGINGFACE_API_KEY.")
+        raise RuntimeError("No LLM provider configured. Set GROQ_API_KEY, HUGGINGFACE_API_KEY, or the CUSTOM_LLM_* trio.")
+
+    def _custom_config(self) -> Dict[str, str] | None:
+        """Validated custom-provider trio, or None when not configured."""
+        key = _real_key(self.settings.custom_llm_api_key)
+        base = str(self.settings.custom_llm_base_url or "").strip().rstrip("/")
+        model = str(self.settings.custom_llm_model or "").strip()
+        if not (key and base and model):
+            return None
+        if base.lower().endswith("/chat/completions"):
+            endpoint = base
+        else:
+            endpoint = base + "/chat/completions"
+        return {"api_key": key, "endpoint": endpoint, "model": model}
+
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(4),
+        wait=_wait_with_retry_after,
+        retry=retry_if_exception(_is_retryable),
+    )
+    async def _call_custom(self, system_prompt: str, user_prompt: str, custom: Dict[str, str]) -> str:
+        """Generic OpenAI-compatible chat completions call."""
+        async with httpx.AsyncClient(timeout=self.settings.llm_timeout_sec) as client:
+            response = await client.post(
+                custom["endpoint"],
+                headers={
+                    "Authorization": f"Bearer {custom['api_key']}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": custom["model"],
+                    "temperature": 0.1,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
 
     @retry(
         reraise=True,

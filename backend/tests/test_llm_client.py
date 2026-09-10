@@ -191,3 +191,68 @@ async def test_placeholder_keys_are_skipped():
             await client.generate_json("sp", "up")
         assert groq_route.call_count == 0
         assert hf_route.call_count == 0
+
+
+CUSTOM_URL = "https://llm.example.com/v1/chat/completions"
+
+
+def _custom_settings(**over):
+    from app.core.config import Settings
+
+    base = {"groq_api_key": "test-key", "huggingface_api_key": "test-hf-key",
+            "custom_llm_api_key": "test-custom-key",
+            "custom_llm_base_url": "https://llm.example.com/v1",
+            "custom_llm_model": "test-model", "_env_file": None}
+    base.update(over)
+    return Settings(**base)
+
+
+async def test_custom_provider_leads_chain():
+    client = LLMClient(_custom_settings())
+    with respx.mock(assert_all_called=False) as mock:
+        custom_route = mock.post(CUSTOM_URL).mock(
+            return_value=httpx.Response(200, json={"choices": [{"message": {"content": json.dumps({"via": "custom"})}}]}))
+        groq_route = mock.post(GROQ_URL).mock(return_value=_groq_response({"via": "groq"}))
+        result = await client.generate_json("sp", "up")
+        assert result == {"via": "custom"}
+        assert custom_route.call_count == 1
+        assert groq_route.call_count == 0
+
+
+async def test_custom_failure_falls_back_to_groq():
+    client = LLMClient(_custom_settings())
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post(CUSTOM_URL).mock(return_value=httpx.Response(500, json={"error": "down"}))
+        mock.post(GROQ_URL).mock(return_value=_groq_response({"via": "groq"}))
+        result = await client.generate_json("sp", "up")
+        assert result == {"via": "groq"}
+        assert client.custom_breaker._consecutive_failures >= 1
+
+
+async def test_partial_custom_trio_skipped():
+    client = LLMClient(_custom_settings(custom_llm_api_key=""))
+    with respx.mock(assert_all_called=False) as mock:
+        custom_route = mock.post(CUSTOM_URL).mock(return_value=_groq_response({"via": "custom"}))
+        mock.post(GROQ_URL).mock(return_value=_groq_response({"via": "groq"}))
+        result = await client.generate_json("sp", "up")
+        assert result == {"via": "groq"}
+        assert custom_route.call_count == 0
+
+
+async def test_full_endpoint_url_accepted():
+    client = LLMClient(_custom_settings(
+        custom_llm_base_url="https://llm.example.com/v1/chat/completions"))
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post(CUSTOM_URL).mock(
+            return_value=httpx.Response(200, json={"choices": [{"message": {"content": json.dumps({"ok": True})}}]}))
+        result = await client.generate_json("sp", "up")
+        assert result == {"ok": True}
+        assert route.call_count == 1
+
+
+def test_validator_accepts_custom_only():
+    from app.core.config import Settings
+
+    settings = Settings(custom_llm_api_key="k", custom_llm_base_url="https://x/v1",
+                        custom_llm_model="m", _env_file=None)
+    assert settings.custom_llm_model == "m"

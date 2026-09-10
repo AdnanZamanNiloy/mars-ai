@@ -1,7 +1,17 @@
 from functools import lru_cache
+from typing import Any
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _real_key_like(value: Any) -> str:
+    """Non-empty, non-placeholder key text (mirrors llm._real_key without
+    importing it — config must stay import-cycle free)."""
+    text = str(value or "").strip()
+    if not text or text.lower().startswith("your_"):
+        return ""
+    return text
 
 
 class Settings(BaseSettings):
@@ -22,6 +32,12 @@ class Settings(BaseSettings):
     huggingface_api_key: str = ""
     huggingface_model: str = "Qwen/Qwen2.5-7B-Instruct"
     tavily_api_key: str = ""
+    # Custom OpenAI-compatible provider (any host serving /chat/completions:
+    # OpenRouter, Together, Ollama+ngrok, vLLM, LM Studio, ...). All three
+    # must be set; when present it leads the chain, Groq/HF stay as fallback.
+    custom_llm_api_key: str = ""
+    custom_llm_base_url: str = ""
+    custom_llm_model: str = ""
 
     # Persistence
     database_url: str = "./research.db"
@@ -58,10 +74,15 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _require_llm_provider(self) -> "Settings":
-        if not (self.groq_api_key or self.huggingface_api_key):
+        custom_ok = bool(
+            _real_key_like(self.custom_llm_api_key)
+            and self.custom_llm_base_url.strip()
+            and self.custom_llm_model.strip()
+        )
+        if not (self.groq_api_key or self.huggingface_api_key or custom_ok):
             raise ValueError(
-                "No LLM provider configured. Set GROQ_API_KEY or HUGGINGFACE_API_KEY "
-                "in your environment or .env file."
+                "No LLM provider configured. Set GROQ_API_KEY, HUGGINGFACE_API_KEY, "
+                "or the CUSTOM_LLM_* trio in your environment or .env file."
             )
         return self
 
