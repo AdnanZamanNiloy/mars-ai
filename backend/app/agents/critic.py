@@ -2,7 +2,7 @@ from typing import Any, Dict, List
 
 from app.core.logging import get_logger
 
-from app.agents.evidence_utils import dedupe_semantic_facts, filter_facts_by_domain
+from app.agents.evidence_utils import dedupe_semantic_facts, extract_domain, filter_facts_by_domain, normalize_claim_text
 from app.core.llm import LLMClient, clamp_confidence
 from app.core.schemas import CriticVerdictModel
 
@@ -148,11 +148,30 @@ async def critic_agent(
         is_sufficient = False
 
     # Deterministic guardrails improve consistency when model judgments are noisy.
+    # Synthesis gate: never call evidence sufficient without a verified,
+    # multi-source foundation — a stronger model verdict cannot waive this.
+    # NOTE: quality_facts above are rebuilt by the prefilters WITHOUT the
+    # "verified" key, so verified/source standing is read back off the
+    # incoming facts by normalized claim text.
+    standing: Dict[str, Dict[str, Any]] = {}
+    for f in facts:
+        key = normalize_claim_text(str(f.get("claim", "")))
+        if key and key not in standing:
+            standing[key] = f
+    verified_count = sum(
+        1 for q in quality_facts
+        if standing.get(normalize_claim_text(str(q.get("claim", ""))), {}).get("verified")
+    )
+    distinct_sources = {
+        extract_domain(str(standing.get(normalize_claim_text(str(q.get("claim", ""))), {}).get("source", "")))
+        for q in quality_facts
+    } - {""}
     has_definition = any(" is " in str(f.get("claim", "")).lower() for f in quality_facts[:5])
     avg_fact_conf = sum(float(f.get("confidence", 0.0) or 0.0) for f in quality_facts) / max(1, len(quality_facts))
     min_facts_required = 4
 
-    if len(quality_facts) < min_facts_required or not has_definition or avg_fact_conf < 0.74:
+    if (len(quality_facts) < min_facts_required or not has_definition or avg_fact_conf < 0.74
+            or verified_count < 1 or len(distinct_sources) < 2):
         is_sufficient = False
         confidence = min(confidence, 0.58)
         if not cleaned_queries:
@@ -162,9 +181,11 @@ async def critic_agent(
             ]
         reason = (
             "Evidence is still incomplete for a high-quality synthesis; "
-            "the answer lacks enough reliable, non-redundant coverage or a clear definition."
+            "the answer lacks enough reliable, non-redundant coverage, a clear definition, "
+            "or a verified multi-source foundation "
+            f"(facts={len(quality_facts)}, verified={verified_count}, sources={len(distinct_sources)})."
         )
-    elif avg_fact_conf >= 0.80:
+    elif avg_fact_conf >= 0.80 and verified_count >= 1 and len(distinct_sources) >= 2:
         is_sufficient = True
         confidence = max(confidence, 0.78)
 

@@ -82,6 +82,14 @@ def is_valid_question(q: str) -> bool:
     return len(q.split()) >= 3
 
 
+def diversity_coverage(sub_questions: List[Dict[str, Any]]) -> set:
+    """Distinct valid search_types in a plan — its diversity contract."""
+    return {
+        q.get("search_type") for q in sub_questions
+        if isinstance(q, dict) and q.get("search_type") in VALID_SEARCH_TYPES
+    }
+
+
 def deduplicate_semantic(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     seen = set()
     result = []
@@ -126,6 +134,15 @@ RULE 2 — COVER IN PHASES, NOT JUST AXES
   definition | mechanism | application | criticism | comparison |
   evidence | history | outlook
   Do not restate the same angle twice.
+
+  DIVERSITY TABLE — spread the plan across information types by using at
+  least 3 distinct search_types (they are the plan's diversity contract):
+  facts/data      → statistical   (numbers, market data, official stats)
+  cases/examples  → comparison    (A-vs-B, implementations in the wild)
+  expert views    → academic      (papers, studies, technical depth)
+  trends/outlook  → news          (recent developments, forecasts)
+  background      → encyclopedia  (definitions, established facts)
+  Name the information type each question serves in its coverage_goal.
 
 RULE 3 — SEARCH TYPE PER QUESTION
   Assign exactly one search_type:
