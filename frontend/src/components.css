@@ -70,44 +70,10 @@
 }
 .answer-lead { margin: 2px 0 0; font-size: 14.5px; line-height: 1.65; color: #c9c9d1; white-space: pre-wrap; }
 
-.answer-cols { display: grid; grid-template-columns: 1.04fr 1fr; gap: 0 30px; margin-top: 22px; }
-.answer-cols h3 { font-size: 15.5px; font-weight: 650; margin: 0 0 14px; }
-.answer-cols .right { border-left: 1px solid var(--line-soft); padding-left: 30px; }
-
-.finding { display: flex; gap: 12px; margin-bottom: 15px; }
-.finding:last-child { margin-bottom: 0; }
-.finding-n {
-  width: 26px; height: 26px; flex: none; margin-top: 2px;
-  border-radius: 50%;
-  background: #3f3f46;
-  color: #e4e4e7;
-  font-size: 12.5px; font-weight: 650;
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
-}
-.finding-text { font-size: 13.5px; line-height: 1.58; color: #c2c2ca; margin: 0; }
-.finding.clickable { cursor: pointer; border-radius: 10px; padding: 8px; margin: 0 -8px 7px; transition: background 0.13s; }
-.finding.clickable:hover { background: rgba(255, 255, 255, 0.025); }
-.finding.clickable.selected { background: rgba(255, 255, 255, 0.04); outline: 1px solid #52525b; }
-.cite {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 0 5px;
-  border: 1px solid #2c2c34;
-  background: #1a1a20;
-  border-radius: 5px;
-  font-size: 10.5px;
-  font-weight: 550;
-  line-height: 1.5;
-  color: #84848d;
-  vertical-align: 2px;
-}
 .src-link { color: #9c9ca6; font-size: 12px; text-decoration: none; border-bottom: 1px dotted #44444e; }
 .src-link:hover { color: var(--mars-soft); border-bottom-color: var(--mars-soft); }
 
-.risk-row { display: flex; gap: 11px; margin-bottom: 15px; align-items: flex-start; }
-.risk-row svg { color: var(--mars); flex: none; margin-top: 2px; }
-.risk-row p { margin: 0; font-size: 13.5px; line-height: 1.55; color: #c2c2ca; }
+.evidence-block { margin-top: 0; border-top: 0; padding-top: 0; }
 
 .evidence-block { margin-top: 24px; border-top: 1px solid var(--line-soft); padding-top: 19px; }
 .evidence-block .sub { font-size: 12.5px; color: var(--t3); margin: 6px 0 0; }
@@ -332,16 +298,6 @@
 
 /* ---------- replay ---------- */
 
-.degraded-banner {
-  display: flex; align-items: center; gap: 10px;
-  border: 1px solid var(--line);
-  border-left: 3px solid #71717a;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: var(--r-md);
-  padding: 11px 15px; margin-bottom: 16px;
-  font-size: 12.5px; color: var(--t2);
-}
-
 .replay-banner {
   display: flex; align-items: center; gap: 10px;
   border: 1px solid var(--line);
@@ -355,8 +311,6 @@
 /* ---------- responsive columns ---------- */
 
 @media (max-width: 720px) {
-  .answer-cols { grid-template-columns: 1fr; }
-  .answer-cols .right { border-left: 0; padding-left: 0; margin-top: 20px; border-top: 1px solid var(--line-soft); padding-top: 20px; }
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
   .answer { padding: 16px; }
 }

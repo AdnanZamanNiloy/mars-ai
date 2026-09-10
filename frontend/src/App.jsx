@@ -282,10 +282,7 @@ export default function App() {
     try {
       const trace = await fetchTrace(runId);
       const mission = loadMissions().find((m) => m.runId === runId);
-      const degraded = [...new Set(
-        (trace.events || []).filter((e) => e.event_type === "fallback").map((e) => e.node)
-      )];
-      setMessages((prev) => [...prev, { id: nid(), kind: "replay", runId, trace, degraded,
+      setMessages((prev) => [...prev, { id: nid(), kind: "replay", runId, trace,
         query: mission?.query || trace.query || "Replay", at: new Date().toISOString() }]);
       const events = (trace.events || []).map((e) => ({
         at: e.ended_at || e.started_at || new Date().toISOString(),
@@ -362,8 +359,6 @@ export default function App() {
                   key={m.id}
                   message={m}
                   running={running}
-                  selectedFinding={selectedFinding}
-                  onSelectFinding={setSelectedFinding}
                   onResume={resumeRun}
                 />)
               )}
@@ -415,7 +410,7 @@ export default function App() {
   );
 }
 
-function ThreadMessage({ message, running, selectedFinding, onSelectFinding, onResume }) {
+function ThreadMessage({ message, running, onResume }) {
   if (message.kind === "user") {
     return <UserMessage text={message.text} time={fmtTime(message.at)} />;
   }
@@ -433,18 +428,7 @@ function ThreadMessage({ message, running, selectedFinding, onSelectFinding, onR
           <ErrorCard message={run.error} resumable={run.resumable} resuming={run.resuming} onResume={() => onResume(run)} />
         ) : null}
         {run.done && run.report ? (
-          <>
-            {run.degraded.length > 0 ? (
-              <div className="degraded-banner anim-rise" role="status">
-                <span className="tag tone-bad">degraded</span>
-                <span>
-                  {run.degraded.join(", ")} fell back to deterministic defaults — the model
-                  was unreachable for parts of this run, so treat the answer with extra care.
-                </span>
-              </div>
-            ) : null}
-            <AnswerCard run={run} selectedFinding={selectedFinding} onSelectFinding={onSelectFinding} />
-          </>
+          <AnswerCard run={run} />
         ) : null}
         {run.done && !run.report && !run.error ? (
           <div className="error-box">The run finished without producing a report.</div>
@@ -457,19 +441,12 @@ function ThreadMessage({ message, running, selectedFinding, onSelectFinding, onR
   }
   if (message.kind === "replay") {
     const { trace } = message;
-    const degraded = message.degraded || [];
     return (
       <MarsMessageShell time={fmtTime(message.at)}>
         <div className="replay-banner">
           <span className="tag tone-blue">replay</span>
           <span>Read-only record of “{message.query}” · status: {trace.status}{(trace.plan || []).length ? ` · ${(trace.plan || []).length} planned questions` : ""}</span>
         </div>
-        {degraded.length > 0 ? (
-          <div className="degraded-banner anim-rise" role="status">
-            <span className="tag tone-bad">degraded</span>
-            <span>{degraded.join(", ")} fell back to deterministic defaults during this run.</span>
-          </div>
-        ) : null}
         {trace.final_report ? (
           <ReplayAnswerCard trace={trace} />
         ) : (
