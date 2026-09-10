@@ -151,3 +151,76 @@ def test_resume_reruns_critic_not_planner_or_search(tmp_path, monkeypatch):
     status, report = asyncio.run(_check())
     assert status == "completed"
     assert "# Final Answer" in report
+
+
+def test_incremental_sources_saved_without_duplicates(tmp_path):
+    """Expansion passes persist only unseen source URLs (no re-inserts)."""
+    from app.api.routes import limiter
+    from app.api.routes import router as api_router
+    from app.db.sqlite import init_db
+
+    db_path = str(tmp_path / "incsrc.db")
+    asyncio.run(init_db(db_path))
+
+    class StubSourceWorkflow:
+        async def astream(self, state, stream_mode=None):
+            yield {"search_results": [
+                {"url": "https://a.com/1", "snippet": "s1"},
+                {"url": "https://b.com/2", "snippet": "s2"},
+            ]}
+            yield {"search_results": [
+                {"url": "https://a.com/1", "snippet": "s1"},
+                {"url": "https://b.com/2", "snippet": "s2"},
+                {"url": "https://c.com/3", "snippet": "s3"},
+            ]}
+            yield {"final_report": "# Final Answer\nok", "confidence": 0.6}
+
+    settings = Settings(groq_api_key="k", database_url=db_path, _env_file=None)
+    app = FastAPI()
+    app.state.workflow = StubSourceWorkflow()
+    app.state.settings = settings
+    app.state.limiter = limiter
+    app.include_router(api_router, prefix="/api")
+    limiter.reset()
+
+    async def _call():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.post("/api/research/stream", json={"query": "valid research query here"})
+
+    response = asyncio.run(_call())
+    limiter.reset()
+    assert response.status_code == 200
+
+    import aiosqlite
+
+    async def _check():
+        async with aiosqlite.connect(db_path) as db:
+            cur = await db.execute("SELECT url FROM sources ORDER BY id")
+            urls = [r[0] for r in await cur.fetchall()]
+            cur = await db.execute("SELECT COUNT(*) FROM evidence")
+            ev = (await cur.fetchone())[0]
+        return urls, ev
+
+    urls, ev = asyncio.run(_check())
+    assert urls == ["https://a.com/1", "https://b.com/2", "https://c.com/3"], urls
+    assert ev == 3, ev
+
+
+def test_resume_restores_run_max_iterations(tmp_path):
+    """load_state_for_resume returns the run's own ceiling, not hardcoded 3."""
+    from app.db.sqlite import init_db, load_state_for_resume
+
+    db_path = str(tmp_path / "maxiter.db")
+    asyncio.run(init_db(db_path))
+
+    async def _seed():
+        await start_research_run(db_path, "run-deep", "q", complexity="high",
+                                 agent_count=5, max_iterations=5)
+        await complete_research_run(db_path, "run-deep", "timeout", confidence=0.0,
+                                    estimated_cost=0.0)
+
+    asyncio.run(_seed())
+    state = asyncio.run(load_state_for_resume(db_path, "run-deep"))
+    assert state is not None
+    assert state["max_iterations"] == 5

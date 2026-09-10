@@ -120,3 +120,80 @@ async def test_critic_event_carries_confidence_breakdown(tmp_path):
         rows = await cur.fetchall()
     assert len(rows) == 1
     assert json.loads(rows[0][0]) == {"overall": 0.8, "signals": {"source_quality": 0.9}}
+
+
+class StubVerifyWorkflow:
+    """Pre-verifier snapshot (unverified facts) then post-verifier snapshot
+    (same length, annotated in place) — the re-emission case."""
+
+    async def astream(self, state, stream_mode=None):
+        yield {"facts": [
+            {"claim": "RAG combines search with generation", "source": "https://a.com", "confidence": 0.8},
+            {"claim": "Dense indexes serve the retriever", "source": "https://b.com", "confidence": 0.7},
+        ], "iteration": 0}
+        yield {"facts": [
+            {"claim": "RAG combines search with generation", "source": "https://a.com", "confidence": 0.8,
+             "verified": True, "verification_score": 0.9},
+            {"claim": "Dense indexes serve the retriever", "source": "https://b.com", "confidence": 0.7,
+             "verified": False, "verification_score": 0.2},
+        ], "iteration": 0}
+        yield {"final_report": "# Final Answer\nok", "confidence": 0.7}
+
+
+async def test_verified_facts_reemit_when_flags_change(tmp_path):
+    from app.db.sqlite import init_db
+
+    db_path = str(tmp_path / "reemit.db")
+    await init_db(db_path)
+    settings = Settings(groq_api_key="test-key", database_url=db_path, _env_file=None)
+    app = _build_app(StubVerifyWorkflow(), settings)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/research/stream", json={"query": "valid research query here"})
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    findings = [e for e in events if e.get("type") == "findings"]
+    assert len(findings) == 2, findings
+    assert findings[1].get("verified_update") is True
+    assert findings[1]["items"][0]["verified"] is True
+    assert findings[1]["items"][1]["verified"] is False
+
+
+async def test_eval_batches_endpoint_returns_summaries(tmp_path):
+    from app.db.sqlite import init_db, save_evaluation_run
+
+    db_path = str(tmp_path / "evalapi.db")
+    await init_db(db_path)
+    await save_evaluation_run(db_path, {
+        "eval_batch": "b1", "query_id": "q1", "query": "What is RAG?", "mode": "quick",
+        "run_id": "r1", "status": "completed", "confidence": 0.8, "claims": 6,
+        "verified": 4, "sources": 8, "contradictions": 0,
+        "recommended_option": None, "cost": 0.001, "passed": True, "degraded": [],
+    })
+    settings = Settings(groq_api_key="test-key", database_url=db_path, _env_file=None)
+    app = _build_app(StubFastWorkflow(), settings)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/eval/batches?limit=5")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["batches"]) == 1
+    batch = data["batches"][0]
+    assert batch["batch"] == "b1"
+    assert batch["summary"]["queries"] == 1
+    assert batch["summary"]["pass_rate"] == 1.0
+    assert batch["rows"][0]["query_id"] == "q1"
+    assert batch["rows"][0]["mode"] == "quick"
+
+
+async def test_eval_batches_rejects_bad_limit(tmp_path):
+    from app.db.sqlite import init_db
+
+    db_path = str(tmp_path / "evalapi2.db")
+    await init_db(db_path)
+    settings = Settings(groq_api_key="test-key", database_url=db_path, _env_file=None)
+    app = _build_app(StubFastWorkflow(), settings)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/eval/batches?limit=abc")
+    assert response.status_code == 422

@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS research_runs (
     status TEXT NOT NULL,
     estimated_cost REAL,
     confidence REAL,
+    max_iterations INTEGER NOT NULL DEFAULT 3,
     created_at TEXT NOT NULL,
     completed_at TEXT
 );
@@ -103,6 +104,35 @@ CREATE TABLE IF NOT EXISTS final_reports (
     generated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS contradictions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES research_runs(id),
+    claim_a TEXT NOT NULL,
+    source_a TEXT NOT NULL,
+    claim_b TEXT NOT NULL,
+    source_b TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS verification_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES research_runs(id),
+    claim TEXT NOT NULL,
+    verified INTEGER NOT NULL,
+    score REAL,
+    reason TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS citations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES research_runs(id),
+    marker INTEGER NOT NULL,
+    domain TEXT NOT NULL,
+    url TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS evaluation_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     eval_batch TEXT NOT NULL,
@@ -147,6 +177,9 @@ async def init_db(database_path: str) -> None:
         review_cols = await db.execute("PRAGMA table_info(critic_reviews)")
         if "breakdown" not in {r[1] for r in await review_cols.fetchall()}:
             await db.execute("ALTER TABLE critic_reviews ADD COLUMN breakdown TEXT NOT NULL DEFAULT '{}'")
+        run_cols = await db.execute("PRAGMA table_info(research_runs)")
+        if "max_iterations" not in {r[1] for r in await run_cols.fetchall()}:
+            await db.execute("ALTER TABLE research_runs ADD COLUMN max_iterations INTEGER NOT NULL DEFAULT 3")
         claim_cols = await db.execute("PRAGMA table_info(claims)")
         claim_names = {r[1] for r in await claim_cols.fetchall()}
         if "agent" not in claim_names:
@@ -182,12 +215,13 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def start_research_run(database_path: str, run_id: str, query: str, complexity: str, agent_count: int) -> None:
+async def start_research_run(database_path: str, run_id: str, query: str, complexity: str, agent_count: int,
+                           max_iterations: int = 3) -> None:
     async with aiosqlite.connect(database_path) as db:
         await db.execute(
-            "INSERT OR IGNORE INTO research_runs (id, query, complexity, agent_count, status, created_at) "
-            "VALUES (?, ?, ?, ?, 'running', ?)",
-            (run_id, query, complexity, agent_count, _now()),
+            "INSERT OR IGNORE INTO research_runs (id, query, complexity, agent_count, status, max_iterations, created_at) "
+            "VALUES (?, ?, ?, ?, 'running', ?, ?)",
+            (run_id, query, complexity, agent_count, int(max_iterations), _now()),
         )
         await db.commit()
 
@@ -404,6 +438,82 @@ async def save_decisions(database_path: str, run_id: str, options: list) -> None
         await db.commit()
 
 
+async def save_contradictions(database_path: str, run_id: str, contradictions: list) -> int:
+    """Persist detected contradiction pairs for replay and diagnosis."""
+    rows = [
+        (
+            run_id,
+            str(c.get("claim_a", "")).strip(),
+            str(c.get("source_a", "") or "").strip(),
+            str(c.get("claim_b", "")).strip(),
+            str(c.get("source_b", "") or "").strip(),
+            _now(),
+        )
+        for c in contradictions or []
+        if isinstance(c, dict) and str(c.get("claim_a", "")).strip() and str(c.get("claim_b", "")).strip()
+    ]
+    if not rows:
+        return 0
+    async with aiosqlite.connect(database_path) as db:
+        await db.executemany(
+            "INSERT INTO contradictions (run_id, claim_a, source_a, claim_b, source_b, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        await db.commit()
+    return len(rows)
+
+
+async def save_verification_results(database_path: str, run_id: str, facts: list) -> int:
+    """Persist per-fact verification detail (the claims table keeps only
+    the verified flag; scores and reasons live here)."""
+    rows = [
+        (
+            run_id,
+            str(f.get("claim", "")).strip(),
+            1 if f.get("verified") else 0,
+            float(f.get("verification_score", 0.0) or 0.0)
+            if isinstance(f.get("verification_score"), (int, float)) else None,
+            str(f.get("verification_reason", "") or ""),
+            _now(),
+        )
+        for f in facts or []
+        if isinstance(f, dict) and str(f.get("claim", "")).strip()
+    ]
+    if not rows:
+        return 0
+    async with aiosqlite.connect(database_path) as db:
+        await db.executemany(
+            "INSERT INTO verification_results (run_id, claim, verified, score, reason, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        await db.commit()
+    return len(rows)
+
+
+async def save_citations(database_path: str, run_id: str, report_markdown: str) -> int:
+    """Parse the emitted Sources legend back into citation rows, so the
+    [n] markers in the report resolve to URLs without reparsing markdown."""
+    import re as _re
+
+    count = 0
+    _, _, legend = (report_markdown or "").partition("\nSources:")
+    async with aiosqlite.connect(database_path) as db:
+        for line in legend.splitlines():
+            match = _re.match(r"^\[(\d+)\]\s+(\S+)\s+—\s*(\S+)\s*$", line.strip())
+            if not match:
+                continue
+            await db.execute(
+                "INSERT INTO citations (run_id, marker, domain, url, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (run_id, int(match.group(1)), match.group(2), match.group(3) or "", _now()),
+            )
+            count += 1
+        await db.commit()
+    return count
+
+
 async def save_final_report(database_path: str, run_id: str, report_markdown: str, confidence: float) -> None:
     """Canonical report row keyed by run_id (research_reports stays for
     backward compatibility)."""
@@ -463,13 +573,16 @@ async def eval_batch_rows(database_path: str, eval_batch: str) -> list:
     async with aiosqlite.connect(database_path) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
-            "SELECT query_id, confidence, claims, verified, sources, contradictions, cost, "
+            "SELECT query_id, query, mode, status, confidence, claims, verified, sources, contradictions, cost, "
             "checks_passed, degraded, judge_score FROM evaluation_runs WHERE eval_batch = ? ORDER BY id",
             (eval_batch,),
         )
         return [
             {
                 "query_id": r["query_id"],
+                "query": r["query"],
+                "mode": r["mode"],
+                "status": r["status"],
                 "confidence": r["confidence"],
                 "claims": r["claims"],
                 "verified": r["verified"],
@@ -569,7 +682,8 @@ async def load_state_for_resume(database_path: str, run_id: str) -> dict | None:
         "critique": {},
         "critique_feedback": "",
         "iteration": iteration,
-        "max_iterations": 3,
+        "max_iterations": int(run_row["max_iterations"] or 3)
+        if "max_iterations" in run_row.keys() else 3,
         "final_report": "",
         "synthesized_answer": "",
         "confidence": run_row["confidence"] or 0.0,
@@ -667,6 +781,21 @@ async def get_run_trace(database_path: str, run_id: str) -> dict | None:
             "FROM decisions WHERE run_id = ? ORDER BY id",
             (run_id,),
         )
+        contradictions = await _all(
+            "SELECT id, claim_a, source_a, claim_b, source_b, created_at "
+            "FROM contradictions WHERE run_id = ? ORDER BY id",
+            (run_id,),
+        )
+        verification_results = await _all(
+            "SELECT id, claim, verified, score, reason, created_at "
+            "FROM verification_results WHERE run_id = ? ORDER BY id",
+            (run_id,),
+        )
+        citations = await _all(
+            "SELECT id, marker, domain, url, created_at "
+            "FROM citations WHERE run_id = ? ORDER BY marker, id",
+            (run_id,),
+        )
         cur = await db.execute(
             "SELECT report_markdown, confidence, generated_at FROM final_reports WHERE run_id = ?",
             (run_id,),
@@ -690,5 +819,8 @@ async def get_run_trace(database_path: str, run_id: str) -> dict | None:
             "critic_reviews": critic_reviews,
             "evidence": evidence,
             "decisions": decisions,
+            "contradictions": contradictions,
+            "verification_results": verification_results,
+            "citations": citations,
             "final_report": dict(final_report_row) if final_report_row else None,
         }

@@ -110,15 +110,12 @@ These are real bugs found by reading the code, not hypotheticals. Each one below
   still fail.
 ```
 
-[OPEN — found in Phase 4.1 calibration] app/api/routes.py (findings emission)
-  Findings NDJSON events are length-based (`len(facts) > emitted_findings`),
-  but verifier_node annotates facts in place (same list length) — so
-  `verified`/`verification_score` never re-emit on single-pass runs and
-  live `findings` events always read unverified. The claims table is
-  unaffected (saved post-critic), and the eval harness (4.1) scores
-  persisted trace truth for exactly this reason. A proper fix re-emits
-  facts when verification flags change; until then, do not trust
-  stream-observed `verified` in new UI features — read trace claims.
+[FIXED — verified-flags re-emission] app/api/routes.py (findings emission)
+  Findings NDJSON events were length-based, so verifier in-place annotation
+  never re-emitted. The route now emits the annotated facts once when
+  verification flags first appear (`verified_update: true`), and the UI
+  upserts by claim text instead of appending duplicates. Eval scoring of
+  persisted trace truth is unchanged.
 
 [FIXED — answer-quality audit] app/agents/summarizer.py (stale fact cache)
   The summarizer cache key embeds PROMPT_VERSION, but the version was not

@@ -12,21 +12,27 @@ from slowapi.util import get_remote_address
 from app.core.config import get_settings
 from app.core.budget import BudgetTracker, current_budget
 from app.core.degradation import clear_fallbacks, reset_fallbacks, take_fallbacks
+from app.core.eval import summarize_batch
 from app.db.sqlite import (
     complete_research_run,
+    eval_batch_rows,
     get_run_trace,
+    latest_eval_batches,
     load_state_for_resume,
     mark_challenged_claims,
     mark_run_resumable_reset,
     record_event,
     save_agent_tasks,
+    save_citations,
     save_claims,
+    save_contradictions,
     save_critic_review,
     save_decisions,
     save_evidence,
     save_final_report,
     save_report,
     save_sources,
+    save_verification_results,
     start_research_run,
 )
 from app.core.logging import bind_request_context, get_logger, unbind_request_context
@@ -64,6 +70,41 @@ async def research_trace(run_id: str, request: Request) -> Dict[str, Any]:
     if trace is None:
         raise HTTPException(status_code=404, detail=f"Unknown run_id: {run_id}")
     return trace
+
+
+@router.get("/eval/batches")
+async def eval_batches(request: Request, limit: int = 5) -> Dict[str, Any]:
+    """Evaluation Lab dashboard data (read-only): recent batches with
+    headline summaries plus per-query rows. Trends exclude degraded rows
+    the same way scripts/run_eval.py reports them."""
+    settings = getattr(request.app.state, "settings", None)
+    if settings is None:
+        raise HTTPException(status_code=500, detail="Workflow is not initialized")
+
+    try:
+        count = max(1, min(int(limit), 20))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="limit must be an integer 1-20")
+
+    batches = []
+    for batch in await latest_eval_batches(settings.database_url, limit=count):
+        rows = await eval_batch_rows(settings.database_url, batch)
+        clean = [r for r in rows if not r.get("degraded")]
+        batches.append({
+            "batch": batch,
+            "summary": summarize_batch(clean),
+            "degraded_excluded": len(rows) - len(clean),
+            "rows": [
+                {"query_id": r.get("query_id"), "query": r.get("query"), "mode": r.get("mode"),
+                 "status": r.get("status"), "confidence": r.get("confidence"),
+                 "claims": r.get("claims"), "verified": r.get("verified"),
+                 "contradictions": r.get("contradictions"), "cost": r.get("cost"),
+                 "passed": r.get("passed"), "degraded": r.get("degraded", []),
+                 "judge_score": r.get("judge_score")}
+                for r in rows
+            ],
+        })
+    return {"batches": batches}
 
 
 @router.post("/research/stream")
@@ -117,8 +158,9 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
             last_iteration = -1
             emitted_plan = False
             emitted_findings = 0
+            emitted_verified = False
             saved_facts = 0
-            saved_sources = False
+            saved_source_urls: set = set()
 
             async def _persist(coro):
                 """Memory persistence must never kill a research run — log and continue."""
@@ -167,6 +209,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 payload.query,
                 complexity=str(state.get("orchestration", {}).get("complexity_level", "unknown")),
                 agent_count=int(state.get("orchestration", {}).get("target_agents", 0)),
+                max_iterations=int(state.get("max_iterations", 3)),
             ))
 
             yield event_line("progress", request_id=request_id, message="Query received")
@@ -202,17 +245,23 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                                 "search_progress",
                                 snippets=len(snapshot["search_results"]),
                             )
-                            if not saved_sources:
-                                saved_sources = True
+                            # Incremental persistence: expansion passes add new
+                            # sources — save only unseen URLs, never re-insert.
+                            fresh_sources = [
+                                r for r in snapshot.get("search_results", [])
+                                if r.get("url") and r.get("url") not in saved_source_urls
+                            ]
+                            if fresh_sources:
+                                saved_source_urls.update(r.get("url") for r in fresh_sources)
                                 await _persist(save_sources(
                                     settings.database_url,
                                     request_id,
-                                    snapshot.get("search_results", []),
+                                    fresh_sources,
                                 ))
                                 await _persist(save_evidence(
                                     settings.database_url,
                                     request_id,
-                                    snapshot.get("search_results", []),
+                                    fresh_sources,
                                 ))
 
                         if iteration != last_iteration and iteration > 0:
@@ -233,6 +282,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                             ))
 
                         facts = snapshot.get("facts", [])
+                        has_verified = any("verified" in f for f in facts)
                         if len(facts) > emitted_findings:
                             new_facts = facts[emitted_findings : emitted_findings + 3]
                             findings = [
@@ -251,6 +301,23 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                             ]
                             yield event_line("findings", items=findings)
                             emitted_findings = len(facts)
+                        if has_verified and not emitted_verified:
+                            # Verifier annotates in place (same list length), so the
+                            # length check above never fires for it — re-emit the
+                            # annotated facts once so live verification is real.
+                            emitted_verified = True
+                            yield event_line("findings", verified_update=True, items=[
+                                {
+                                    "claim": f.get("claim", ""),
+                                    "source": f.get("source", ""),
+                                    "verified": f.get("verified"),
+                                    "verification_score": f.get("verification_score"),
+                                    "verification_reason": f.get("verification_reason"),
+                                    "agent": f.get("agent", ""),
+                                    "confidence": f.get("confidence"),
+                                }
+                                for f in facts
+                            ])
 
                         if len(facts) > saved_facts and iteration > 0:
                             # Persist new claims incrementally (post-verifier snapshots only).
@@ -312,6 +379,14 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
             await _persist(mark_challenged_claims(
                 settings.database_url, request_id, last_snapshot.get("contradictions") or [],
             ))
+            # Verification-domain memory: contradictions, per-fact results,
+            # and parsed citations persist alongside the report.
+            await _persist(save_contradictions(
+                settings.database_url, request_id, last_snapshot.get("contradictions") or [],
+            ))
+            await _persist(save_verification_results(
+                settings.database_url, request_id, last_snapshot.get("facts", []),
+            ))
 
             if report:
                 await save_report(
@@ -324,6 +399,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 await _persist(save_final_report(
                     settings.database_url, request_id, report, confidence,
                 ))
+                await _persist(save_citations(settings.database_url, request_id, report))
                 # Degradation flag: which agents fell back to deterministic
                 # defaults (field on the existing event — no contract break).
                 degraded = take_fallbacks()
@@ -406,6 +482,14 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
         last_iteration = int(state.get("iteration", 0))
         emitted_findings = 0
         saved_facts = 0
+
+        async def _persist(coro):
+            """Memory persistence must never kill a resumed run either."""
+            try:
+                await coro
+            except Exception as exc:
+                logger.warning("persistence_failed", error=str(exc), exc_info=exc)
+
         try:
             yield event_line("progress", request_id=request_id, message=f"Resuming run {request_id[:8]}")
 
@@ -454,8 +538,18 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
             report = str(final_state.get("final_report", ""))
             confidence = float(final_state.get("confidence", 0.0))
             await _persist_complete(settings.database_url, request_id, "completed", confidence, budget_tracker.estimated_cost_usd)
+            await _persist(mark_challenged_claims(
+                settings.database_url, request_id, last_snapshot.get("contradictions") or [],
+            ))
+            await _persist(save_contradictions(
+                settings.database_url, request_id, last_snapshot.get("contradictions") or [],
+            ))
+            await _persist(save_verification_results(
+                settings.database_url, request_id, last_snapshot.get("facts", []),
+            ))
             if report:
                 await _persist_report(settings.database_url, request_id, str(state.get("query", "")), report, confidence)
+                await _persist(save_citations(settings.database_url, request_id, report))
                 degraded = take_fallbacks()
                 for agent in degraded:
                     await _persist(record_event(
