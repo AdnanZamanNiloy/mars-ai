@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchTrace, resumeResearch, startResearch } from "./api";
-import { MODE_META, loadMissions, removeMission, upsertMission } from "./lib";
+import { MODE_META, loadMissions, parseReport, removeMission, upsertMission } from "./lib";
 import Sidebar, { Planet } from "./components/Sidebar";
 import Composer from "./components/Composer";
 import { ErrorCard, LiveRunCard, MarsMessageShell, TypingRow, UserMessage } from "./components/Thread";
@@ -60,6 +60,7 @@ export default function App() {
   const controllerRef = useRef(null);
   const threadRef = useRef(null);
   const runRef = useRef(null); // tempId of the in-flight run
+  const parentRef = useRef(null); // parent runId for challenge runs
 
   const saveMissions = useCallback((list) => setMissions(list), []);
 
@@ -99,6 +100,7 @@ export default function App() {
               saveMissions(upsertMission({
                 runId: evt.request_id, query: msg.run.query, mode: msg.run.mode,
                 status: msg.run.resuming ? "running" : "running", confidence: null, cost: null,
+                parentRunId: parentRef.current,
               }));
             }
             return prev;
@@ -134,8 +136,18 @@ export default function App() {
         if (Array.isArray(evt.items)) {
           setMessages((prev) => prev.map((m) => {
             if (m.kind !== "run" || m.run.tempId !== tempId) return m;
-            const findings = [...m.run.findings, ...evt.items];
-            return { ...m, run: { ...m.run, findings, verifiedCount: findings.filter((f) => f.verified === true).length } };
+            // verified_update re-emits annotated facts (same length): upsert
+            // by claim text instead of appending duplicates.
+            let findings;
+            if (evt.verified_update) {
+              const byClaim = new Map(m.run.findings.map((f) => [f.claim, f]));
+              for (const item of evt.items) byClaim.set(item.claim, item);
+              findings = [...byClaim.values()];
+            } else {
+              findings = [...m.run.findings, ...evt.items];
+            }
+            return { ...m, run: { ...m.run, findings,
+              verifiedCount: findings.filter((f) => f.verified === true).length } };
           }));
           pushTrace({ key: "findings", text: "Claims extracted", kind: "active" });
         }
@@ -205,10 +217,11 @@ export default function App() {
     }
   }, [patchRun, pushTrace, saveMissions]);
 
-  const launch = useCallback(async (queryText, { resumeRun = null } = {}) => {
+  const launch = useCallback(async (queryText, { resumeRun = null, parentRunId = null } = {}) => {
     if (running) return;
     const controller = new AbortController();
     controllerRef.current = controller;
+    parentRef.current = parentRunId;
 
     let tempId;
     if (resumeRun) {
@@ -260,6 +273,7 @@ export default function App() {
     } finally {
       controllerRef.current = null;
       runRef.current = null;
+      parentRef.current = null;
       setRunning(false);
     }
   }, [running, mode, patchRun, pushTrace, handleEvent, saveMissions]);
@@ -300,6 +314,19 @@ export default function App() {
   const resumeRun = useCallback((run) => {
     if (running || !run.runId) return;
     launch("", { resumeRun: run });
+  }, [launch, running]);
+
+  const challengeRun = useCallback((run) => {
+    if (running || !run.runId) return;
+    const sections = parseReport(run.report || "");
+    const ammo = sections.contradictions || sections.finalAnswer || "";
+    const challengeQuery =
+      `Challenge this research conclusion. Original question: "${run.query}". ` +
+      (ammo
+        ? `Attack these points with counter-evidence: ${ammo.slice(0, 400)}`
+        : "Find counter-evidence, limitations, and reasons the conclusion could be wrong.");
+    setMode("redteam");
+    launch(challengeQuery, { parentRunId: run.runId });
   }, [launch, running]);
 
   const openReplay = useCallback(async (runId) => {
@@ -386,6 +413,7 @@ export default function App() {
                   message={m}
                   running={running}
                   onResume={resumeRun}
+                  onChallenge={challengeRun}
                 />)
               )}
             </div>
@@ -436,7 +464,7 @@ export default function App() {
   );
 }
 
-function ThreadMessage({ message, running, onResume }) {
+function ThreadMessage({ message, running, onResume, onChallenge }) {
   if (message.kind === "user") {
     return <UserMessage text={message.text} time={fmtTime(message.at)} />;
   }
@@ -454,7 +482,16 @@ function ThreadMessage({ message, running, onResume }) {
           <ErrorCard message={run.error} resumable={run.resumable} resuming={run.resuming} onResume={() => onResume(run)} />
         ) : null}
         {run.done && run.report ? (
-          <AnswerCard run={run} />
+          <>
+            <AnswerCard run={run} />
+            {!running ? (
+              <div style={{ marginTop: 12 }}>
+                <button className="btn" onClick={() => onChallenge(run)}>
+                  Challenge conclusion
+                </button>
+              </div>
+            ) : null}
+          </>
         ) : null}
         {run.done && !run.report && !run.error ? (
           <div className="error-box">The run finished without producing a report.</div>

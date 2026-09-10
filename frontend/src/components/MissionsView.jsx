@@ -44,12 +44,19 @@ export default function MissionsView({ missions, onOpen, onRemove, onNew }) {
         <h2>Missions</h2>
         <p>{missions.length} run{missions.length === 1 ? "" : "s"} · click any mission to replay its trace</p>
       </div>
-      {missions.map((m) => (
+      {missions.map((m) => {
+        const parent = m.parentRunId ? missions.find((p) => p.runId === m.parentRunId) : null;
+        return (
         <div key={m.runId} className="mission-card" onClick={() => onOpen(m.runId)} role="button" tabIndex={0}
           onKeyDown={(e) => { if (e.key === "Enter") onOpen(m.runId); }}>
           <span className={`dot ${DOT[m.status] || "idle"}`} style={{ marginTop: 6 }} />
           <span className="body">
             <p className="q">{m.query}</p>
+            {parent ? (
+              <span className="meta">
+                <span>↳ challenge of “{(parent.query || "").slice(0, 70)}”</span>
+              </span>
+            ) : null}
             <span className="meta">
               <span className="tag tone-muted">{MODE_META[m.mode]?.label || m.mode}</span>
               <span className={`tag tone-${m.status === "completed" ? "good" : m.status === "running" ? "blue" : m.status === "resumable" ? "bad" : "muted"}`}>
@@ -73,7 +80,8 @@ export default function MissionsView({ missions, onOpen, onRemove, onNew }) {
             <IconX size={14} />
           </button>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
