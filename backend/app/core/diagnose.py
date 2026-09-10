@@ -97,6 +97,26 @@ def contradiction_watch(report_markdowns: List[str]) -> Dict[str, Any]:
     return {"reports": len(report_markdowns), "with_contradictions": hits, "rate": hits / len(report_markdowns)}
 
 
+def _finding_key(health: Dict[str, Any], domains: List[Dict[str, Any]],
+                 critic: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Shared pattern detectors: each returns a finding dict or nothing.
+    attention_flags() and recommend() render different views of these."""
+    findings = []
+    if health["total"] >= 5 and health["fail_rate"] > 0.2:
+        findings.append({"key": "interruptions", "fail_rate": health["fail_rate"],
+                         "total": health["total"]})
+    for row in domains:
+        if row["claims"] >= 10 and row["verified_rate"] < 0.3:
+            findings.append({"key": "low_yield_domain", "domain": row["domain"],
+                             "rate": row["verified_rate"], "claims": row["claims"]})
+    if critic["runs"] >= 5 and critic["expansion_rate"] > 0.8 and critic["avg_confidence_gain"] < 0.05:
+        findings.append({"key": "wasteful_expansion", "rate": critic["expansion_rate"],
+                         "gain": critic["avg_confidence_gain"]})
+    if health["avg_cost"] is not None and health["avg_cost"] > 0.01:
+        findings.append({"key": "high_cost", "cost": health["avg_cost"]})
+    return findings
+
+
 def attention_flags(
     health: Dict[str, Any],
     domains: List[Dict[str, Any]],
@@ -105,27 +125,66 @@ def attention_flags(
     """Human-readable warnings. Conservative thresholds — flag only
     patterns strong enough to act on, not every below-average number."""
     flags = []
-    if health["total"] >= 5 and health["fail_rate"] > 0.2:
-        flags.append(
-            f"High interruption rate: {health['fail_rate']:.0%} of {health['total']} runs "
-            "ended failed/timeout — check timeouts and provider errors before tuning quality."
-        )
-    for row in domains:
-        if row["claims"] >= 10 and row["verified_rate"] < 0.3:
+    for finding in _finding_key(health, domains, critic):
+        key = finding["key"]
+        if key == "interruptions":
             flags.append(
-                f"Low verification yield from {row['domain']}: "
-                f"{row['verified_rate']:.0%} verified across {row['claims']} claims — "
+                f"High interruption rate: {finding['fail_rate']:.0%} of {finding['total']} runs "
+                "ended failed/timeout — check timeouts and provider errors before tuning quality."
+            )
+        elif key == "low_yield_domain":
+            flags.append(
+                f"Low verification yield from {finding['domain']}: "
+                f"{finding['rate']:.0%} verified across {finding['claims']} claims — "
                 "consider down-weighting or blocklisting this provider."
             )
-    if critic["runs"] >= 5 and critic["expansion_rate"] > 0.8 and critic["avg_confidence_gain"] < 0.05:
-        flags.append(
-            f"Critic expands {critic['expansion_rate']:.0%} of runs but gains only "
-            f"{critic['avg_confidence_gain']:+.2f} confidence on average — expansion "
-            "may be burning budget for little improvement."
-        )
-    if health["avg_cost"] is not None and health["avg_cost"] > 0.01:
-        flags.append(
-            f"Average run cost ${health['avg_cost']:.4f} is above the $0.01 comfort line — "
-            "review per-run budget caps."
-        )
+        elif key == "wasteful_expansion":
+            flags.append(
+                f"Critic expands {finding['rate']:.0%} of runs but gains only "
+                f"{finding['gain']:+.2f} confidence on average — expansion "
+                "may be burning budget for little improvement."
+            )
+        elif key == "high_cost":
+            flags.append(
+                f"Average run cost ${finding['cost']:.4f} is above the $0.01 comfort line — "
+                "review per-run budget caps."
+            )
     return flags
+
+
+def recommend(
+    health: Dict[str, Any],
+    domains: List[Dict[str, Any]],
+    critic: Dict[str, Any],
+) -> List[Dict[str, str]]:
+    """Suggested concrete changes, one per finding. Applied manually —
+    the loop stays human-supervised by design (vision §22)."""
+    suggestions = []
+    for finding in _finding_key(health, domains, critic):
+        key = finding["key"]
+        if key == "interruptions":
+            suggestions.append({
+                "problem": f"{finding['fail_rate']:.0%} of runs end failed/timeout.",
+                "suggestion": "Raise RESEARCH_TIMEOUT_SEC, then check provider 429/DNS errors "
+                              "in backend logs before touching quality settings.",
+            })
+        elif key == "low_yield_domain":
+            suggestions.append({
+                "problem": f"{finding['domain']} verifies at {finding['rate']:.0%}.",
+                "suggestion": f"Add {finding['domain']} to LOW_QUALITY_DOMAINS in "
+                              "app/agents/evidence_utils.py, or lower its source floor "
+                              "via filter_search_results_by_domain().",
+            })
+        elif key == "wasteful_expansion":
+            suggestions.append({
+                "problem": "Expansion burns budget for little confidence gain.",
+                "suggestion": "Raise sufficiency_threshold in Settings (fewer expansions) "
+                              "or lower max_iterations for the costly modes.",
+            })
+        elif key == "high_cost":
+            suggestions.append({
+                "problem": f"Average run cost ${finding['cost']:.4f}.",
+                "suggestion": "Lower research_max_cost_usd, or default expensive queries "
+                              "to quick mode via the composer.",
+            })
+    return suggestions

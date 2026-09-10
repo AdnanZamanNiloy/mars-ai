@@ -109,3 +109,23 @@ def test_diagnosis_connection_is_read_only(tmp_path):
             return False
 
     assert asyncio.run(_check()) is True
+
+
+def test_recommendations_mirror_flags():
+    from app.core.diagnose import recommend
+
+    health = {"total": 10, "fail_rate": 0.3, "avg_cost": 0.02, "by_status": {}}
+    domains = [{"domain": "spam.io", "claims": 12, "verified": 2, "verified_rate": 2 / 12, "avg_confidence": 0.4}]
+    critic = {"runs": 10, "avg_iterations": 2.5, "expansion_rate": 0.9, "avg_confidence_gain": 0.01}
+    recs = recommend(health, domains, critic)
+    assert len(recs) == 4
+    assert all(set(r) == {"problem", "suggestion"} for r in recs)
+    assert any("LOW_QUALITY_DOMAINS" in r["suggestion"] for r in recs)
+    assert any("sufficiency_threshold" in r["suggestion"] for r in recs)
+
+
+def test_recommendations_empty_when_healthy():
+    from app.core.diagnose import recommend
+
+    health = {"total": 10, "fail_rate": 0.0, "avg_cost": 0.0004, "by_status": {}}
+    assert recommend(health, [], {"runs": 2, "expansion_rate": 0.0, "avg_confidence_gain": 0.0}) == []

@@ -30,6 +30,7 @@ from app.core.diagnose import (  # noqa: E402
     attention_flags,
     contradiction_watch,
     critic_efficiency,
+    recommend,
     run_health,
     verification_by_domain,
 )
@@ -148,6 +149,15 @@ def render_text(data: dict, days: int) -> str:
             lines.append(f"  ! {flag}")
     else:
         lines.append("  nothing above action thresholds — system looks healthy.")
+    lines.append("")
+    lines.append("Suggested changes (apply manually — the loop stays supervised):")
+    suggestions = recommend(health, domains, critic)
+    if suggestions:
+        for i, s in enumerate(suggestions, 1):
+            lines.append(f"  {i}. Problem: {s['problem']}")
+            lines.append(f"     Change: {s['suggestion']}")
+    else:
+        lines.append("  none — nothing to change.")
     return "\n".join(lines)
 
 
@@ -167,17 +177,16 @@ async def main() -> int:
 
     if args.json:
         health = run_health(data["runs"])
+        domains = verification_by_domain(data["claims"], extract_domain)
+        critic = critic_efficiency(data["reviews"])
         print(json.dumps({
             "days": args.days,
             "health": health,
-            "domains": verification_by_domain(data["claims"], extract_domain)[:20],
-            "critic": critic_efficiency(data["reviews"]),
+            "domains": domains[:20],
+            "critic": critic,
             "contradictions": contradiction_watch(data["reports"]),
-            "flags": attention_flags(
-                health,
-                verification_by_domain(data["claims"], extract_domain),
-                critic_efficiency(data["reviews"]),
-            ),
+            "flags": attention_flags(health, domains, critic),
+            "recommendations": recommend(health, domains, critic),
         }, indent=2))
     else:
         print(render_text(data, args.days))
