@@ -9,7 +9,7 @@ import httpx
 from pydantic import BaseModel
 from tenacity import (
     retry,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_exponential_jitter,
 )
@@ -66,6 +66,51 @@ class CircuitBreaker:
         self._opened_at = None
 
 
+def _real_key(value: Any) -> str:
+    """Settings may carry example placeholders (your_...); treat those as
+    unset so we skip the provider instead of burning calls on 401s."""
+    text = str(value or "").strip()
+    if not text or text.lower().startswith("your_"):
+        return ""
+    return text
+
+
+def _is_auth_error(exc: BaseException) -> bool:
+    """401/403 must fail fast to fallback — retrying bad credentials only
+    burns time and worsens rate limiting."""
+    return (
+        isinstance(exc, httpx.HTTPStatusError)
+        and exc.response is not None
+        and exc.response.status_code in (401, 403)
+    )
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    if _is_auth_error(exc):
+        return False
+    return isinstance(exc, (httpx.HTTPError, RuntimeError))
+
+
+def _wait_with_retry_after(retry_state) -> float:
+    """Honor the provider's Retry-After on 429s; exponential jitter otherwise."""
+    outcome = getattr(retry_state, "outcome", None)
+    exc = outcome.exception() if outcome is not None else None
+    if (
+        isinstance(exc, httpx.HTTPStatusError)
+        and exc.response is not None
+        and exc.response.status_code == 429
+    ):
+        try:
+            delay = float(exc.response.headers.get("retry-after", ""))
+            # Capped well below the research timeout: honoring a 30s+
+            # Retry-After inside a 90s research budget would convert every
+            # rate-limit burst into a run timeout.
+            return min(max(delay, 1.0), 10.0)
+        except (TypeError, ValueError):
+            pass
+    return wait_exponential_jitter(initial=0.4, max=3)(retry_state)
+
+
 class LLMClient:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -104,7 +149,9 @@ class LLMClient:
         return {}
 
     async def _generate_with_fallback(self, system_prompt: str, user_prompt: str) -> str:
-        if self.settings.groq_api_key and not self.groq_breaker.is_open():
+        groq_key = _real_key(self.settings.groq_api_key)
+        hf_key = _real_key(self.settings.huggingface_api_key)
+        if groq_key and not self.groq_breaker.is_open():
             try:
                 text = await self._call_groq(system_prompt, user_prompt)
                 self.groq_breaker.record_success()
@@ -118,16 +165,16 @@ class LLMClient:
                     exc_info=exc,
                 )
 
-        if self.settings.huggingface_api_key:
+        if hf_key:
             return await self._call_huggingface(system_prompt, user_prompt)
 
         raise RuntimeError("No LLM provider configured. Set GROQ_API_KEY or HUGGINGFACE_API_KEY.")
 
     @retry(
         reraise=True,
-        stop=stop_after_attempt(3),
-        wait=wait_exponential_jitter(initial=0.4, max=3),
-        retry=retry_if_exception_type((httpx.HTTPError, RuntimeError)),
+        stop=stop_after_attempt(4),
+        wait=_wait_with_retry_after,
+        retry=retry_if_exception(_is_retryable),
     )
     async def _call_groq(self, system_prompt: str, user_prompt: str) -> str:
         url = "https://api.groq.com/openai/v1/chat/completions"
@@ -172,8 +219,8 @@ class LLMClient:
     @retry(
         reraise=True,
         stop=stop_after_attempt(2),
-        wait=wait_exponential_jitter(initial=0.4, max=2),
-        retry=retry_if_exception_type((httpx.HTTPError, RuntimeError)),
+        wait=_wait_with_retry_after,
+        retry=retry_if_exception(_is_retryable),
     )
     async def _call_huggingface(self, system_prompt: str, user_prompt: str) -> str:
         headers = {

@@ -20,6 +20,16 @@ def client(test_settings) -> LLMClient:
     return LLMClient(test_settings)
 
 
+@pytest.fixture
+def hf_client() -> LLMClient:
+    """Client with real-looking keys for both providers, so the HF fallback
+    path is exercised (placeholder keys are skipped by design)."""
+    from app.core.config import Settings
+
+    return LLMClient(Settings(groq_api_key="test-key", huggingface_api_key="test-hf-key",
+                              _env_file=None))
+
+
 async def test_retry_recovers_after_transient_failures(client):
     with respx.mock(assert_all_called=False) as mock:
         route = mock.post(GROQ_URL).mock(
@@ -34,17 +44,17 @@ async def test_retry_recovers_after_transient_failures(client):
         assert route.call_count == 3
 
 
-async def test_persistent_groq_failure_falls_back_to_hf(client):
+async def test_persistent_groq_failure_falls_back_to_hf(hf_client):
     with respx.mock(assert_all_called=False) as mock:
         mock.post(GROQ_URL).mock(return_value=httpx.Response(500, json={"error": "down"}))
         mock.post(HF_URL).mock(return_value=httpx.Response(200, json=[{"generated_text": json.dumps({"via": "hf"})}]))
-        result = await client.generate_json("sp", "up")
+        result = await hf_client.generate_json("sp", "up")
         assert result == {"via": "hf"}
-        assert client.groq_breaker._consecutive_failures >= 1
+        assert hf_client.groq_breaker._consecutive_failures >= 1
 
 
-async def test_open_breaker_skips_groq_entirely(test_settings):
-    client = LLMClient(test_settings)
+async def test_open_breaker_skips_groq_entirely(hf_client):
+    client = hf_client
     # Threshold 1 so a single failure trips the breaker for this test.
     client.groq_breaker = CircuitBreaker(threshold=1, cooldown_sec=60.0)
     with respx.mock(assert_all_called=False) as mock:
@@ -70,7 +80,7 @@ async def test_breaker_resets_on_success(client):
     assert not client.groq_breaker.is_open()
 
 
-async def test_malformed_output_rejected_and_retried(client):
+async def test_malformed_output_rejected_and_retried(hf_client):
     """Phase 1.2: payload failing response_model validation triggers retry, not silent accept."""
     from app.core.schemas import PlannerOutputModel
 
@@ -109,7 +119,7 @@ async def test_malformed_output_rejected_and_retried(client):
                 ],
             )
         )
-        result = await client.generate_json("sp", "up", response_model=PlannerOutputModel)
+        result = await hf_client.generate_json("sp", "up", response_model=PlannerOutputModel)
         assert result["sub_questions"][0]["question"].startswith("what is")
         assert route.call_count == 2, "malformed response must be retried"
 
@@ -144,3 +154,41 @@ def test_env_file_precedence_real_key_beats_placeholder():
         assert not settings.groq_api_key.startswith("your_"), (
             "placeholder from .env.example is overriding the real .env key"
         )
+
+
+async def test_auth_error_fails_fast_without_retries(hf_client):
+    hf_ok = httpx.Response(200, json=[{"generated_text": json.dumps({"via": "hf"})}])
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post(GROQ_URL).mock(
+            return_value=httpx.Response(401, json={"error": "invalid key"}))
+        mock.post(HF_URL).mock(return_value=hf_ok)
+        result = await hf_client.generate_json("sp", "up")
+        assert result == {"via": "hf"}
+        assert route.call_count == 1
+
+
+async def test_rate_limit_retries_then_recovers(hf_client):
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post(GROQ_URL).mock(side_effect=[
+            httpx.Response(429, headers={"retry-after": "0"}, json={"error": "slow down"}),
+            httpx.Response(429, headers={"retry-after": "0"}, json={"error": "slow down"}),
+            _groq_response({"ok": True}),
+        ])
+        result = await hf_client.generate_json("sp", "up")
+        assert result == {"ok": True}
+        assert route.call_count == 3
+
+
+async def test_placeholder_keys_are_skipped():
+    from app.core.config import Settings
+
+    settings = Settings(groq_api_key="your_groq_key_here",
+                        huggingface_api_key="your_hf_key_here", _env_file=None)
+    client = LLMClient(settings)
+    with respx.mock(assert_all_called=False) as mock:
+        groq_route = mock.post(GROQ_URL).mock(return_value=_groq_response({"x": 1}))
+        hf_route = mock.post(HF_URL).mock(return_value=_groq_response({"x": 1}))
+        with pytest.raises(RuntimeError, match="No LLM provider configured"):
+            await client.generate_json("sp", "up")
+        assert groq_route.call_count == 0
+        assert hf_route.call_count == 0
