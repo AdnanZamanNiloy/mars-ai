@@ -30,6 +30,7 @@ function blankRun(query, mode) {
     findings: [],
     verifiedCount: 0,
     critiques: [],
+    breakdown: null,
     budget: null,
     decisions: [],
     report: "",
@@ -120,7 +121,10 @@ export default function App() {
         if (evt.iteration) {
           setMessages((prev) => prev.map((m) =>
             m.kind === "run" && m.run.tempId === tempId
-              ? { ...m, run: { ...m.run, critiques: [...m.run.critiques, { iteration: evt.iteration, reason: evt.reason || "" }] } }
+              ? { ...m, run: { ...m.run,
+                  critiques: [...m.run.critiques, { iteration: evt.iteration, reason: evt.reason || "" }],
+                  breakdown: evt.breakdown && typeof evt.breakdown === "object" ? evt.breakdown : m.run.breakdown,
+                } }
               : m
           ));
           pushTrace({ text: `Critic pass ${evt.iteration}: ${evt.reason || "reviewed"}`, kind: "done" });

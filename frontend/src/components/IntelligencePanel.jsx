@@ -91,6 +91,11 @@ export default function IntelligencePanel({
       </section>
 
       <section className="intel-section">
+        <h3>Confidence breakdown</h3>
+        <ConfidenceBreakdown breakdown={run?.breakdown} />
+      </section>
+
+      <section className="intel-section">
         <div className="budget-line">
           <span className="k">Budget usage</span>
           {run?.budget ? (
@@ -164,6 +169,54 @@ export function IntelExpandButton({ onExpand }) {
 }
 
 /* ---------- derivation: stream state → panel widgets ---------- */
+
+const SIGNAL_LABELS = {
+  source_quality: "Source quality",
+  source_diversity: "Source diversity",
+  citation_coverage: "Citation coverage",
+  claim_verification_strength: "Claim verification",
+  cross_source_agreement: "Cross-source agreement",
+  critic_survival: "Critic survival",
+  freshness: "Freshness",
+};
+
+function ConfidenceBreakdown({ breakdown }) {
+  const signals = breakdown?.signals;
+  if (!signals || typeof signals !== "object") {
+    return <p className="empty">Signal detail arrives with the first critic pass.</p>;
+  }
+  const overall = typeof breakdown.overall === "number" ? Math.round(breakdown.overall * 100) : null;
+  return (
+    <div>
+      {overall !== null ? (
+        <div className="health-row">
+          <IconChart size={15} className="tone-muted" />
+          <span className="k"><strong>Overall</strong></span>
+          <span className="v">{overall}%</span>
+        </div>
+      ) : null}
+      {Object.entries(signals).map(([key, value]) => {
+        const pct = typeof value === "number" ? Math.round(value * 100) : null;
+        return (
+          <div key={key}>
+            <div className="health-row" style={{ paddingBottom: 2 }}>
+              <span className="k">{SIGNAL_LABELS[key] || key}</span>
+              <span className="v">{pct !== null ? `${pct}%` : "—"}</span>
+            </div>
+            <div className="bar" style={{ marginBottom: 8 }}>
+              <div style={{ width: `${pct ?? 0}%` }} />
+            </div>
+            {key === "freshness" && pct === 0 ? (
+              <div className="budget-sub" style={{ textAlign: "left", marginTop: -4, marginBottom: 8 }}>
+                publish dates not captured yet
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function deriveAgents(run) {
   const planned = run.plan.length;

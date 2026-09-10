@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import json
 
 import aiosqlite
 
@@ -77,6 +78,7 @@ CREATE TABLE IF NOT EXISTS critic_reviews (
     is_sufficient INTEGER,
     reason TEXT,
     confidence REAL,
+    breakdown TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL
 );
 
@@ -139,6 +141,9 @@ async def init_db(database_path: str) -> None:
             await db.execute("ALTER TABLE evaluation_runs ADD COLUMN degraded TEXT NOT NULL DEFAULT ''")
         if "judge_score" not in col_names:
             await db.execute("ALTER TABLE evaluation_runs ADD COLUMN judge_score REAL")
+        review_cols = await db.execute("PRAGMA table_info(critic_reviews)")
+        if "breakdown" not in {r[1] for r in await review_cols.fetchall()}:
+            await db.execute("ALTER TABLE critic_reviews ADD COLUMN breakdown TEXT NOT NULL DEFAULT '{}'")
         await db.execute(
             "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);"
         )
@@ -303,21 +308,27 @@ async def save_evidence(database_path: str, run_id: str, search_results: list) -
         await db.commit()
 
 
-async def save_critic_review(database_path: str, run_id: str, iteration: int, critique: dict) -> None:
+async def save_critic_review(database_path: str, run_id: str, iteration: int, critique: dict,
+                           breakdown: dict | None = None) -> None:
     """Persist EVERY critic iteration (not just the final verdict) — Replay
     needs the actual back-and-forth, not only the outcome."""
     if not isinstance(critique, dict):
         return
+    try:
+        breakdown_json = json.dumps(breakdown or {})
+    except (TypeError, ValueError):
+        breakdown_json = "{}"
     async with aiosqlite.connect(database_path) as db:
         await db.execute(
-            "INSERT INTO critic_reviews (run_id, iteration, is_sufficient, reason, confidence, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO critic_reviews (run_id, iteration, is_sufficient, reason, confidence, breakdown, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 run_id,
                 int(iteration),
                 1 if critique.get("is_sufficient") else 0,
                 str(critique.get("reason", "")),
                 float(critique.get("confidence", 0.0) or 0.0),
+                breakdown_json,
                 _now(),
             ),
         )
@@ -593,10 +604,15 @@ async def get_run_trace(database_path: str, run_id: str) -> dict | None:
             (run_id,),
         )
         critic_reviews = await _all(
-            "SELECT id, iteration, is_sufficient, reason, confidence, created_at "
+            "SELECT id, iteration, is_sufficient, reason, confidence, breakdown, created_at "
             "FROM critic_reviews WHERE run_id = ? ORDER BY iteration, id",
             (run_id,),
         )
+        for review in critic_reviews:
+            try:
+                review["breakdown"] = json.loads(review.get("breakdown") or "{}")
+            except (TypeError, ValueError):
+                review["breakdown"] = {}
         evidence = await _all(
             "SELECT id, source_id, raw_snippet, created_at "
             "FROM evidence WHERE run_id = ? ORDER BY id",

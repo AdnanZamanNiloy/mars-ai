@@ -1,5 +1,6 @@
 """Route-level behavior: per-request timeout (1.3) and rate limiting (1.7)."""
 import asyncio
+import json
 
 import httpx
 import pytest
@@ -82,3 +83,40 @@ async def test_normal_run_completes_within_timeout():
         response = await _post_stream(client, "valid research query here")
     lines = [line for line in response.text.splitlines() if line.strip()]
     assert any('"final_report"' in line for line in lines), lines
+
+
+class StubCriticWorkflow:
+    """Yields plan → critic (with breakdown) → final_report like the real route."""
+
+    async def astream(self, state, stream_mode=None):
+        yield {"sub_questions": [{"question": "what is RAG today?"}]}
+        yield {"sub_questions": [{"question": "what is RAG today?"}],
+               "iteration": 1,
+               "critique": {"is_sufficient": True, "reason": "ok"},
+               "confidence_breakdown": {"overall": 0.8, "signals": {"source_quality": 0.9}}}
+        yield {"final_report": "# Final Answer\nok", "confidence": 0.8}
+
+
+async def test_critic_event_carries_confidence_breakdown(tmp_path):
+    from app.db.sqlite import init_db
+
+    db_path = str(tmp_path / "bd.db")
+    await init_db(db_path)
+    settings = Settings(groq_api_key="test-key", database_url=db_path, _env_file=None)
+    app = _build_app(StubCriticWorkflow(), settings)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/research/stream", json={"query": "valid research query here"})
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    critics = [e for e in events if e.get("type") == "critic"]
+    assert len(critics) == 1
+    assert critics[0]["breakdown"] == {"overall": 0.8, "signals": {"source_quality": 0.9}}
+
+    import aiosqlite
+
+    async with aiosqlite.connect(db_path) as db:
+        cur = await db.execute("SELECT breakdown FROM critic_reviews")
+        rows = await cur.fetchall()
+    assert len(rows) == 1
+    assert json.loads(rows[0][0]) == {"overall": 0.8, "signals": {"source_quality": 0.9}}

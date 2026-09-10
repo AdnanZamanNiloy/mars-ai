@@ -217,7 +217,8 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                         if iteration != last_iteration and iteration > 0:
                             critique = snapshot.get("critique", {})
                             reason = critique.get("reason", "No reason provided")
-                            yield event_line("critic", iteration=iteration, reason=reason)
+                            yield event_line("critic", iteration=iteration, reason=reason,
+                                             breakdown=snapshot.get("confidence_breakdown") or {})
                             last_iteration = iteration
                             await _persist(record_event(
                                 settings.database_url, request_id, "critic", "end",
@@ -227,6 +228,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                             # shows the back-and-forth, not only the outcome.
                             await _persist(save_critic_review(
                                 settings.database_url, request_id, iteration, critique,
+                                breakdown=snapshot.get("confidence_breakdown") or {},
                             ))
 
                         facts = snapshot.get("facts", [])
@@ -425,9 +427,11 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
 
                         if iteration != last_iteration and iteration > last_iteration:
                             critique = snapshot.get("critique", {})
-                            yield event_line("critic", iteration=iteration, reason=critique.get("reason", ""))
+                            yield event_line("critic", iteration=iteration, reason=critique.get("reason", ""),
+                                             breakdown=snapshot.get("confidence_breakdown") or {})
                             last_iteration = iteration
-                            await _persist_record(settings.database_url, request_id, iteration, critique)
+                            await _persist_record(settings.database_url, request_id, iteration, critique,
+                                                  breakdown=snapshot.get("confidence_breakdown") or {})
 
                         if budget_tracker.total_tokens > 0:
                             yield event_line("budget", **budget_tracker.snapshot())
@@ -474,10 +478,11 @@ async def _persist_save(db: str, run_id: str, facts: list) -> None:
         logger.warning("persistence_failed", error=str(exc), exc_info=exc)
 
 
-async def _persist_record(db: str, run_id: str, iteration: int, critique: dict) -> None:
+async def _persist_record(db: str, run_id: str, iteration: int, critique: dict,
+                          breakdown: dict | None = None) -> None:
     try:
         await record_event(db, run_id, "critic", "end", payload=json.dumps({"iteration": iteration}))
-        await save_critic_review(db, run_id, iteration, critique)
+        await save_critic_review(db, run_id, iteration, critique, breakdown=breakdown or {})
     except Exception as exc:
         logger.warning("persistence_failed", error=str(exc), exc_info=exc)
 
