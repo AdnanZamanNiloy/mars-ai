@@ -129,19 +129,6 @@
   flex-direction: column;
 }
 
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 26px;
-  border-bottom: 1px solid var(--line-soft);
-  background: rgba(13, 13, 17, 0.7);
-  backdrop-filter: blur(8px);
-  z-index: 5;
-}
-.topbar h1 { font-size: 14px; font-weight: 650; margin: 0; }
-.topbar .crumb { font-size: 12px; color: var(--t3); }
-.topbar .spacer { flex: 1; }
 
 .thread { flex: 1; overflow-y: auto; padding: 22px 26px 12px; }
 .thread-inner { max-width: 1100px; margin: 0 auto; }
@@ -231,9 +218,20 @@
     position: absolute; inset: 0; z-index: 15;
     background: rgba(0, 0, 0, 0.55); border: 0; padding: 0; cursor: pointer;
   }
-  .topbar, .thread { padding-left: 16px; padding-right: 16px; }
+  .thread { padding-left: 16px; padding-right: 16px; }
   .composer-zone { padding-left: 16px; padding-right: 16px; }
-  .menu-btn { display: inline-flex !important; }
+  .menu-btn {
+    display: inline-flex !important;
+    position: absolute;
+    left: 12px;
+    top: 12px;
+    z-index: 25;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    width: 34px;
+    height: 34px;
+  }
 }
 
 .menu-btn { display: none; }

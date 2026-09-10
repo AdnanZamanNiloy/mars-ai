@@ -331,21 +331,9 @@ export default function App() {
       <div className="workspace-wrap">
         <ErrorBoundary>
         <main className="workspace">
-          <header className="topbar">
-            <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
-              <IconMenu size={17} />
-            </button>
-            <div>
-              <h1>{view === "missions" ? "Missions" : view === "evidence" ? "Evidence" : "Command Center"}</h1>
-              <div className="crumb">
-                {activeRun ? `${activeRun.query.slice(0, 64)}${activeRun.query.length > 64 ? "…" : ""}` : "Multi-Agent Research System"}
-              </div>
-            </div>
-            <span className="spacer" />
-            {activeRun?.runId ? <span className="tag tone-muted">run {activeRun.runId.slice(0, 8)}</span> : null}
-            {running ? <span className="tag tone-blue"><span className="dot live" /> live</span> : null}
-          </header>
-
+          <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
+            <IconMenu size={17} />
+          </button>
           <div className="thread" ref={threadRef}>
             <div className="thread-inner">
               {view === "missions" ? (
