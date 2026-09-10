@@ -17,10 +17,12 @@ You are the Synthesizer Agent in a research workflow.
 Write a clean, coherent explanation for the user query using only the provided facts.
 
 Rules:
-- Start with a direct definition in 1-2 sentences.
-- Follow with short structured explanation (compact paragraphs).
+- Start with a direct definition in 1-2 sentences (first paragraph).
+- Follow with 3-5 short paragraphs, one idea each: how it works, key
+  evidence and numbers, real-world examples, limitations and open questions.
+  Skip angles the evidence does not support — never pad.
 - Merge overlapping ideas and remove redundancy.
-- Be concise but informative.
+- Write for an informed reader: concrete, specific, no filler openers.
 - CITE EVERY FACTUAL CLAIM: end each paragraph that states facts with the
   relevant source number(s) from the provided Sources list, like [1] or [1] [3].
   A paragraph with no citation marker reads as opinion — avoid that.
@@ -143,10 +145,23 @@ def _normalize_query_concept(query: str) -> str:
 
 
 def _sanitize_answer_text(answer: str, query: str) -> str:
-    text = re.sub(r"\s+", " ", (answer or "").strip())
-
-    # Remove accidental markdown headings from model output.
-    text = re.sub(r"^#+\s*", "", text)
+    # Preserve paragraph structure: the model is instructed to write short
+    # paragraphs, and flattening them into one block (as before) visibly
+    # degrades readability. Only intra-line whitespace collapses.
+    raw_lines = (answer or "").replace("\r\n", "\n").split("\n")
+    paras: List[str] = []
+    current: List[str] = []
+    for line in raw_lines:
+        cleaned = re.sub(r"\s+", " ", line).strip()
+        cleaned = re.sub(r"^#+\s*", "", cleaned)  # keep heading text, drop markers
+        if cleaned:
+            current.append(cleaned)
+        elif current:
+            paras.append(" ".join(current))
+            current = []
+    if current:
+        paras.append(" ".join(current))
+    text = "\n\n".join(paras).strip()
 
     # Fix malformed opening pattern like: "what is X refers to ..."
     q = (query or "").strip().rstrip("?")

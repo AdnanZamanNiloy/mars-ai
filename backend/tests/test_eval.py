@@ -276,3 +276,71 @@ def test_run_one_reads_degraded_from_trace_fallbacks():
 
     metrics = asyncio.run(_run())
     assert metrics["degraded"] == ["planner", "synthesizer"]
+
+
+def test_judge_prompt_and_parse():
+    from app.core.eval import judge_prompt, parse_judge_scores
+
+    prompt = judge_prompt("What is RAG?", "# Final Answer\nRAG is great [1].")
+    assert "grounding" in prompt and "coverage" in prompt and "clarity" in prompt
+    assert "RAG is great" in prompt
+    scores = parse_judge_scores({"grounding": 4, "coverage": 3, "clarity": 5})
+    assert scores == {"grounding": 4.0, "coverage": 3.0, "clarity": 5.0, "overall": 4.0}
+    assert parse_judge_scores({"grounding": 6, "coverage": 3, "clarity": 5}) is None
+    assert parse_judge_scores({"grounding": 4}) is None
+    assert parse_judge_scores("not json") is None
+
+
+def test_summarize_avg_judge_optional():
+    rows = [{**_metrics(), "passed": True, "judge_score": 4.0},
+            {**_metrics(), "passed": True, "judge_score": None}]
+    summary = summarize_batch(rows)
+    assert summary["avg_judge"] == 4.0
+    assert "avg judge /5: 4.00" in format_trend(summary, None)
+    assert summarize_batch([{**_metrics(), "passed": True}])["avg_judge"] is None
+
+
+def test_judge_score_round_trip_and_migration(tmp_path):
+    import aiosqlite
+
+    db_path = str(tmp_path / "judge.db")
+    asyncio.run(init_db(db_path))
+    asyncio.run(save_evaluation_run(db_path, {
+        "eval_batch": "b1", "query_id": "q1", "query": "q?", "mode": "quick",
+        "run_id": "r1", "status": "completed", "confidence": 0.6, "claims": 5,
+        "verified": 2, "sources": 6, "contradictions": 0,
+        "recommended_option": None, "cost": 0.001, "passed": True,
+        "degraded": [], "judge_score": 4.5,
+    }))
+    rows = asyncio.run(eval_batch_rows(db_path, "b1"))
+    assert rows[0]["judge_score"] == 4.5
+
+
+def test_fetch_judge_score_parses_rater():
+    import httpx
+    from scripts.run_eval import fetch_judge_score
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "api.groq.com"
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": 'Intro text {"grounding": 4, "coverage": 5, "clarity": 3} trailing'}}]})
+
+    async def _run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await fetch_judge_score(client, "key", "model", "q?", "# Final Answer\nok")
+
+    assert asyncio.run(_run()) == 4.0
+
+
+def test_fetch_judge_score_never_raises():
+    import httpx
+    from scripts.run_eval import fetch_judge_score
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": "busy"})
+
+    async def _run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await fetch_judge_score(client, "key", "model", "q?", "")
+
+    assert asyncio.run(_run()) is None

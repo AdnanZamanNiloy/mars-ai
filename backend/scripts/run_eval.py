@@ -27,7 +27,15 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.core.config import get_settings  # noqa: E402
-from app.core.eval import format_trend, score_query, summarize_batch  # noqa: E402
+from app.core.eval import (  # noqa: E402
+    JUDGE_MODEL_DEFAULT,
+    _extract_json_object,
+    format_trend,
+    judge_prompt,
+    parse_judge_scores,
+    score_query,
+    summarize_batch,
+)
 from app.db.sqlite import (  # noqa: E402
     eval_batch_rows,
     init_db,
@@ -52,6 +60,39 @@ def count_section_lines(markdown: str, heading: str) -> int:
     return len(lines)
 
 
+async def fetch_judge_score(
+    client: httpx.AsyncClient,
+    api_key: str,
+    model: str,
+    query: str,
+    report_markdown: str,
+) -> float | None:
+    """One rater call to Groq. Returns the overall 1-5 score or None —
+    judging must never fail an eval batch."""
+    if not api_key or not report_markdown.strip():
+        return None
+    try:
+        resp = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": judge_prompt(query, report_markdown)}],
+                "temperature": 0,
+                "max_tokens": 200,
+            },
+            timeout=60.0,
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        text = data["choices"][0]["message"]["content"]
+        scores = parse_judge_scores(_extract_json_object(text))
+        return scores["overall"] if scores else None
+    except Exception:
+        return None
+
+
 async def run_one(client: httpx.AsyncClient, server: str, query: dict, timeout: float) -> dict:
     """Run one live evaluation; return observed metrics (never raises).
 
@@ -74,6 +115,8 @@ async def run_one(client: httpx.AsyncClient, server: str, query: dict, timeout: 
         "cost": None,
         "error": None,
         "degraded": [],
+        "report": "",
+        "judge_score": None,
     }
     run_id: str | None = None
     try:
@@ -121,6 +164,7 @@ async def run_one(client: httpx.AsyncClient, server: str, query: dict, timeout: 
         claims = trace.get("claims") or []
         decisions = trace.get("decisions") or []
         report_md = (trace.get("final_report") or {}).get("report_markdown") or ""
+        metrics["report"] = report_md
         metrics["status"] = trace.get("status") or metrics["status"]
         metrics["claims"] = len(claims)
         metrics["verified"] = sum(1 for c in claims if c.get("verified"))
@@ -151,6 +195,9 @@ async def main() -> int:
     parser.add_argument("--limit", type=int, default=0, help="evaluate only the first N queries")
     parser.add_argument("--query-id", action="append", default=[], help="evaluate only these ids (repeatable)")
     parser.add_argument("--batch", default=None, help="batch label (default: UTC timestamp)")
+    parser.add_argument("--judge", action="store_true",
+                        help="rate each report with an LLM judge (extra model calls)")
+    parser.add_argument("--judge-model", default=JUDGE_MODEL_DEFAULT)
     args = parser.parse_args()
 
     with open(args.queries, encoding="utf-8") as fh:
@@ -191,6 +238,11 @@ async def main() -> int:
         for i, query in enumerate(queries, 1):
             print(f"[{i}/{len(queries)}] {query['id']}: {query['query'][:60]}…", flush=True)
             metrics = await run_one(client, args.server.rstrip("/"), query, stream_timeout)
+            if args.judge and metrics["status"] == "completed":
+                metrics["judge_score"] = await fetch_judge_score(
+                    client, settings.groq_api_key, args.judge_model,
+                    query["query"], metrics["report"],
+                )
             checks = score_query(query, metrics)
             status = "PASS" if checks["passed"] else "FAIL"
             if not checks["passed"]:
@@ -202,6 +254,7 @@ async def main() -> int:
                 f"conf={metrics['confidence']} cost={metrics['cost']}"
                 + (f" error={metrics['error']}" if metrics.get("error") else "")
                 + (f" DEGRADED={','.join(metrics['degraded'])}" if metrics.get("degraded") else "")
+                + (f" judge={metrics['judge_score']}" if metrics.get("judge_score") is not None else "")
             )
             await save_evaluation_run(db_path, {
                 "eval_batch": batch,
@@ -219,11 +272,17 @@ async def main() -> int:
                 "cost": metrics["cost"],
                 "passed": checks["passed"],
                 "degraded": metrics.get("degraded") or [],
+                "judge_score": metrics.get("judge_score"),
             })
 
     rows = await eval_batch_rows(db_path, batch)
     clean = [r for r in rows if not r.get("degraded")]
     skipped = len(rows) - len(clean)
+    if not clean:
+        print(f"\nbatch {batch}: all {len(rows)} rows degraded — no clean trend available.")
+        if skipped:
+            print(f"degraded agents seen: {sorted({a for r in rows for a in r.get('degraded', [])})}")
+        return 1 if failures else 0
     current = summarize_batch(clean)
     batches = await latest_eval_batches(db_path, limit=2)
     previous = None

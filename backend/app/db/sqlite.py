@@ -115,6 +115,7 @@ CREATE TABLE IF NOT EXISTS evaluation_runs (
     cost REAL,
     checks_passed INTEGER NOT NULL,
     degraded TEXT NOT NULL DEFAULT '',
+    judge_score REAL,
     created_at TEXT NOT NULL
 );
 """
@@ -133,8 +134,11 @@ async def init_db(database_path: str) -> None:
         # Additive migration: existing evaluation_runs tables predate the
         # degraded column — add it in place, never rebuild the table.
         cols = await db.execute("PRAGMA table_info(evaluation_runs)")
-        if "degraded" not in {r[1] for r in await cols.fetchall()}:
+        col_names = {r[1] for r in await cols.fetchall()}
+        if "degraded" not in col_names:
             await db.execute("ALTER TABLE evaluation_runs ADD COLUMN degraded TEXT NOT NULL DEFAULT ''")
+        if "judge_score" not in col_names:
+            await db.execute("ALTER TABLE evaluation_runs ADD COLUMN judge_score REAL")
         await db.execute(
             "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);"
         )
@@ -366,7 +370,7 @@ async def save_evaluation_run(database_path: str, row: dict) -> None:
         await db.execute(
             "INSERT INTO evaluation_runs (eval_batch, query_id, query, mode, run_id, status, "
             "confidence, claims, verified, sources, contradictions, recommended_option, cost, "
-            "checks_passed, degraded, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "checks_passed, degraded, judge_score, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 str(row.get("eval_batch", "")),
                 str(row.get("query_id", "")),
@@ -383,6 +387,7 @@ async def save_evaluation_run(database_path: str, row: dict) -> None:
                 row.get("cost"),
                 1 if row.get("passed") else 0,
                 degraded_str,
+                row.get("judge_score"),
                 _now(),
             ),
         )
@@ -405,7 +410,7 @@ async def eval_batch_rows(database_path: str, eval_batch: str) -> list:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             "SELECT query_id, confidence, claims, verified, sources, contradictions, cost, "
-            "checks_passed, degraded FROM evaluation_runs WHERE eval_batch = ? ORDER BY id",
+            "checks_passed, degraded, judge_score FROM evaluation_runs WHERE eval_batch = ? ORDER BY id",
             (eval_batch,),
         )
         return [
@@ -419,6 +424,7 @@ async def eval_batch_rows(database_path: str, eval_batch: str) -> list:
                 "cost": r["cost"],
                 "passed": bool(r["checks_passed"]),
                 "degraded": [a for a in str(r["degraded"] or "").split(",") if a],
+                "judge_score": r["judge_score"],
             }
             for r in await cur.fetchall()
         ]

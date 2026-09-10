@@ -77,3 +77,19 @@ def test_legend_capped_at_top_ten():
 def test_validate_citations_edge_cases():
     assert _validate_citations("a [1] b [0] c [3]", 2) == "a [1] b  c "
     assert _validate_citations("", 2) == ""
+
+
+def test_sanitizer_preserves_paragraphs():
+    from app.agents.synthesizer import _sanitize_answer_text
+
+    raw = "First paragraph here.\n\n\nSecond paragraph  with   spaces.\n### Costs heading\nCost line [1]."
+    out = _sanitize_answer_text(raw, "What is X?")
+    assert out == ("First paragraph here.\n\nSecond paragraph with spaces. "
+                   "Costs heading Cost line [1].")
+
+
+def test_sanitizer_repairs_query_opener():
+    from app.agents.synthesizer import _sanitize_answer_text
+
+    out = _sanitize_answer_text("what is RAG refers to retrieval.", "What is RAG?")
+    assert out.startswith("RAG refers to retrieval.")
