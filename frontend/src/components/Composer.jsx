@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FOLLOWUP_CHIPS, MODE_META } from "../lib";
+import { MODE_META } from "../lib";
 import { IconCheck, IconChevronDown, IconSend, IconStop } from "./icons";
 
 const MODES = ["quick", "standard", "deep"];
@@ -13,7 +13,6 @@ export default function Composer({
   mode,
   onModeChange,
   placeholder,
-  showChips = true,
 }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
@@ -100,15 +99,6 @@ export default function Composer({
           )}
         </div>
       </div>
-      {showChips && !running ? (
-        <div className="chip-row">
-          {FOLLOWUP_CHIPS.map((s) => (
-            <button key={s} type="button" className="chip" onClick={() => onChange(s)}>
-              {s}
-            </button>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }

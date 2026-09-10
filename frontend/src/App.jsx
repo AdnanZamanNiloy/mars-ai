@@ -12,12 +12,6 @@ import MissionsView from "./components/MissionsView";
 import EvidenceView from "./components/EvidenceView";
 import { IconChevronLeft, IconMenu } from "./components/icons";
 
-const EXAMPLE_QUERIES = [
-  "Should Bangladesh invest in nuclear or solar energy?",
-  "What are the most credible small-language-model benchmarks in 2026?",
-  "Compare open-source speech-to-text models that run efficiently on CPU.",
-];
-
 let seq = 1;
 const nid = () => `m${Date.now()}-${seq++}`;
 
@@ -346,7 +340,7 @@ export default function App() {
               ) : view === "evidence" ? (
                 <EvidenceView messages={messages} onInspect={setSelectedFinding} />
               ) : messages.length === 0 ? (
-                <WelcomeHero onPick={setComposer} />
+                <WelcomeHero />
               ) : (
                 messages.map((m) => <ThreadMessage
                   key={m.id}
@@ -478,7 +472,7 @@ function ThreadMessage({ message, running, selectedFinding, onSelectFinding, onR
   return null;
 }
 
-function WelcomeHero({ onPick }) {
+function WelcomeHero() {
   return (
     <div className="hero-card anim-rise">
       <Planet size={88} ring />
@@ -487,11 +481,6 @@ function WelcomeHero({ onPick }) {
         A team of research agents plans the inquiry, gathers sources, verifies claims,
         challenges conclusions and synthesizes a cited report — streaming live to this console.
       </p>
-      <div className="hero-examples">
-        {EXAMPLE_QUERIES.map((q) => (
-          <button key={q} type="button" onClick={() => onPick(q)}>{q}</button>
-        ))}
-      </div>
     </div>
   );
 }

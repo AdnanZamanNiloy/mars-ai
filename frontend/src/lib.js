@@ -116,10 +116,3 @@ export const MODE_META = {
   standard: { label: "Standard", hint: "3 agents · up to 3 passes" },
   deep: { label: "Deep research", hint: "5 agents · up to 5 passes" },
 };
-
-export const FOLLOWUP_CHIPS = [
-  "What are the main cost drivers?",
-  "Compare with industry benchmarks",
-  "What are the biggest risks?",
-  "What evidence is weakest?",
-];
