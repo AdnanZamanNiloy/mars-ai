@@ -3,7 +3,7 @@ import { fetchTrace, resumeResearch, startResearch } from "./api";
 import { MODE_META, loadKnowledge, loadMissions, parseReport, removeKnowledgeItem, removeMission, saveKnowledgeItem, upsertMission } from "./lib";
 import Sidebar, { Planet } from "./components/Sidebar";
 import Composer from "./components/Composer";
-import { ErrorCard, LiveRunCard, MarsMessageShell, TypingRow, UserMessage } from "./components/Thread";
+import { ErrorCard, LiveRunCard, MarsMessageShell, ThinkingSteps, TypingRow, UserMessage } from "./components/Thread";
 import AnswerCard, { ReplayAnswerCard } from "./components/AnswerCard";
 import ClaimDrawer from "./components/ClaimDrawer";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -429,6 +429,7 @@ export default function App() {
                   onResume={resumeRun}
                   onChallenge={challengeRun}
                   onRegenerate={submitQuery}
+                  steps={traceLog}
                 />)
               )}
             </div>
@@ -457,13 +458,10 @@ export default function App() {
           <ErrorBoundary>
             <IntelligencePanel
               run={activeRun}
-              traceLog={traceLog}
               collapsed={intelCollapsed}
               onCollapse={() => setIntelCollapsed(true)}
               onExpand={() => setIntelCollapsed(false)}
               onResume={() => activeRun && resumeRun(activeRun)}
-              onReplay={openReplay}
-              replaying={replaying}
             />
             {intelCollapsed ? (
               <button className="icon-btn intel-expand" onClick={() => setIntelCollapsed(false)} title="Expand panel" aria-label="Expand panel">
@@ -486,7 +484,7 @@ export default function App() {
   );
 }
 
-function ThreadMessage({ message, running, onResume, onChallenge, onRegenerate }) {
+function ThreadMessage({ message, running, onResume, onChallenge, onRegenerate, steps }) {
   if (message.kind === "user") {
     return <UserMessage text={message.text} />;
   }
@@ -500,6 +498,7 @@ function ThreadMessage({ message, running, onResume, onChallenge, onRegenerate }
         onRegenerate={() => onRegenerate(run.query)}
       >
         {!run.done && !run.error && !run.aborted ? <LiveRunCard run={run} /> : null}
+        <ThinkingSteps steps={steps} />
         {run.aborted && !run.done ? (
           <div className="error-box" style={{ borderColor: "var(--line)", background: "var(--card)" }}>
             Mission aborted by user before completion.
@@ -543,6 +542,7 @@ function ThreadMessage({ message, running, onResume, onChallenge, onRegenerate }
           <span className="tag tone-blue">replay</span>
           <span>Read-only record of “{message.query}” · status: {trace.status}{(trace.plan || []).length ? ` · ${(trace.plan || []).length} planned questions` : ""}</span>
         </div>
+        <ThinkingSteps steps={steps} />
         {trace.final_report ? (
           <ReplayAnswerCard trace={trace} />
         ) : (

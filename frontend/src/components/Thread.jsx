@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { formatTime } from "../lib";
-import { IconCheck, IconClock, IconCopy, IconRefresh, IconSpeaker, IconThumbDown, IconThumbUp } from "./icons";
+import { IconCheck, IconChevronDown, IconClock, IconCopy, IconRefresh, IconSpeaker, IconThumbDown, IconThumbUp } from "./icons";
 
 /* Chat-style thread: right-aligned user bubbles, plain MARS responses
  * with a working action row (copy, read aloud, feedback, regenerate). */
@@ -190,12 +190,30 @@ export function TypingRow() {
   );
 }
 
-export function TraceEventLine({ at, children }) {
+export function ThinkingSteps({ steps }) {
+  const [open, setOpen] = useState(true);
+  if (!steps || steps.length === 0) return null;
   return (
-    <div className="trace-row">
-      <span className="trace-time">{formatTime(at)}</span>
-      <span className="trace-node"><span className="trace-blink" /></span>
-      <span className="trace-text">{children}</span>
+    <div className="steps-card anim-rise">
+      <button
+        className="steps-head"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        <IconChevronDown size={14} className={open ? "flip" : ""} />
+        {open ? "Less steps" : `${steps.length} steps`}
+      </button>
+      {open ? (
+        <div className="steps-list">
+          {steps.map((t, i) => (
+            <div className="steps-row" key={i}>
+              <span className="steps-rail"><span className={`steps-dot kind-${t.kind || "wait"}`} /></span>
+              <span className="steps-text">{t.text}</span>
+              <span className="steps-time">{formatTime(t.at)}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

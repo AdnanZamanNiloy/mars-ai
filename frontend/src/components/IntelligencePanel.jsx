@@ -1,13 +1,11 @@
-import { formatTime } from "../lib";
-import { Planet } from "./Sidebar";
 import {
-  IconAgents, IconAlert, IconChart, IconCheck, IconCheckCircle, IconChevronUp,
-  IconCoins, IconDoc, IconRefresh, IconSearch, IconShield, IconShieldCheck, IconTarget,
+  IconAgents, IconAlert, IconChart, IconCheckCircle, IconChevronUp,
+  IconDoc, IconRefresh, IconSearch, IconShield, IconShieldCheck, IconTarget,
 } from "./icons";
 
 /* Mission Intelligence — every number comes from streamed run state.
- * Props: run (live run object or null), traceLog (timestamped event lines),
- * onCollapse/onExpand, collapsed, onResume, onReplay. */
+ * Props: run (live run object or null), onCollapse/onExpand, collapsed,
+ * onResume. */
 
 function AgentRow({ icon: Ic, name, desc, status, meta, progress }) {
   const label = status === "done" ? "Complete" : status === "active" ? "Analyzing" : "Waiting";
@@ -28,19 +26,8 @@ function AgentRow({ icon: Ic, name, desc, status, meta, progress }) {
   );
 }
 
-function TraceNode({ kind }) {
-  if (kind === "done") {
-    return (
-      <span className="trace-check"><IconCheck size={9} /></span>
-    );
-  }
-  if (kind === "warn") return <span className="trace-node"><span className="trace-dot" /></span>;
-  if (kind === "active") return <span className="trace-node"><span className="trace-ring" /></span>;
-  return <span className="trace-node"><span className="trace-blink" /></span>;
-}
-
 export default function IntelligencePanel({
-  run, traceLog, collapsed, onCollapse, onExpand, onResume, onReplay, replaying,
+  run, collapsed, onCollapse, onExpand, onResume,
 }) {
   if (collapsed) return null;
 
@@ -124,30 +111,6 @@ export default function IntelligencePanel({
           </button>
         </section>
       ) : null}
-
-      <section className="intel-section">
-        <div className="intel-section-head">
-          <h3>Live trace</h3>
-          {run?.runId ? (
-            <button className="link-btn" onClick={() => onReplay(run.runId)} disabled={replaying}>
-              {replaying ? "Loading…" : "View replay →"}
-            </button>
-          ) : null}
-        </div>
-        <div className="trace">
-          {traceLog.length > 0 ? (
-            traceLog.map((t, i) => (
-              <div className="trace-row" key={i}>
-                <span className="trace-time">{formatTime(t.at)}</span>
-                <TraceNode kind={t.kind} />
-                <span className="trace-text">{t.text}</span>
-              </div>
-            ))
-          ) : (
-            <p className="empty">Pipeline events will stream here live.</p>
-          )}
-        </div>
-      </section>
 
       <section className="intel-section">
         <div className="health-row">

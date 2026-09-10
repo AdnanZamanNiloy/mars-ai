@@ -180,17 +180,6 @@
 .budget-line .v small { color: var(--t3); font-weight: 500; }
 .budget-sub { text-align: right; font-size: 11px; color: var(--t3); margin-top: 7px; font-variant-numeric: tabular-nums; }
 
-.trace { position: relative; margin-top: 4px; }
-.trace::before { content: ""; position: absolute; left: 52px; top: 12px; bottom: 12px; width: 1px; background: var(--track); }
-.trace-row { position: relative; display: flex; align-items: center; gap: 10px; padding: 5.5px 0; }
-.trace-time { width: 34px; flex: none; font-size: 10.5px; color: var(--t3); font-variant-numeric: tabular-nums; }
-.trace-node { width: 18px; flex: none; display: flex; justify-content: center; }
-.trace-text { font-size: 12px; color: #c2c2ca; }
-.trace-check { width: 15px; height: 15px; border-radius: 50%; background: var(--mint); display: flex; align-items: center; justify-content: center; color: #0d0d11; }
-.trace-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--mars); }
-.trace-ring { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--mars); animation: pulse 1.6s ease-in-out infinite; }
-.trace-blink { width: 7px; height: 7px; border-radius: 50%; background: #5f5f69; animation: pulse 1.2s ease-in-out infinite; }
-
 /* ---------- composer ---------- */
 
 .composer { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 10px 14px 8px; transition: border-color 0.15s; }
@@ -248,6 +237,50 @@
 .mode-menu button small { display: block; font-size: 11px; color: var(--t3); font-weight: 400; margin-top: 1px; }
 .mode-menu button.picked { color: var(--mars-soft); }
 .chip-row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* ---------- thinking steps (inline trace) ---------- */
+
+.steps-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 6px 16px 12px;
+  margin-bottom: 18px;
+}
+.steps-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 0;
+  border: 0;
+  background: none;
+  color: var(--t3);
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+}
+.steps-head:hover { color: var(--t1); }
+.steps-head svg { transition: transform 0.18s ease; }
+.steps-head svg.flip { transform: rotate(180deg); }
+.steps-list { position: relative; padding: 2px 0 2px 2px; }
+.steps-list::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  bottom: 10px;
+  width: 1px;
+  background: var(--line);
+}
+.steps-row { position: relative; display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; }
+.steps-rail { width: 18px; flex: none; display: flex; justify-content: center; padding-top: 5px; }
+.steps-dot { width: 7px; height: 7px; border-radius: 50%; background: #5f5f69; flex: none; }
+.steps-dot.kind-done { background: var(--mint); }
+.steps-dot.kind-warn { background: var(--mars); }
+.steps-dot.kind-active { border: 2px solid var(--mars); background: transparent; width: 9px; height: 9px; animation: pulse 1.6s ease-in-out infinite; }
+.steps-text { flex: 1; min-width: 0; font-size: 13px; line-height: 1.55; color: #c2c2ca; }
+.steps-time { flex: none; font-size: 10.5px; color: var(--t3); font-variant-numeric: tabular-nums; padding-top: 2px; }
 
 /* ---------- claim drawer ---------- */
 
