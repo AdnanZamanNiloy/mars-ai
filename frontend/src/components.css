@@ -7,16 +7,16 @@
   flex: none;
   border-radius: 50%;
   background:
-    radial-gradient(ellipse 20% 14% at 62% 30%, rgba(0, 0, 0, 0.55), transparent 70%),
-    radial-gradient(ellipse 24% 16% at 42% 66%, rgba(0, 0, 0, 0.5), transparent 70%),
-    radial-gradient(ellipse 13% 10% at 72% 60%, rgba(0, 0, 0, 0.45), transparent 70%),
-    radial-gradient(ellipse 30% 24% at 38% 34%, rgba(255, 255, 255, 0.2), transparent 70%),
-    radial-gradient(circle at 35% 30%, #e4e4e7 0%, #a1a1aa 22%, #71717a 45%, #3f3f46 66%, #27272a 85%, #131315 100%);
+    radial-gradient(ellipse 20% 14% at 62% 30%, rgba(70, 20, 8, 0.55), transparent 70%),
+    radial-gradient(ellipse 24% 16% at 42% 66%, rgba(70, 20, 8, 0.5), transparent 70%),
+    radial-gradient(ellipse 13% 10% at 72% 60%, rgba(70, 20, 8, 0.45), transparent 70%),
+    radial-gradient(ellipse 30% 24% at 38% 34%, rgba(255, 196, 156, 0.22), transparent 70%),
+    radial-gradient(circle at 35% 30%, #f0a276 0%, #E8794F 22%, #c05a35 45%, #8f3f27 66%, #5c291b 85%, #3a1911 100%);
   box-shadow:
     inset -8px -11px 22px rgba(0, 0, 0, 0.62),
-    inset 4px 5px 12px rgba(255, 255, 255, 0.14),
+    inset 4px 5px 12px rgba(255, 200, 160, 0.16),
     0 4px 16px rgba(0, 0, 0, 0.5),
-    0 0 24px rgba(255, 255, 255, 0.07);
+    0 0 24px rgba(232, 121, 79, 0.18);
 }
 .planet::after {
   content: "";
@@ -29,7 +29,7 @@
   position: absolute;
   inset: -5px;
   border-radius: 50%;
-  border: 1.5px solid rgba(228, 228, 231, 0.3);
+  border: 1.5px solid rgba(232, 121, 79, 0.4);
   border-top-color: transparent;
   border-left-color: transparent;
   transform: rotate(-24deg);
