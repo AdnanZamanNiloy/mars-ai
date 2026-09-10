@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { formatTime } from "../lib";
-import { IconCheck, IconClock, IconCopy, IconRefresh, IconSpark, IconSpeaker, IconThumbDown, IconThumbUp } from "./icons";
+import { IconCheck, IconClock, IconCopy, IconRefresh, IconSpeaker, IconThumbDown, IconThumbUp } from "./icons";
 
 /* Chat-style thread: right-aligned user bubbles, plain MARS responses
  * with a working action row (copy, read aloud, feedback, regenerate). */
@@ -99,7 +99,6 @@ export function MessageActions({ messageId, text, onRegenerate, canRegenerate })
 export function MarsMessageShell({ id, text, onRegenerate, canRegenerate, children }) {
   return (
     <div className="msg-mars anim-rise">
-      <span className="sparkle" aria-hidden="true"><IconSpark size={22} /></span>
       <div className="msg-body">
         {children}
         {text ? (
