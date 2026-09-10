@@ -145,3 +145,34 @@ def test_pdf_missing_lib_skips(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
     assert _extract_pdf_text(b"%PDF-1.4 junk", "https://x.com/a.pdf") == ""
+
+
+async def test_tavily_content_skips_refetch(monkeypatch, tmp_path):
+    """Tavily content counts as fetched: no second HTTP fetch per URL."""
+    from app.agents import search as search_mod
+
+    settings = _settings(tavily_api_key="tvly-real-key",
+                         database_url=str(tmp_path / "t.db"))
+    client = SearchClient(settings)
+    calls = []
+
+    async def fake_tavily(self, query):
+        return _tavily_to_results(
+            {"results": [{"title": "t", "url": "https://a.com",
+                           "content": "already have full text here"}]},
+            query)
+
+    async def boom_fetch(url):
+        calls.append(url)
+        raise AssertionError("must not refetch Tavily content")
+
+    async def empty_wiki(self, query):
+        return []
+
+    monkeypatch.setattr(SearchClient, "_tavily_search", fake_tavily)
+    monkeypatch.setattr(SearchClient, "_wiki", empty_wiki)
+    monkeypatch.setattr(search_mod, "_fetch_content", boom_fetch)
+    ranked = await client._search("tavily skip probe query")
+    assert len(ranked) == 1
+    assert ranked[0].is_content_fetched is True
+    assert calls == []

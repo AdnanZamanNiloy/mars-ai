@@ -246,10 +246,14 @@ def _tavily_to_results(payload: Any, query: str) -> List["SearchResult"]:
     for row in items:
         if not isinstance(row, dict) or not row.get("url"):
             continue
+        # Tavily already returns cleaned content: keep it in `content` so
+        # the fetch loop below recognizes it as fetched (no double fetch).
+        content = str(row.get("content", "") or "")
         results.append(SearchResult(
             title=str(row.get("title", "") or ""),
             url=str(row.get("url") or ""),
-            snippet=str(row.get("content", "") or "")[:1500],
+            snippet=content[:1500],
+            content=content[:6000],
             provider="tavily",
             published_at=str(row.get("published_date", "") or ""),
         ))
@@ -312,6 +316,11 @@ class SearchClient:
             # Depth is setting-driven (search_fetch_top_n); fetched text is
             # consumed by the summarizer, which releases it afterwards.
             async def _attach(r):
+                # Tavily results arrive with content: never re-fetch them.
+                if r.content:
+                    r.content_length = len(r.content)
+                    r.is_content_fetched = True
+                    return
                 content, last_modified = await _fetch_content(r.url)
                 if content:
                     r.content = content
