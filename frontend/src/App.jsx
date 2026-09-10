@@ -3,7 +3,7 @@ import { fetchTrace, resumeResearch, startResearch } from "./api";
 import { MODE_META, loadKnowledge, loadMissions, parseReport, removeKnowledgeItem, removeMission, saveKnowledgeItem, upsertMission } from "./lib";
 import Sidebar, { Planet } from "./components/Sidebar";
 import Composer from "./components/Composer";
-import { ErrorCard, LiveRunCard, MarsMessageShell, ThinkingSteps, TypingRow, UserMessage } from "./components/Thread";
+import { ErrorCard, MarsMessageShell, ThinkingSteps, TypingRow, UserMessage } from "./components/Thread";
 import AnswerCard, { ReplayAnswerCard } from "./components/AnswerCard";
 import ClaimDrawer from "./components/ClaimDrawer";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -497,7 +497,6 @@ function ThreadMessage({ message, running, onResume, onChallenge, onRegenerate, 
         canRegenerate={run.done && !running && !run.error && run.query.length > 0}
         onRegenerate={() => onRegenerate(run.query)}
       >
-        {!run.done && !run.error && !run.aborted ? <LiveRunCard run={run} /> : null}
         <ThinkingSteps steps={steps} />
         {run.aborted && !run.done ? (
           <div className="error-box" style={{ borderColor: "var(--line)", background: "var(--card)" }}>
