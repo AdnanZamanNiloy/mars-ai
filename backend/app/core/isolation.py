@@ -99,10 +99,20 @@ def build_contexts(
         if not isinstance(contract, dict):
             continue
         question = str(contract.get("question", "")).strip()
+        # Variant phrasings belong to the parent contract's context —
+        # otherwise their results orphan and the summarizer drops them.
+        wanted = {question}
+        variants = contract.get("variants", [])
+        if isinstance(variants, list):
+            wanted |= {str(v).strip() for v in variants if str(v).strip()}
+        own = []
+        for text, results in by_question.items():
+            if text in wanted:
+                own.extend(results)
         contexts.append(
             AgentContext(
                 contract=contract,
-                own_results=list(by_question.get(question, [])),
+                own_results=own,
             )
         )
     return contexts

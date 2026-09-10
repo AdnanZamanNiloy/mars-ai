@@ -79,7 +79,7 @@ async def test_raw_content_dropped_after_summarization(monkeypatch):
     async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None):
         return {"is_sufficient": True, "reason": "ok", "improved_queries": [], "confidence": 0.9}
 
-    async def fake_planner(llm, query, critique_feedback=""):
+    async def fake_planner(llm, query, critique_feedback="", today=""):
         return _make_state()["sub_questions"]
 
     async def fake_synthesizer(llm, query, facts=None):
@@ -109,3 +109,21 @@ async def test_raw_content_dropped_after_summarization(monkeypatch):
     assert all(not c for c in contents), f"raw content leaked into shared state: {contents}"
     # Snippets remain for transparency/verification.
     assert any(r.get("snippet") for r in final.get("search_results", []))
+
+
+def test_variant_results_attach_to_parent_context():
+    from app.core.isolation import build_contexts
+
+    contracts = [
+        {"question": "What is RAG?", "variants": ["RAG definition overview 2026"]},
+        {"question": "How does retrieval work?"},
+    ]
+    results = [
+        {"url": "https://a.com", "sub_question": "What is RAG?"},
+        {"url": "https://b.com", "sub_question": "RAG definition overview 2026"},
+        {"url": "https://c.com", "sub_question": "How does retrieval work?"},
+        {"url": "https://d.com", "sub_question": "unrelated orphan query"},
+    ]
+    contexts = build_contexts(contracts, results)
+    assert [r["url"] for r in contexts[0].own_results] == ["https://a.com", "https://b.com"]
+    assert [r["url"] for r in contexts[1].own_results] == ["https://c.com"]

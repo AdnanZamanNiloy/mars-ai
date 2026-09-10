@@ -23,6 +23,7 @@ class SubQuestionModel(BaseModel):
     domain: str = "general"
     minimum_sources: int = Field(default=2, ge=1)
     stop_condition: str = "sufficient evidence for this axis"
+    variants: List[str] = Field(default_factory=list, max_length=2)
 
 
 class PlannerOutputModel(BaseModel):

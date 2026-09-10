@@ -55,7 +55,7 @@ async def test_budget_cutoff_stops_loop_and_notes_limitation(monkeypatch):
 
     big_usage = dict(input_tokens=50_000, output_tokens=50_000)
 
-    async def fake_planner(llm, query, critique_feedback=""):
+    async def fake_planner(llm, query, critique_feedback="", today=""):
         return [{"id": 1, "question": "q one", "axis": "definition", "search_type": "encyclopedia",
                  "priority": 1, "depends_on": [], "coverage_goal": "", "domain": "general",
                  "minimum_sources": 2, "stop_condition": "enough"}]

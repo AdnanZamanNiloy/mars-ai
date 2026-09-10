@@ -30,6 +30,7 @@ class SubQuestion(TypedDict, total=False):
     domain: str
     minimum_sources: int
     stop_condition: str
+    variants: List[str]
 
 
 DEFAULT_MINIMUM_SOURCES = 2
@@ -122,6 +123,14 @@ RULE 1 — QUESTIONS, NOT TOPIC LABELS
   BAD  → "energy"
   GOOD → "cost per megawatt-hour of nuclear vs solar energy 2024"
 
+  VARIANTS — every sub_question MUST include 1-2 variants: alternate
+  phrasings with different keywords but the same intent. Different
+  phrasings retrieve different sources; a question without variants
+  leaves evidence on the table.
+  question → "utility-scale solar installation costs per MW 2024"
+  variants → ["residential solar price per watt 2024 SEIA",
+              "solar farm capital expenditure benchmarks"]
+
 RULE 2 — COVER IN PHASES, NOT JUST AXES
   Plan as a researcher would: survey first, then drill down.
   Phase A (survey): 1 question establishing landscape/definition.
@@ -182,6 +191,10 @@ RULE 7 — CONCRETE QUESTIONS ONLY
   A question that could be answered from general knowledge alone is a
   bad question — rewrite it to demand external evidence.
 
+  TEMPORAL AWARENESS — time-sensitive questions (news, trends, outlook,
+  statistics, "latest"/"recent") MUST carry the actual current year from
+  the request date, never a hardcoded past year and never no year.
+
 RULE 8 — COVERAGE NOTE WITH TEETH
   coverage_note must name the single most important angle the plan
   does NOT cover and why it was deprioritized — or state "full
@@ -206,7 +219,8 @@ Return ONLY valid JSON. No markdown fences. No text outside JSON.
       "coverage_goal": "<what this sub-question should establish>",
       "domain": "<same enum as dominant_domain>",
       "minimum_sources": 2,
-      "stop_condition": "<when this sub-question's search can stop, e.g. 'sufficient evidence for this axis'>"
+      "stop_condition": "<when this sub-question's search can stop, e.g. 'sufficient evidence for this axis'>",
+      "variants": ["<1-2 alternate phrasings with different keywords, same intent>"]
     }
   ],
   "coverage_note": "<one sentence: what would full coverage of this query require>"
@@ -233,6 +247,7 @@ def fallback_plan(query: str) -> List[Dict[str, Any]]:
             "domain": "general",
             "minimum_sources": DEFAULT_MINIMUM_SOURCES,
             "stop_condition": DEFAULT_STOP_CONDITION,
+            "variants": [],
         },
         {
             "id": 2,
@@ -245,6 +260,7 @@ def fallback_plan(query: str) -> List[Dict[str, Any]]:
             "domain": "general",
             "minimum_sources": DEFAULT_MINIMUM_SOURCES,
             "stop_condition": DEFAULT_STOP_CONDITION,
+            "variants": [],
         },
         {
             "id": 3,
@@ -257,6 +273,7 @@ def fallback_plan(query: str) -> List[Dict[str, Any]]:
             "domain": "general",
             "minimum_sources": DEFAULT_MINIMUM_SOURCES,
             "stop_condition": DEFAULT_STOP_CONDITION,
+            "variants": [],
         },
         {
             "id": 4,
@@ -269,6 +286,7 @@ def fallback_plan(query: str) -> List[Dict[str, Any]]:
             "domain": "general",
             "minimum_sources": DEFAULT_MINIMUM_SOURCES,
             "stop_condition": DEFAULT_STOP_CONDITION,
+            "variants": [],
         },
     ]
 
@@ -280,7 +298,8 @@ def fallback_plan(query: str) -> List[Dict[str, Any]]:
 async def planner_agent(
     llm: LLMClient,
     query: str,
-    critique_feedback: str = ""
+    critique_feedback: str = "",
+    today: str = "",
 ) -> List[Dict[str, Any]]:
 
     # No fast-path bypass: every query goes through LLM planning with the
@@ -294,10 +313,12 @@ async def planner_agent(
     # =========================
 
     feedback_block = f"\nCritique feedback: {critique_feedback}" if critique_feedback else ""
+    date_block = f"\nToday is {today.strip()} — use this year in time-sensitive questions." if today.strip() else ""
 
     user_prompt = f"""
 Query: {query}
 {feedback_block}
+{date_block}
 
 Generate a structured research plan.
 Return JSON only.
@@ -333,6 +354,14 @@ Return JSON only.
         if not q or not is_valid_question(q):
             continue
 
+        raw_variants = item.get("variants", [])
+        variants: List[str] = []
+        if isinstance(raw_variants, list):
+            for v in raw_variants[:2]:
+                vs = str(v or "").strip()
+                if vs and is_valid_question(vs) and normalize_text(vs) != normalize_text(q):
+                    variants.append(vs)
+
         cleaned.append({
             "id": item.get("id", i + 1),
             "question": q,
@@ -345,6 +374,7 @@ Return JSON only.
             "domain": normalize_domain(item.get("domain", "general")),
             "minimum_sources": max(1, int(item.get("minimum_sources", DEFAULT_MINIMUM_SOURCES))),
             "stop_condition": str(item.get("stop_condition", "")).strip() or DEFAULT_STOP_CONDITION,
+            "variants": variants,
         })
 
     # Deduplicate (semantic-ish)

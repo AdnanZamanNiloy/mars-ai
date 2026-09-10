@@ -76,6 +76,7 @@ async def test_planner_uses_llm_for_non_trivial_query():
             "domain": "economics",
             "minimum_sources": 2,
             "stop_condition": "sufficient evidence for this axis",
+            "variants": [],
         },
         {
             "id": 2,
@@ -88,6 +89,7 @@ async def test_planner_uses_llm_for_non_trivial_query():
             "domain": "economics",
             "minimum_sources": 2,
             "stop_condition": "sufficient evidence for this axis",
+            "variants": [],
         },
     ]
     assert llm.calls, "planner never called the LLM"
@@ -130,3 +132,46 @@ def test_planner_prompt_has_methodology_teeth():
     for marker in ("statistical", "criticism", "coverage_note", "CONCRETE"):
         assert marker in prompt, f"methodology marker missing: {marker}"
     assert "PLANNER_SYSTEM_PROMPT" not in prompt
+
+
+def _llm_plan_with_variants():
+    plan = dict(LLM_PLAN)
+    plan["sub_questions"] = [
+        {**LLM_PLAN["sub_questions"][0],
+         "variants": ["Bangladesh nuclear solar LCOE comparison 2024",
+                      "Levelized cost per MWh of nuclear vs solar in Bangladesh 2024"]},
+        {**LLM_PLAN["sub_questions"][1], "variants": ["x"]},
+    ]
+    return plan
+
+
+async def test_planner_keeps_valid_variants_drops_dupes_and_junk():
+    llm = FakeLLM(_llm_plan_with_variants())
+    result = await planner_agent(llm, QUERY)
+    assert result[0]["variants"] == ["Bangladesh nuclear solar LCOE comparison 2024"]
+    assert result[1]["variants"] == []
+
+
+async def test_planner_passes_today_into_prompt():
+    llm = FakeLLM(LLM_PLAN)
+    captured = {}
+
+    class SpyLLM(FakeLLM):
+        async def generate_json(self, system_prompt, user_prompt, retries=3, response_model=None):
+            captured["user"] = user_prompt
+            return await super().generate_json(system_prompt, user_prompt, retries, response_model)
+
+    await planner_agent(SpyLLM(LLM_PLAN), QUERY, today="2026-09-10")
+    assert "2026-09-10" in captured["user"]
+
+
+def test_planner_prompt_has_temporal_and_variant_markers():
+    prompt = planner_mod.PLANNER_SYSTEM_PROMPT
+    assert "current year" in prompt
+    assert "variants" in prompt
+    assert "VARIANTS" in prompt
+
+
+def test_fallback_plan_has_empty_variants():
+    for item in fallback_plan("What is RAG?"):
+        assert item["variants"] == []

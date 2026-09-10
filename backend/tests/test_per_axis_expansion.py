@@ -50,7 +50,7 @@ async def test_expansion_searches_only_new_questions(monkeypatch):
     ]
     search_inputs = []
 
-    async def fake_planner(llm, query, critique_feedback=""):
+    async def fake_planner(llm, query, critique_feedback="", today=""):
         return plans.pop(0)
 
     async def fake_summarizer(llm, query, search_results=None, specialist_role="general"):
@@ -98,4 +98,54 @@ async def test_expansion_searches_only_new_questions(monkeypatch):
     assert search_inputs[1] == ["What are RAG benchmarks this year?"], search_inputs
     assert len(final["sub_questions"]) == 3
     assert len(final["search_results"]) == 3
+    assert "# Final Answer" in final["final_report"]
+
+
+async def test_variant_queries_searched_and_attributed(monkeypatch):
+    """Variants fan out in search and their results reach the parent
+    contract's summarizer context (no orphans)."""
+    settings = Settings(groq_api_key="k", _env_file=None)
+    tracker = BudgetTracker(settings)
+    token = current_budget.set(tracker)
+    search_inputs = []
+
+    async def fake_planner(llm, query, critique_feedback="", today=""):
+        return [{**_q(1, "What is RAG today?"),
+                 "variants": ["RAG definition overview 2026"]}]
+
+    async def fake_summarizer(llm, query, search_results=None, specialist_role="general"):
+        return [{"claim": f"Finding about {r.get('sub_question', '')[:30]} is documented here",
+                 "source": r.get("url", ""), "confidence": 0.9}
+                for r in (search_results or [])]
+
+    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None):
+        return {"is_sufficient": True, "reason": "ok", "improved_queries": [], "confidence": 0.9}
+
+    async def fake_synthesizer(llm, query, facts):
+        return "synthesized answer"
+
+    monkeypatch.setattr(wf, "planner_agent", fake_planner)
+    monkeypatch.setattr(wf, "summarizer_agent", fake_summarizer)
+    monkeypatch.setattr(wf, "critic_agent", fake_critic)
+    monkeypatch.setattr(wf, "synthesizer_agent", fake_synthesizer)
+    monkeypatch.setattr(wf, "verify_facts", lambda facts, search_results: facts)
+
+    class StubSearch:
+        async def run_search(self, questions):
+            search_inputs.append(list(questions))
+            return [{"url": f"https://test.com/{i}", "sub_question": q,
+                     "snippet": "snip", "content": "content here"}
+                    for i, q in enumerate(questions)]
+
+    state = wf.build_initial_state("What is RAG?", 3)
+    state["budget_tracker"] = tracker
+    workflow = wf.create_workflow(LLMClient(settings), StubSearch())
+
+    final = None
+    async for snap in workflow.astream(state, stream_mode="values"):
+        final = snap
+    current_budget.reset(token)
+
+    assert search_inputs[0] == ["What is RAG today?", "RAG definition overview 2026"], search_inputs
+    assert len(final["facts"]) == 2, final["facts"]
     assert "# Final Answer" in final["final_report"]

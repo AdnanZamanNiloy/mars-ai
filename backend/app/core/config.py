@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     # content fetched (was hardcoded 3). Each fetch is ~6KB cleaned text kept
     # only until summarization — raise gradually, watching research latency.
     search_fetch_top_n: int = 5
+    # Query fan-out: max search queries issued per pass (questions + their
+    # alternate phrasings). Bounds latency when plans carry variants.
+    search_max_queries_per_pass: int = 8
 
     # Timeouts (seconds)
     llm_timeout_sec: float = 25.0

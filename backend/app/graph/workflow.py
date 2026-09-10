@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 from typing import Any, Dict, List, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -339,6 +340,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             llm=llm,
             query=state["query"],
             critique_feedback=feedback,
+            today=datetime.date.today().isoformat(),
         )
         # Hardware guardrail: cap the plan at the orchestrated target agents.
         orchestration = state.get("orchestration", {})
@@ -357,9 +359,30 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
     async def search_node(state: ResearchState) -> SearchUpdate:
         previous = [r for r in state.get("search_results", []) or [] if isinstance(r, dict)]
         # Per-axis expansion: search only questions with no results yet.
+        # Each unanswered parent fans out to its alternate phrasings
+        # (variants ride the parent contract, so nothing orphans).
         # Accumulated results stay bounded (passes × ~10 snippets) and the
         # verifier still releases raw content after each pass.
-        fresh = _unanswered_questions(state.get("sub_questions", []), previous)[:5]
+        fresh: List[str] = []
+        answered = {
+            normalize_text(str(r.get("sub_question", ""))) for r in previous
+        } - {""}
+        by_text = {}
+        for item in state.get("sub_questions", []) or []:
+            text = _extract_question_text(item)
+            if text and text not in by_text:
+                by_text[text] = item
+        for text in _unanswered_questions(state.get("sub_questions", []), previous):
+            fresh.append(text)
+            item = by_text.get(text)
+            if isinstance(item, dict):
+                for v in item.get("variants", []) or []:
+                    vs = str(v or "").strip()
+                    if vs and normalize_text(vs) not in answered:
+                        fresh.append(vs)
+        cap = max(1, int(getattr(getattr(search_client, "settings", None),
+                               "search_max_queries_per_pass", 8) or 8))
+        fresh = fresh[:cap]
         if not fresh:
             if previous:
                 return {"search_results": previous}
