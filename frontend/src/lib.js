@@ -111,6 +111,43 @@ export function removeMission(runId) {
   return list;
 }
 
+const KNOWLEDGE_KEY = "mars.knowledge.v1";
+const MAX_SAVED = 100;
+
+export function loadKnowledge() {
+  try {
+    const raw = localStorage.getItem(KNOWLEDGE_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveKnowledgeItem(item) {
+  const key = `${item.claim || ""}||${item.source || ""}`;
+  const list = loadKnowledge().filter((k) => `${k.claim || ""}||${k.source || ""}` !== key);
+  list.unshift({ claim: item.claim || "", source: item.source || "",
+                 verified: item.verified ?? null, savedAt: new Date().toISOString() });
+  try {
+    localStorage.setItem(KNOWLEDGE_KEY, JSON.stringify(list.slice(0, MAX_SAVED)));
+  } catch {
+    /* ignore */
+  }
+  return list.slice(0, MAX_SAVED);
+}
+
+export function removeKnowledgeItem(item) {
+  const key = `${item.claim || ""}||${item.source || ""}`;
+  const list = loadKnowledge().filter((k) => `${k.claim || ""}||${k.source || ""}` !== key);
+  try {
+    localStorage.setItem(KNOWLEDGE_KEY, JSON.stringify(list));
+  } catch {
+    /* ignore */
+  }
+  return list;
+}
+
 export const MODE_META = {
   quick: { label: "Quick scan", hint: "2 agents · 1 pass · fastest" },
   standard: { label: "Standard", hint: "3 agents · up to 3 passes" },

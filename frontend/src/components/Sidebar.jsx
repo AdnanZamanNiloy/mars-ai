@@ -1,5 +1,5 @@
 import { timeAgo } from "../lib";
-import { IconCompass, IconMissions, IconLayers, IconPlus } from "./icons";
+import { IconAgents, IconCompass, IconDoc, IconFlask, IconMissions, IconLayers, IconPlus } from "./icons";
 
 export function Planet({ size = 40, ring = false }) {
   return (
@@ -13,6 +13,9 @@ const NAV = [
   { id: "workspace", label: "Command Center", icon: IconCompass },
   { id: "missions", label: "Missions", icon: IconMissions },
   { id: "evidence", label: "Evidence", icon: IconLayers },
+  { id: "knowledge", label: "Knowledge", icon: IconDoc },
+  { id: "evaluations", label: "Evaluations", icon: IconFlask },
+  { id: "agents", label: "Agents", icon: IconAgents },
 ];
 
 const DOT = {

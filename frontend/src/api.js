@@ -77,6 +77,12 @@ export function resumeResearch({ runId, signal, onEvent }) {
   });
 }
 
+export async function fetchEvalBatches(limit = 5, signal) {
+  const response = await fetch(`/api/eval/batches?limit=${encodeURIComponent(limit)}`, { signal });
+  if (!response.ok) throw new Error(`Eval request failed (${response.status})`);
+  return response.json();
+}
+
 export async function fetchTrace(runId, signal) {
   const response = await fetch(`/api/research/${encodeURIComponent(runId)}/trace`, { signal });
   if (!response.ok) {

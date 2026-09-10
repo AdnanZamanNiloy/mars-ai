@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchTrace, resumeResearch, startResearch } from "./api";
-import { MODE_META, loadMissions, parseReport, removeMission, upsertMission } from "./lib";
+import { MODE_META, loadKnowledge, loadMissions, parseReport, removeKnowledgeItem, removeMission, saveKnowledgeItem, upsertMission } from "./lib";
 import Sidebar, { Planet } from "./components/Sidebar";
 import Composer from "./components/Composer";
 import { ErrorCard, LiveRunCard, MarsMessageShell, TypingRow, UserMessage } from "./components/Thread";
@@ -10,6 +10,9 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import IntelligencePanel from "./components/IntelligencePanel";
 import MissionsView from "./components/MissionsView";
 import EvidenceView from "./components/EvidenceView";
+import KnowledgeView from "./components/KnowledgeView";
+import EvalView from "./components/EvalView";
+import AgentsView from "./components/AgentsView";
 import { IconChevronLeft, IconMenu } from "./components/icons";
 
 let seq = 1;
@@ -47,6 +50,7 @@ function blankRun(query, mode) {
 export default function App() {
   const [view, setView] = useState("workspace");
   const [missions, setMissions] = useState(() => loadMissions());
+  const [knowledge, setKnowledge] = useState(() => loadKnowledge());
   const [messages, setMessages] = useState([]);
   const [composer, setComposer] = useState("");
   const [mode, setMode] = useState("standard");
@@ -392,6 +396,16 @@ export default function App() {
                 />
               ) : view === "evidence" ? (
                 <EvidenceView messages={messages} onInspect={setSelectedFinding} />
+              ) : view === "knowledge" ? (
+                <KnowledgeView
+                  items={knowledge}
+                  onRemove={(item) => setKnowledge(removeKnowledgeItem(item))}
+                  onInspect={setSelectedFinding}
+                />
+              ) : view === "evaluations" ? (
+                <EvalView />
+              ) : view === "agents" ? (
+                <AgentsView />
               ) : messages.length === 0 ? (
                 <WelcomeHero
                   composer={
@@ -459,7 +473,14 @@ export default function App() {
         ) : null}
       </div>
 
-      <ClaimDrawer finding={selectedFinding} onClose={() => setSelectedFinding(null)} />
+      <ClaimDrawer
+        finding={selectedFinding}
+        onClose={() => setSelectedFinding(null)}
+        onSave={(finding) => setKnowledge(saveKnowledgeItem(finding))}
+        saved={selectedFinding ? knowledge.some(
+          (k) => `${k.claim || ""}||${k.source || ""}` ===
+                 `${selectedFinding.claim || ""}||${selectedFinding.source || ""}`) : false}
+      />
     </div>
   );
 }

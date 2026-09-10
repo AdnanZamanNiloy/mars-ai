@@ -5,7 +5,7 @@ import { IconX } from "./icons";
  * backend findings stream (claim, source, verified, verification_score,
  * verification_reason, confidence). Nothing is synthesized. */
 
-export default function ClaimDrawer({ finding, onClose }) {
+export default function ClaimDrawer({ finding, onClose, onSave, saved }) {
   if (!finding) return null;
   const domain = extractDomain(finding.source || "");
   const trust = trustOf(domain);
@@ -20,6 +20,13 @@ export default function ClaimDrawer({ finding, onClose }) {
             <IconX size={16} />
           </button>
         </div>
+        {onSave ? (
+          <div style={{ marginTop: 12 }}>
+            <button className="btn" onClick={() => onSave(finding)} disabled={saved}>
+              {saved ? "Saved to knowledge" : "Save to knowledge"}
+            </button>
+          </div>
+        ) : null}
 
         <div className="tag-row">
           {typeof finding.verified === "boolean" ? (
