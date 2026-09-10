@@ -301,8 +301,6 @@ def test_summarize_avg_judge_optional():
 
 
 def test_judge_score_round_trip_and_migration(tmp_path):
-    import aiosqlite
-
     db_path = str(tmp_path / "judge.db")
     asyncio.run(init_db(db_path))
     asyncio.run(save_evaluation_run(db_path, {

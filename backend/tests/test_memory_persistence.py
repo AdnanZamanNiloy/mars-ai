@@ -6,7 +6,6 @@ asserts every memory table has rows joinable by run_id.
 import json
 
 import aiosqlite
-import pytest
 
 import app.graph.workflow as wf
 from app.core.budget import BudgetTracker

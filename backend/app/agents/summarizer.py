@@ -8,7 +8,6 @@ from app.agents.evidence_utils import (
     dedupe_semantic_facts,
     filter_search_results_by_domain,
     MIN_QUERY_OVERLAP,
-    normalize_claim_text,
     source_reliability_score,
 )
 from app.core.llm import LLMClient, clamp_confidence

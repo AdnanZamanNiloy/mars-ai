@@ -5,7 +5,6 @@ Any cache in this project MUST have an explicit size cap (AGENTS.md Section 5)
 """
 import hashlib
 import json
-import logging
 from typing import Any, Optional
 
 from diskcache import Cache

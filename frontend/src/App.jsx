@@ -460,7 +460,6 @@ export default function App() {
               run={activeRun}
               collapsed={intelCollapsed}
               onCollapse={() => setIntelCollapsed(true)}
-              onExpand={() => setIntelCollapsed(false)}
               onResume={() => activeRun && resumeRun(activeRun)}
             />
             {intelCollapsed ? (

@@ -1,5 +1,5 @@
 import {
-  IconAgents, IconAlert, IconChart, IconCheckCircle, IconChevronUp,
+  IconAlert, IconChart, IconCheckCircle, IconChevronUp,
   IconDoc, IconRefresh, IconSearch, IconShield, IconShieldCheck, IconTarget,
 } from "./icons";
 
@@ -27,7 +27,7 @@ function AgentRow({ icon: Ic, name, desc, status, meta, progress }) {
 }
 
 export default function IntelligencePanel({
-  run, collapsed, onCollapse, onExpand, onResume,
+  run, collapsed, onCollapse, onResume,
 }) {
   if (collapsed) return null;
 
@@ -120,14 +120,6 @@ export default function IntelligencePanel({
         </div>
       </section>
     </aside>
-  );
-}
-
-export function IntelExpandButton({ onExpand }) {
-  return (
-    <button className="icon-btn intel-expand" onClick={onExpand} title="Expand panel" aria-label="Expand panel">
-      <IconAgents size={15} />
-    </button>
   );
 }
 

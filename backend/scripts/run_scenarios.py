@@ -97,7 +97,7 @@ def trace_summary(trace: dict) -> dict:
     }
 
 
-def render(comparison: Dict, base_query: str) -> str:
+def render(comparison: dict, base_query: str) -> str:
     lines = [f"Scenario comparison for: {base_query}", ""]
     lines.append(f"Base recommendation: Option {comparison['base_option']}" if comparison["base_option"] else "Base run: no recommendation")
     lines.append("")
@@ -180,7 +180,7 @@ async def main() -> int:
                 continue
             scen_trace = await wait_trace(client, server, scen_id)
             if scen_trace is None or scen_trace.get("status") != "completed":
-                print(f"  scenario run did not complete", flush=True)
+                print("  scenario run did not complete", flush=True)
                 results.append({"id": s["id"], "assumption": s["assumption"],
                                 "confidence": None, "claims": [], "new_claims": [],
                                 "recommended_option": None})

@@ -6,7 +6,7 @@ from typing import Any, Dict, List, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from app.agents.evidence_utils import dedupe_semantic_facts, filter_facts_by_domain, source_reliability_score, verify_answer_support
+from app.agents.evidence_utils import dedupe_semantic_facts, filter_facts_by_domain, verify_answer_support
 from app.agents.critic import critic_agent
 from app.agents.orchestrator import orchestrate
 from app.agents.planner import normalize_text, planner_agent

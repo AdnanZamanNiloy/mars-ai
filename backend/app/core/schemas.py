@@ -7,7 +7,7 @@ Schema rule (AGENTS.md 4.2): every field here must match the keys the
 corresponding agent's system prompt documents AND the keys its parsing
 code reads. Keep the three in sync.
 """
-from typing import List, Literal, Optional
+from typing import List, Literal
 
 from pydantic import BaseModel, Field, field_validator
 

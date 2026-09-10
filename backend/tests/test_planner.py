@@ -5,10 +5,6 @@ every LLM planning call raised NameError and silently fell back to a fixed
 4-question template. This test must never silently pass again: if the planner
 falls back when it shouldn't, these tests fail.
 """
-import asyncio
-
-import pytest
-
 import app.agents.planner as planner_mod
 from app.agents.planner import fallback_plan, planner_agent
 
@@ -161,7 +157,6 @@ async def test_planner_keeps_valid_variants_drops_dupes_and_junk():
 
 
 async def test_planner_passes_today_into_prompt():
-    llm = FakeLLM(LLM_PLAN)
     captured = {}
 
     class SpyLLM(FakeLLM):

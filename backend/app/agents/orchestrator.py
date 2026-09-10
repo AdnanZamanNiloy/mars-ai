@@ -178,33 +178,3 @@ def orchestrate(
         max_parallel_agents=max_parallel_agents,
         notes=notes,
     )
-
-
-def apply_mode_preset(
-    query: str,
-    mode: str,
-    max_parallel_agents_setting: int,
-) -> OrchestrationPlan:
-    """Resolve a research mode into an effective orchestration plan."""
-    preset = MODE_PRESETS.get(mode, MODE_PRESETS["standard"])
-    plan = orchestrate(
-        query,
-        max_parallel_agents=min(max_parallel_agents_setting, preset["max_agents"]),
-        deep_research=preset["deep_research"],
-    )
-    plan.notes = [f"mode={mode}", *plan.notes]
-    return plan
-
-
-def plan_metadata_for_event(plan: OrchestrationPlan) -> Dict[str, Any]:
-    """Compact dict for embedding in the plan NDJSON event metadata."""
-    return {
-        "complexity_score": plan.complexity.score,
-        "complexity_level": plan.complexity.level,
-        "query_type": plan.complexity.query_type,
-        "target_agents": plan.target_agents,
-        "max_parallel_agents": plan.max_parallel_agents,
-        "clamped": plan.clamped,
-        "deep_research": plan.deep_research,
-        "notes": plan.notes,
-    }

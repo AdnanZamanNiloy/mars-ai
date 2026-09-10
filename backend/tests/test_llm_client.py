@@ -136,7 +136,6 @@ async def test_validation_failure_after_all_retries_raises(client):
 def test_env_file_precedence_real_key_beats_placeholder():
     """.env must override .env.example placeholders (regression: settings
     loaded 'your_groq_api_key_here' and every LLM call 401'd silently)."""
-    import os
     from pathlib import Path
 
     from app.core.config import Settings

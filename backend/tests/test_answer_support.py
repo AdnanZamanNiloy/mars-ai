@@ -1,7 +1,5 @@
 """Answer support: cited sentences checked against cited evidence."""
 
-import asyncio
-
 import app.graph.workflow as wf
 from app.agents.evidence_utils import verify_answer_support
 from app.core.budget import BudgetTracker, current_budget

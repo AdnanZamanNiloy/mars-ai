@@ -1,6 +1,4 @@
 """Cost Governor tests (Phase 2.2)."""
-import pytest
-
 import app.graph.workflow as wf
 from app.core.budget import BudgetTracker, current_budget
 from app.core.config import Settings

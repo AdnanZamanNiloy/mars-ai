@@ -481,7 +481,6 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
         state["budget_tracker"] = budget_tracker
         last_iteration = int(state.get("iteration", 0))
         emitted_findings = 0
-        saved_facts = 0
 
         async def _persist(coro):
             """Memory persistence must never kill a resumed run either."""

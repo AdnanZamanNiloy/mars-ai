@@ -1,7 +1,6 @@
 """Research Replay trace endpoint tests (Phase 3.4)."""
 import json
 
-import aiosqlite
 import httpx
 import pytest
 
@@ -9,7 +8,6 @@ from app.api.routes import router as api_router
 from app.core.config import Settings
 from app.db.sqlite import (
     complete_research_run,
-    get_run_trace,
     init_db,
     record_event,
     save_agent_tasks,

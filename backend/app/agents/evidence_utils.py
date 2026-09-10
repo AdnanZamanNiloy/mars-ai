@@ -88,10 +88,6 @@ def source_reliability_score(url: str) -> float:
     return 0.55
 
 
-def is_reliable_source(url: str, min_score: float = 0.62) -> bool:
-    return source_reliability_score(url) >= min_score
-
-
 def normalize_claim_text(text: str) -> str:
     cleaned = re.sub(r"\s+", " ", (text or "").strip())
     cleaned = cleaned.strip("-:;,. ")

@@ -1,8 +1,5 @@
 """Dynamic Research Depth controller tests (Phase 2.8)."""
-import pytest
-
 from app.core import depth_controller as dc
-from app.core.config import Settings
 
 
 def _state(**overrides):

@@ -12,7 +12,7 @@ differ significantly, from DIFFERENT sources.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 from app.agents.evidence_utils import _semantic_similarity
 

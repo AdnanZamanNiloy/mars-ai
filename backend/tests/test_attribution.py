@@ -3,7 +3,6 @@
 import asyncio
 
 from app.db.sqlite import (
-    eval_batch_rows,
     init_db,
     mark_challenged_claims,
     save_claims,

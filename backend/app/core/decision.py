@@ -12,7 +12,7 @@ collapses to a single "no material decision" option.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 from app.core.config import Settings
 
@@ -91,7 +91,6 @@ def build_decision_layer(
     if query_type not in ("comparative", "analytical"):
         return [_build_factual_option(str(state.get("query", "")))]
 
-    facts = state.get("facts", [])
     contradictions = state.get("contradictions", [])
     axes: List[str] = []
     for q in state.get("sub_questions", []):

@@ -117,7 +117,6 @@
 .mission-row .sub { display: flex; justify-content: space-between; gap: 8px; margin-top: 3px; font-size: 11px; color: var(--t3); }
 
 .side-foot { margin-top: auto; padding: 20px 8px 0; }
-.side-foot .motto { font-size: 9.5px; letter-spacing: 2.6px; line-height: 2; color: var(--t3); font-weight: 600; }
 .side-foot .ver { font-size: 11px; color: var(--t4); margin-top: 8px; }
 
 /* ---------- workspace ---------- */
@@ -186,17 +185,6 @@
 .intel-section > h3 { font-size: 13.5px; font-weight: 650; margin: 0 2px 12px; }
 .intel-section-head { display: flex; align-items: center; justify-content: space-between; margin: 0 2px 10px; }
 .intel-section-head h3 { font-size: 13.5px; font-weight: 650; margin: 0; }
-.link-btn {
-  border: 0;
-  background: none;
-  padding: 0;
-  color: var(--mars-soft);
-  font-size: 11.5px;
-  font-weight: 550;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.link-btn:hover { color: #fff; }
 
 /* ---------- responsive ---------- */
 

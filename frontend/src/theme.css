@@ -112,25 +112,6 @@ button { font-family: inherit; }
 .btn-primary:active:not(:disabled) { transform: translateY(1px); }
 .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
 
-.btn-danger-ghost {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 36px;
-  padding: 0 14px;
-  border-radius: 10px;
-  background: transparent;
-  border: 1px solid var(--line);
-  color: var(--t3);
-  font-size: 12.5px;
-  font-weight: 550;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
-  white-space: nowrap;
-}
-.btn-danger-ghost:hover:not(:disabled) { color: var(--red); border-color: rgba(205, 111, 99, 0.5); background: rgba(205, 111, 99, 0.07); }
-.btn-danger-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
-
 .chip {
   padding: 7px 14px;
   border-radius: 999px;

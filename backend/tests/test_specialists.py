@@ -4,8 +4,6 @@ DoD: a financial sub-question and a general sub-question get measurably
 different system prompts (observable via captured LLM calls), and each
 specialist path provably uses its own AgentContext — never the full state.
 """
-import asyncio
-
 import app.graph.workflow as wf
 from app.core.config import Settings
 from app.core.isolation import AgentContext, build_contexts, specialist_role_for_domain

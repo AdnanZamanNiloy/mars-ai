@@ -1,7 +1,5 @@
 """Per-axis expansion: plans append gap questions, search skips answered ones."""
 
-import asyncio
-
 import app.graph.workflow as wf
 from app.core.budget import BudgetTracker, current_budget
 from app.core.config import Settings
@@ -74,8 +72,6 @@ async def test_expansion_searches_only_new_questions(monkeypatch):
     monkeypatch.setattr(wf, "summarizer_agent", fake_summarizer)
     monkeypatch.setattr(wf, "critic_agent", fake_critic)
     monkeypatch.setattr(wf, "synthesizer_agent", fake_synthesizer)
-
-    from app.agents.verifier import verify_facts as real_verify
     monkeypatch.setattr(wf, "verify_facts", lambda facts, search_results: facts)
 
     class StubSearch:

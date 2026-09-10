@@ -2,7 +2,6 @@
 import asyncio
 
 import httpx
-import pytest
 from fastapi import FastAPI
 
 from app.core.config import Settings
@@ -97,7 +96,6 @@ def test_resume_reruns_critic_not_planner_or_search(tmp_path, monkeypatch):
     _seed(db_path)
 
     import app.graph.workflow as wf
-    from app.core.llm import LLMClient
 
     visited = []
     seen_tracker = {}
