@@ -93,3 +93,52 @@ def test_sanitizer_repairs_query_opener():
 
     out = _sanitize_answer_text("what is RAG refers to retrieval.", "What is RAG?")
     assert out.startswith("RAG refers to retrieval.")
+
+
+def test_clean_snippet_strips_date_stamps():
+    from app.agents.evidence_utils import clean_snippet_text
+
+    out = clean_snippet_text(
+        "Mar 17, 2026 · Transfer learning is a machine learning technique where a model "
+        "trained on one task is reused as the starting point for a different task."
+    )
+    assert out.startswith("Transfer learning is a machine learning technique")
+    assert "Mar 17" not in out
+
+
+def test_clean_snippet_trims_mid_sentence_cuts():
+    from app.agents.evidence_utils import clean_snippet_text
+
+    out = clean_snippet_text(
+        "Jul 2, 2025 · This article delves into the mechanics of transfer learning, "
+        "exploring its theoretical foundations, practical applications, and effica"
+    )
+    assert "Jul 2" not in out
+    assert "effica" not in out
+    assert out.endswith(".")
+
+
+def test_clean_snippet_drops_relative_dates_and_stumps():
+    from app.agents.evidence_utils import clean_snippet_text
+
+    assert clean_snippet_text("2 days ago · Short frag") == ""
+    assert clean_snippet_text("May 9, 2026 · Transfer learning is a technique where a model is reused.") != ""
+
+
+def test_fallback_answer_has_no_boilerplate():
+    from app.agents.synthesizer import synthesizer_agent
+
+    class ExplodingLLM:
+        async def generate_json(self, *a, **k):
+            raise RuntimeError("down")
+
+    facts = [
+        {"claim": "Transfer learning reuses a model trained on one task for a related task with limited data.",
+         "source": "https://en.wikipedia.org/wiki/Transfer_learning", "confidence": 0.9},
+        {"claim": "Fine-tuning pretrained networks reduces training time substantially.",
+         "source": "https://arxiv.org/abs/1234", "confidence": 0.85},
+    ]
+    answer = asyncio.run(synthesizer_agent(ExplodingLLM(), "What is transfer learning?", facts))
+    assert "supported by reliable evidence" not in answer
+    assert "Transfer learning reuses" in answer
+    assert "Sources:" in answer

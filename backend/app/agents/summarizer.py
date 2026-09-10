@@ -3,6 +3,7 @@ from typing import Any, Dict, List
 from app.core.logging import get_logger
 
 from app.agents.evidence_utils import (
+    clean_snippet_text,
     dedupe_semantic_facts,
     filter_search_results_by_domain,
     normalize_claim_text,
@@ -209,12 +210,12 @@ async def summarizer_agent(
     record_fallback("summarizer")
     fallback: List[Dict[str, Any]] = []
     for item in quality_results[:6]:
-        snippet = item.get("snippet", "").strip()
-        if not snippet:
+        claim = clean_snippet_text(item.get("snippet", ""))
+        if not claim:
             continue
         fallback.append(
             {
-                "claim": normalize_claim_text(snippet[:180]),
+                "claim": claim,
                 "source": item.get("url", ""),
                 "confidence": clamp_confidence((0.30 * 0.45) + (0.70 * source_reliability_score(item.get("url", "")))),
             }

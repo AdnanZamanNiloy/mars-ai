@@ -92,12 +92,12 @@ async def synthesizer_agent(llm: LLMClient, query: str, facts: List[Dict[str, An
         return _append_source_legend(answer, numbered)
 
     # Deterministic fallback keeps output coherent if LLM JSON parsing fails.
-    concept = _normalize_query_concept(query)
-    definition = f"{concept} is a concept supported by reliable evidence and clear explanatory claims."
-    body = " ".join([str(item.get("claim", "")).strip() for item in top_facts[:4] if item.get("claim")])
-    if not body:
-        return definition
-    return _append_source_legend(_sanitize_answer_text(f"{definition}\n\n{body}".strip(), query), numbered)
+    # No boilerplate openers: lead with the strongest evidence sentences.
+    body_facts = [str(item.get("claim", "")).strip() for item in top_facts[:3] if item.get("claim")]
+    if not body_facts:
+        return f"No reliable evidence was retrieved for {concept}."
+    body = " ".join(body_facts)
+    return _append_source_legend(_sanitize_answer_text(body, query), numbered)
 
 
 def _numbered_sources(top_facts: List[Dict[str, Any]]) -> List[Dict[str, str]]:

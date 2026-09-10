@@ -317,3 +317,40 @@ def verify_answer_support(
         # None (not 0.0) when nothing was cited — unmeasured, not failed.
         "rate": (supported / cited) if cited else None,
     }
+
+
+# Leading date stamps search engines prepend to snippets ("Mar 17, 2026 ·",
+# "2 days ago ·"). They leak into fallback answers as garbage prefixes.
+DATE_STAMP_RE = re.compile(
+    r"^(?:[A-Z][a-z]{2,8}\s+\d{1,2},\s+\d{4}|\d+\s+(?:day|hour|minute|second)s?\s+ago)"
+    r"\s*[·\-–|]\s*",
+    re.IGNORECASE,
+)
+
+MIN_CLEAN_CLAIM_CHARS = 50
+
+
+def clean_snippet_text(snippet: str, max_chars: int = 300) -> str:
+    """Turn a raw search snippet into a presentable claim sentence.
+
+    Strips engine date stamps, cuts to the last complete sentence within
+    max_chars, and rejects stumps too short to stand alone. Returns ""
+    when nothing salvageable remains.
+    """
+    text = re.sub(r"\s+", " ", (snippet or "")).strip()
+    text = DATE_STAMP_RE.sub("", text).strip()
+    if len(text) < MIN_CLEAN_CLAIM_CHARS:
+        return ""
+    # Trim to the last complete sentence; fall back to a comma break so a
+    # mid-sentence cut ("...and effica") never survives as a claim.
+    working = text[:max_chars]
+    ends = [m.end() for m in re.finditer(r"[.!?](?=\s|$)", working)]
+    if ends:
+        text = working[: ends[-1]].strip()
+    else:
+        alt = [m.end() for m in re.finditer(r"[,;:](?=\s)", working)]
+        text = (working[: alt[-1]].rstrip(",;:") + ".").strip() if alt else working
+    text = text.strip()
+    if len(text) < MIN_CLEAN_CLAIM_CHARS:
+        return ""
+    return text
