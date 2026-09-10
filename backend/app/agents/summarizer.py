@@ -3,9 +3,11 @@ from typing import Any, Dict, List
 from app.core.logging import get_logger
 
 from app.agents.evidence_utils import (
+    claim_query_overlap,
     clean_snippet_text,
     dedupe_semantic_facts,
     filter_search_results_by_domain,
+    MIN_QUERY_OVERLAP,
     normalize_claim_text,
     source_reliability_score,
 )
@@ -191,10 +193,16 @@ async def summarizer_agent(
     for fact in facts:
         if not isinstance(fact, dict):
             continue
-        claim = normalize_claim_text(str(fact.get("claim", "")))
+        # Model output gets the same fragment hygiene as snippets: echoed
+        # truncations ("...from a large dat") must not enter the pool.
+        claim = clean_snippet_text(str(fact.get("claim", "")), min_chars=25)
+        if not claim:
+            continue
         source = str(fact.get("source", "")).strip()
         source_score = source_reliability_score(source)
         if source_score < 0.55:
+            continue
+        if claim_query_overlap(query, claim) < MIN_QUERY_OVERLAP:
             continue
 
         model_confidence = clamp_confidence(fact.get("confidence", 0.0))
@@ -212,6 +220,8 @@ async def summarizer_agent(
     for item in quality_results[:6]:
         claim = clean_snippet_text(item.get("snippet", ""))
         if not claim:
+            continue
+        if claim_query_overlap(query, claim) < MIN_QUERY_OVERLAP:
             continue
         fallback.append(
             {

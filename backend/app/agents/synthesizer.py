@@ -4,7 +4,7 @@ from app.core.logging import get_logger
 import re
 from typing import Any, Dict, List
 
-from app.agents.evidence_utils import dedupe_semantic_facts, extract_domain, filter_facts_by_domain
+from app.agents.evidence_utils import dedupe_semantic_facts, extract_domain, filter_facts_by_domain, select_diverse
 from app.core.degradation import record_fallback
 from app.core.llm import LLMClient
 from app.core.schemas import SynthesizerAnswerModel
@@ -92,10 +92,12 @@ async def synthesizer_agent(llm: LLMClient, query: str, facts: List[Dict[str, An
         return _append_source_legend(answer, numbered)
 
     # Deterministic fallback keeps output coherent if LLM JSON parsing fails.
-    # No boilerplate openers: lead with the strongest evidence sentences.
-    body_facts = [str(item.get("claim", "")).strip() for item in top_facts[:3] if item.get("claim")]
+    # No boilerplate openers: lead with diverse evidence sentences (MMR
+    # keeps near-duplicate definitions from filling all three slots).
+    diverse = select_diverse(top_facts, k=3)
+    body_facts = [str(item.get("claim", "")).strip() for item in diverse if item.get("claim")]
     if not body_facts:
-        return f"No reliable evidence was retrieved for {concept}."
+        return f"No reliable evidence was retrieved for {_normalize_query_concept(query)}."
     body = " ".join(body_facts)
     return _append_source_legend(_sanitize_answer_text(body, query), numbered)
 

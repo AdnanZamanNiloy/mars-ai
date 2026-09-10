@@ -142,3 +142,81 @@ def test_fallback_answer_has_no_boilerplate():
     assert "supported by reliable evidence" not in answer
     assert "Transfer learning reuses" in answer
     assert "Sources:" in answer
+
+
+def test_overlap_drops_off_topic_junk():
+    from app.agents.evidence_utils import MIN_QUERY_OVERLAP, claim_query_overlap
+
+    query = "What is transfer learning?"
+    assert claim_query_overlap(query, "Crypto has real uses beyond investing today") < MIN_QUERY_OVERLAP
+    assert claim_query_overlap(query, "Transfer learning reuses models trained before") >= MIN_QUERY_OVERLAP
+
+
+def test_select_diverse_skips_near_dupes():
+    from app.agents.evidence_utils import select_diverse
+
+    dupes = [
+        {"claim": "Transfer learning reuses a model trained on one task for another task", "confidence": 0.95},
+        {"claim": "Transfer learning reuses a model trained on one task for a new task", "confidence": 0.9},
+        {"claim": "Quantum error correction uses surface codes on superconducting qubits", "confidence": 0.85},
+    ]
+    picked = select_diverse(dupes, k=3)
+    assert len(picked) == 2
+    assert any("Quantum" in p["claim"] for p in picked)
+
+
+def test_model_path_fragment_rejected(tmp_path):
+    from app.agents.summarizer import summarizer_agent
+    from app.core.config import Settings
+
+    class FakeLLM:
+        settings = Settings(groq_api_key="k", database_url=str(tmp_path / "t.db"), _env_file=None)
+
+        async def generate_json(self, *a, **k):
+            return {"facts": [
+                {"claim": "Transfer learning reuses models learned from a large dat",
+                 "source": "https://en.wikipedia.org/wiki/X", "confidence": 0.9},
+            ]}
+
+    facts = asyncio.run(summarizer_agent(
+        FakeLLM(), "What is transfer learning?",
+        search_results=[{"url": "https://en.wikipedia.org/wiki/X", "snippet": "s", "content": "c"}]))
+    assert all(" dat" not in f["claim"] for f in facts)
+
+
+def test_heuristic_drops_off_topic_snippet(tmp_path):
+    from app.agents.summarizer import summarizer_agent
+    from app.core.config import Settings
+
+    class ExplodingLLM:
+        settings = Settings(groq_api_key="k", database_url=str(tmp_path / "t.db"), _env_file=None)
+
+        async def generate_json(self, *a, **k):
+            raise RuntimeError("down")
+
+    facts = asyncio.run(summarizer_agent(
+        ExplodingLLM(), "What is transfer learning?",
+        search_results=[{"url": "https://crypto.example.com/x",
+                         "snippet": "Crypto has real world uses beyond investing today for payments",
+                         "content": "crypto payments everywhere today"}]))
+    assert facts == []
+
+
+def test_fallback_assembly_prefers_diverse_claims():
+    from app.agents.synthesizer import synthesizer_agent
+
+    class ExplodingLLM:
+        async def generate_json(self, *a, **k):
+            raise RuntimeError("down")
+
+    dupes = [
+        {"claim": "Transfer learning reuses a model trained on one task for another task",
+         "source": "https://a.com/1", "confidence": 0.95},
+        {"claim": "Transfer learning reuses a model trained on one task for a new task",
+         "source": "https://b.com/2", "confidence": 0.9},
+        {"claim": "Fine-tuning pretrained networks cuts training time substantially here",
+         "source": "https://c.com/3", "confidence": 0.85},
+    ]
+    answer = asyncio.run(synthesizer_agent(ExplodingLLM(), "What is transfer learning?", dupes))
+    assert "Fine-tuning pretrained networks" in answer
+    assert answer.count("reuses a model trained on one task") == 1

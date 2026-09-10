@@ -330,16 +330,16 @@ DATE_STAMP_RE = re.compile(
 MIN_CLEAN_CLAIM_CHARS = 50
 
 
-def clean_snippet_text(snippet: str, max_chars: int = 300) -> str:
+def clean_snippet_text(snippet: str, max_chars: int = 300, min_chars: int = MIN_CLEAN_CLAIM_CHARS) -> str:
     """Turn a raw search snippet into a presentable claim sentence.
 
     Strips engine date stamps, cuts to the last complete sentence within
-    max_chars, and rejects stumps too short to stand alone. Returns ""
+    max_chars, and rejects stumps shorter than min_chars. Returns ""
     when nothing salvageable remains.
     """
     text = re.sub(r"\s+", " ", (snippet or "")).strip()
     text = DATE_STAMP_RE.sub("", text).strip()
-    if len(text) < MIN_CLEAN_CLAIM_CHARS:
+    if len(text) < min_chars:
         return ""
     # Trim to the last complete sentence; fall back to a comma break so a
     # mid-sentence cut ("...and effica") never survives as a claim.
@@ -349,8 +349,49 @@ def clean_snippet_text(snippet: str, max_chars: int = 300) -> str:
         text = working[: ends[-1]].strip()
     else:
         alt = [m.end() for m in re.finditer(r"[,;:](?=\s)", working)]
-        text = (working[: alt[-1]].rstrip(",;:") + ".").strip() if alt else working
+        if alt:
+            text = (working[: alt[-1]].rstrip(",;:") + ".").strip()
+        elif len(working.rsplit(None, 1)[-1]) <= 3:
+            # No sentence end and a stub tail ("...from a large dat"):
+            # a mid-word cut. (Rare casualty: legit ends like "...the US".)
+            return ""
     text = text.strip()
-    if len(text) < MIN_CLEAN_CLAIM_CHARS:
+    if len(text) < min_chars:
         return ""
     return text
+
+
+def claim_query_overlap(query: str, claim: str) -> float:
+    """Word overlap between the research query and a claim (0-1). Guards
+    the evidence pool against off-topic drift (crypto tips in a transfer
+    learning run): zero shared vocabulary means unrelated."""
+    q_words = _tokenize(query or "")
+    c_words = _tokenize(claim or "")
+    if not q_words:
+        return 0.0
+    return len(q_words & c_words) / len(q_words)
+
+
+MIN_QUERY_OVERLAP = 0.15
+
+
+def select_diverse(
+    claims: List[Dict[str, Any]], k: int = 3, max_similarity: float = 0.75
+) -> List[Dict[str, Any]]:
+    """Greedy maximal-marginal-relevance pick: highest confidence first,
+    then each next claim must add novelty vs everything already picked.
+    Stops fallback answers reading the same definition three times."""
+    ranked = sorted(claims or [], key=lambda f: float(f.get("confidence", 0.0) or 0.0), reverse=True)
+    selected: List[Dict[str, Any]] = []
+    for candidate in ranked:
+        text = str(candidate.get("claim", "") or "")
+        if not text:
+            continue
+        if all(
+            _semantic_similarity(text, str(kept.get("claim", "") or "")) < max_similarity
+            for kept in selected
+        ):
+            selected.append(candidate)
+        if len(selected) >= k:
+            break
+    return selected
