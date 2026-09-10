@@ -22,7 +22,7 @@
 }
 
 .brand { display: flex; align-items: center; gap: 12px; padding: 2px 6px 0; }
-.brand-name { font-size: 17px; font-weight: 800; letter-spacing: 5px; }
+.brand-name { font-size: 17px; font-weight: 800; letter-spacing: 5px; color: #EAB308; }
 .brand-sub { font-size: 10.5px; line-height: 1.5; color: var(--t3); margin-top: 3px; }
 
 .new-btn {
@@ -34,16 +34,15 @@
   margin-top: 16px;
   padding: 11px 0;
   border-radius: 11px;
-  border: 1px solid rgba(0, 0, 0, 0.25);
-  background: #E8794F;
-  color: #1c1009;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--t1);
   font-size: 13.5px;
-  font-weight: 650;
+  font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-  transition: filter 0.15s;
+  transition: background 0.15s, border-color 0.15s;
 }
-.new-btn:hover { filter: brightness(0.92); }
+.new-btn:hover { background: var(--card-2); border-color: #3a3a3a; }
 
 .side-nav { display: flex; flex-direction: column; gap: 2px; margin-top: 14px; }
 .side-nav button {
