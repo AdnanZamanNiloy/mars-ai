@@ -77,6 +77,10 @@ async def test_planner_uses_llm_for_non_trivial_query():
             "minimum_sources": 2,
             "stop_condition": "sufficient evidence for this axis",
             "variants": [],
+            "agent": "",
+            "tools": ["web_search"],
+            "scope": [],
+            "output_format": "structured_findings",
         },
         {
             "id": 2,
@@ -90,6 +94,10 @@ async def test_planner_uses_llm_for_non_trivial_query():
             "minimum_sources": 2,
             "stop_condition": "sufficient evidence for this axis",
             "variants": [],
+            "agent": "",
+            "tools": ["web_search"],
+            "scope": [],
+            "output_format": "structured_findings",
         },
     ]
     assert llm.calls, "planner never called the LLM"

@@ -49,6 +49,34 @@ SPECIALIST_PROMPT_ADDITIONS = {
         "growth-rate claims, and keep their scope (region, segment, period)\n"
         "attached to the number. Note when sources disagree on scope."
     ),
+    "legal": (
+        "\n\nSPECIALIST FOCUS — LEGAL:\n"
+        "Prefer primary legal sources: statutes, regulations, case law, official\n"
+        "guidance. Quote operative language precisely and always attach the\n"
+        "jurisdiction. Distinguish binding authority from commentary, and flag\n"
+        "when a rule varies by jurisdiction or is under appeal."
+    ),
+    "scientific": (
+        "\n\nSPECIALIST FOCUS — SCIENTIFIC:\n"
+        "Prefer peer-reviewed studies, preprints with methods sections, and\n"
+        "official datasets. Capture study design (sample, controls, effect\n"
+        "size) with every finding. Treat single-study results as provisional\n"
+        "and note replication status when sources discuss it."
+    ),
+    "policy": (
+        "\n\nSPECIALIST FOCUS — POLICY:\n"
+        "Prefer government releases, legislative texts, and think-tank analyses\n"
+        "with stated methodology. Attach the jurisdiction and status (proposed,\n"
+        "enacted, repealed) to every policy claim. Distinguish the policy text\n"
+        "itself from analysts' predictions about its effects."
+    ),
+    "academic": (
+        "\n\nSPECIALIST FOCUS — ACADEMIC:\n"
+        "Prefer peer-reviewed papers, monographs, and conference proceedings.\n"
+        "Attribute schools of thought and name key authors with dates. Keep\n"
+        "interpretive claims separate from textual evidence, and flag where\n"
+        "scholars disagree rather than smoothing over the debate."
+    ),
     "general": "",  # no overlay for unrouted domains
 }
 

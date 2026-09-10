@@ -24,6 +24,10 @@ class SubQuestionModel(BaseModel):
     minimum_sources: int = Field(default=2, ge=1)
     stop_condition: str = "sufficient evidence for this axis"
     variants: List[str] = Field(default_factory=list, max_length=2)
+    agent: str = ""
+    tools: List[str] = Field(default_factory=lambda: ["web_search"])
+    scope: List[str] = Field(default_factory=list, max_length=5)
+    output_format: str = "structured_findings"
 
 
 class PlannerOutputModel(BaseModel):

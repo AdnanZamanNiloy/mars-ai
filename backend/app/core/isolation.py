@@ -23,9 +23,13 @@ SPECIALIST_DOMAINS = {
     "economics": "financial",
     "machine_learning": "technical",
     "software": "technical",
-    "science": "technical",
+    "science": "scientific",
+    "legal": "legal",
+    "policy": "policy",
+    "academic": "academic",
 }
-SPECIALIST_ROLES = frozenset({"financial", "technical", "market", "general"})
+SPECIALIST_ROLES = frozenset({"financial", "technical", "market", "general",
+                              "legal", "scientific", "policy", "academic"})
 
 
 def specialist_role_for_domain(domain: str) -> str:

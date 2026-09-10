@@ -31,6 +31,10 @@ class SubQuestion(TypedDict, total=False):
     minimum_sources: int
     stop_condition: str
     variants: List[str]
+    agent: str
+    tools: List[str]
+    scope: List[str]
+    output_format: str
 
 
 DEFAULT_MINIMUM_SOURCES = 2
@@ -63,8 +67,14 @@ VALID_DOMAINS = {
     "philosophy",
     "economics",
     "science",
+    "legal",
+    "policy",
+    "academic",
     "general",
 }
+
+
+VALID_TOOLS = ["web_search", "fetch_content"]
 
 
 # =========================
@@ -82,6 +92,20 @@ def normalize_domain(domain: str) -> str:
 
 def is_valid_question(q: str) -> bool:
     return len(q.split()) >= 3
+
+
+def _clean_str_list(values: Any, limit: int = 5) -> List[str]:
+    """String-list parser guard: keeps short non-empty strings, drops junk."""
+    if not isinstance(values, list):
+        return []
+    cleaned = []
+    for v in values:
+        text = str(v or "").strip()
+        if text and len(text) <= 120 and text not in cleaned:
+            cleaned.append(text)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
 
 
 def diversity_coverage(sub_questions: List[Dict[str, Any]]) -> set:
@@ -179,6 +203,12 @@ RULE 4 — PRIORITY AND DEPENDENCIES
   challenge angles, never just background.
   Use depends_on to list ids of sub-questions this one builds on.
 
+  CONTRACT FIELDS — each sub-question is a delegation contract:
+  agent: short role label, e.g. "financial_researcher" (derived from domain)
+  tools: subset of [web_search, fetch_content] — the only tools that exist
+  scope: 2-5 noun phrases bounding the sub-question
+  output_format: always "structured_findings" (the pipeline's only consumer)
+
 RULE 5 — RESPECT CRITIQUE FEEDBACK
   If critique_feedback is provided, generate sub_questions that
   specifically close the gaps it describes rather than repeating
@@ -188,7 +218,7 @@ RULE 6 — CLASSIFY THE QUERY
   query_type:    factual | comparative | analytical | exploratory
   query_scope:   narrow | broad
   domain must be one of: machine_learning | software | philosophy |
-  economics | science | general
+  economics | science | legal | policy | academic | general
 
 RULE 7 — CONCRETE QUESTIONS ONLY
   Every question must name a searchable noun AND the evidence it seeks.
@@ -213,7 +243,7 @@ Return ONLY valid JSON. No markdown fences. No text outside JSON.
 {
   "query_type": "<factual|comparative|analytical|exploratory>",
   "query_scope": "<narrow|broad>",
-  "dominant_domain": "<machine_learning|software|philosophy|economics|science|general>",
+  "dominant_domain": "<machine_learning|software|philosophy|economics|science|legal|policy|academic|general>",
   "sub_questions": [
     {
       "id": 1,
@@ -226,7 +256,11 @@ Return ONLY valid JSON. No markdown fences. No text outside JSON.
       "domain": "<same enum as dominant_domain>",
       "minimum_sources": 2,
       "stop_condition": "<when this sub-question's search can stop, e.g. 'sufficient evidence for this axis'>",
-      "variants": ["<1-2 alternate phrasings with different keywords, same intent>"]
+      "variants": ["<1-2 alternate phrasings with different keywords, same intent>"],
+      "agent": "<short role label, e.g. financial_researcher>",
+      "tools": ["web_search"],
+      "scope": ["<2-5 bounding noun phrases>"],
+      "output_format": "structured_findings"
     }
   ],
   "coverage_note": "<one sentence: what would full coverage of this query require>"
@@ -254,6 +288,10 @@ def fallback_plan(query: str) -> List[Dict[str, Any]]:
             "minimum_sources": DEFAULT_MINIMUM_SOURCES,
             "stop_condition": DEFAULT_STOP_CONDITION,
             "variants": [],
+            "agent": "",
+            "tools": ["web_search"],
+            "scope": [],
+            "output_format": "structured_findings",
         },
         {
             "id": 2,
@@ -267,6 +305,10 @@ def fallback_plan(query: str) -> List[Dict[str, Any]]:
             "minimum_sources": DEFAULT_MINIMUM_SOURCES,
             "stop_condition": DEFAULT_STOP_CONDITION,
             "variants": [],
+            "agent": "",
+            "tools": ["web_search"],
+            "scope": [],
+            "output_format": "structured_findings",
         },
         {
             "id": 3,
@@ -280,6 +322,10 @@ def fallback_plan(query: str) -> List[Dict[str, Any]]:
             "minimum_sources": DEFAULT_MINIMUM_SOURCES,
             "stop_condition": DEFAULT_STOP_CONDITION,
             "variants": [],
+            "agent": "",
+            "tools": ["web_search"],
+            "scope": [],
+            "output_format": "structured_findings",
         },
         {
             "id": 4,
@@ -293,6 +339,10 @@ def fallback_plan(query: str) -> List[Dict[str, Any]]:
             "minimum_sources": DEFAULT_MINIMUM_SOURCES,
             "stop_condition": DEFAULT_STOP_CONDITION,
             "variants": [],
+            "agent": "",
+            "tools": ["web_search"],
+            "scope": [],
+            "output_format": "structured_findings",
         },
     ]
 
@@ -381,6 +431,10 @@ Return JSON only.
             "minimum_sources": max(1, int(item.get("minimum_sources", DEFAULT_MINIMUM_SOURCES))),
             "stop_condition": str(item.get("stop_condition", "")).strip() or DEFAULT_STOP_CONDITION,
             "variants": variants,
+            "agent": str(item.get("agent", "") or "").strip()[:60],
+            "tools": [t for t in _clean_str_list(item.get("tools", ["web_search"])) if t in VALID_TOOLS] or ["web_search"],
+            "scope": _clean_str_list(item.get("scope", [])),
+            "output_format": "structured_findings",
         })
 
     # Deduplicate (semantic-ish)

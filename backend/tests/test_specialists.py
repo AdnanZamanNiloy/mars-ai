@@ -111,3 +111,52 @@ def test_context_specialist_role_accessor():
     assert isinstance(ctx, AgentContext)
     assert ctx.specialist_role() == "financial"
     assert ctx.domain() == "economics"
+
+
+def test_new_specialist_routing_and_overlays():
+    from app.agents.summarizer import specialist_system_prompt, SUMMARIZER_SYSTEM_PROMPT
+    from app.core.isolation import SPECIALIST_ROLES, specialist_role_for_domain
+
+    assert specialist_role_for_domain("legal") == "legal"
+    assert specialist_role_for_domain("policy") == "policy"
+    assert specialist_role_for_domain("academic") == "academic"
+    assert specialist_role_for_domain("science") == "scientific"
+    assert specialist_role_for_domain("philosophy") == "general"
+    assert SPECIALIST_ROLES == {"financial", "technical", "market", "general",
+                                "legal", "scientific", "policy", "academic"}
+    for role, marker in (("legal", "LEGAL"), ("scientific", "SCIENTIFIC"),
+                         ("policy", "POLICY"), ("academic", "ACADEMIC")):
+        prompt = specialist_system_prompt(role)
+        assert marker in prompt, role
+        assert prompt.startswith(SUMMARIZER_SYSTEM_PROMPT)
+
+
+def test_contract_fields_validated():
+    import asyncio
+
+    from app.agents.planner import planner_agent
+
+    class FakeLLM:
+        async def generate_json(self, system_prompt, user_prompt, retries=3, response_model=None):
+            payload = {
+                "query_type": "factual", "query_scope": "narrow", "dominant_domain": "general",
+                "sub_questions": [{
+                    "id": 1, "question": "What do courts require for valid consent forms?",
+                    "axis": "definition", "search_type": "academic", "priority": 1,
+                    "depends_on": [], "coverage_goal": "doctrine", "domain": "legal",
+                    "agent": "legal_researcher", "tools": ["web_search", "nonsense_tool", "fetch_content"],
+                    "scope": ["consent", "case law", "statutes", "remedies", "extra"],
+                    "output_format": "whatever",
+                }],
+                "coverage_note": "ok",
+            }
+            if response_model is not None:
+                return response_model.model_validate(payload).model_dump()
+            return payload
+
+    result = asyncio.run(planner_agent(FakeLLM(), "What do courts require?"))
+    item = result[0]
+    assert item["agent"] == "legal_researcher"
+    assert item["tools"] == ["web_search", "fetch_content"]
+    assert len(item["scope"]) == 5
+    assert item["output_format"] == "structured_findings"
