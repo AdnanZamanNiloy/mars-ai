@@ -5,6 +5,7 @@ import re
 from typing import Any, Dict, List
 
 from app.agents.evidence_utils import dedupe_semantic_facts, extract_domain, filter_facts_by_domain
+from app.core.degradation import record_fallback
 from app.core.llm import LLMClient
 from app.core.schemas import SynthesizerAnswerModel
 
@@ -76,9 +77,12 @@ async def synthesizer_agent(llm: LLMClient, query: str, facts: List[Dict[str, An
         )
     except Exception as exc:
         logger.warning("[Synthesizer] LLM call failed, using deterministic fallback", exc_info=exc)
+        record_fallback("synthesizer")
         payload = {}
 
     answer = str(payload.get("answer", "")).strip() if isinstance(payload, dict) else ""
+    if not answer:
+        record_fallback("synthesizer")
     if answer:
         answer = _sanitize_answer_text(_validate_citations(answer, len(numbered)), query)
         return _append_source_legend(answer, numbered)

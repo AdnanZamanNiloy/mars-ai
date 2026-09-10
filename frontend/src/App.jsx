@@ -40,6 +40,7 @@ function blankRun(query, mode) {
     decisions: [],
     report: "",
     confidence: null,
+    degraded: [],
     done: false,
     error: "",
     resumable: false,
@@ -167,6 +168,7 @@ export default function App() {
             ...m.run,
             report: evt.report || "",
             confidence: typeof evt.confidence === "number" ? evt.confidence : null,
+            degraded: Array.isArray(evt.degraded) ? evt.degraded : [],
             done: true,
             resuming: false,
           };
@@ -174,6 +176,7 @@ export default function App() {
             saveMissions(upsertMission({
               runId: run.runId, query: run.query, mode: run.mode,
               status: "completed", confidence: run.confidence, cost: run.budget?.cost ?? null,
+              degraded: run.degraded,
             }));
           }
           return { ...m, run };
@@ -214,7 +217,7 @@ export default function App() {
       tempId = resumeRun.tempId;
       patchRun(tempId, {
         error: "", resumable: false, resuming: true, done: false,
-        findings: [], verifiedCount: 0, budget: null,
+        findings: [], verifiedCount: 0, budget: null, degraded: [],
       });
       pushTrace({ text: `Resuming run ${resumeRun.runId.slice(0, 8)} from checkpoint`, kind: "active" });
     } else {
@@ -285,7 +288,11 @@ export default function App() {
     try {
       const trace = await fetchTrace(runId);
       const mission = loadMissions().find((m) => m.runId === runId);
-      setMessages((prev) => [...prev, { id: nid(), kind: "replay", runId, trace, query: mission?.query || trace.query || "Replay", at: new Date().toISOString() }]);
+      const degraded = [...new Set(
+        (trace.events || []).filter((e) => e.event_type === "fallback").map((e) => e.node)
+      )];
+      setMessages((prev) => [...prev, { id: nid(), kind: "replay", runId, trace, degraded,
+        query: mission?.query || trace.query || "Replay", at: new Date().toISOString() }]);
       const events = (trace.events || []).map((e) => ({
         at: e.ended_at || e.started_at || new Date().toISOString(),
         kind: e.event_type === "end" ? "done" : "active",
@@ -428,7 +435,18 @@ function ThreadMessage({ message, running, selectedFinding, onSelectFinding, onR
           <ErrorCard message={run.error} resumable={run.resumable} resuming={run.resuming} onResume={() => onResume(run)} />
         ) : null}
         {run.done && run.report ? (
-          <AnswerCard run={run} selectedFinding={selectedFinding} onSelectFinding={onSelectFinding} />
+          <>
+            {run.degraded.length > 0 ? (
+              <div className="degraded-banner anim-rise" role="status">
+                <span className="tag tone-bad">degraded</span>
+                <span>
+                  {run.degraded.join(", ")} fell back to deterministic defaults — the model
+                  was unreachable for parts of this run, so treat the answer with extra care.
+                </span>
+              </div>
+            ) : null}
+            <AnswerCard run={run} selectedFinding={selectedFinding} onSelectFinding={onSelectFinding} />
+          </>
         ) : null}
         {run.done && !run.report && !run.error ? (
           <div className="error-box">The run finished without producing a report.</div>
@@ -441,12 +459,19 @@ function ThreadMessage({ message, running, selectedFinding, onSelectFinding, onR
   }
   if (message.kind === "replay") {
     const { trace } = message;
+    const degraded = message.degraded || [];
     return (
       <MarsMessageShell time={fmtTime(message.at)}>
         <div className="replay-banner">
           <span className="tag tone-blue">replay</span>
           <span>Read-only record of “{message.query}” · status: {trace.status}{(trace.plan || []).length ? ` · ${(trace.plan || []).length} planned questions` : ""}</span>
         </div>
+        {degraded.length > 0 ? (
+          <div className="degraded-banner anim-rise" role="status">
+            <span className="tag tone-bad">degraded</span>
+            <span>{degraded.join(", ")} fell back to deterministic defaults during this run.</span>
+          </div>
+        ) : null}
         {trace.final_report ? (
           <ReplayAnswerCard trace={trace} />
         ) : (

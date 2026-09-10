@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.core.degradation import record_fallback
 from app.core.logging import get_logger
 import re
 from typing import Any, Dict, List, TypedDict
@@ -310,12 +311,14 @@ Return JSON only.
         )
     except Exception as e:
         logger.error(f"[Planner] LLM failed: {e}", exc_info=e)
+        record_fallback("planner")
         return fallback_plan(query)
 
     sub_questions = payload.get("sub_questions", [])
 
     if not sub_questions:
         logger.warning("[Planner] Empty LLM output, using fallback")
+        record_fallback("planner")
         return fallback_plan(query)
 
     # =========================

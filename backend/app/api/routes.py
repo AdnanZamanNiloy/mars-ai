@@ -11,6 +11,7 @@ from slowapi.util import get_remote_address
 
 from app.core.config import get_settings
 from app.core.budget import BudgetTracker, current_budget
+from app.core.degradation import clear_fallbacks, reset_fallbacks, take_fallbacks
 from app.db.sqlite import (
     complete_research_run,
     get_run_trace,
@@ -97,6 +98,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
 
     async def event_stream() -> AsyncGenerator[str, None]:
         bind_request_context(request_id=request_id)
+        reset_fallbacks()
         try:
             state = build_initial_state(
                 payload.query,
@@ -309,9 +311,18 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 await _persist(save_final_report(
                     settings.database_url, request_id, report, confidence,
                 ))
-                yield event_line("final_report", report=report, confidence=confidence)
+                # Degradation flag: which agents fell back to deterministic
+                # defaults (field on the existing event — no contract break).
+                degraded = take_fallbacks()
+                for agent in degraded:
+                    await _persist(record_event(
+                        settings.database_url, request_id, agent, "fallback",
+                        payload=json.dumps({"agent": agent}),
+                    ))
+                yield event_line("final_report", report=report, confidence=confidence, degraded=degraded)
             else:
-                yield event_line("final_report", report="No final report generated.", confidence=confidence)
+                yield event_line("final_report", report="No final report generated.", confidence=confidence,
+                                 degraded=take_fallbacks())
 
             # Decision Layer rows (3.5): one per strategic option.
             decision_options = last_snapshot.get("decision_options") or []
@@ -322,6 +333,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                     for o in decision_options
                 ])
         finally:
+            clear_fallbacks()
             unbind_request_context()
 
     return StreamingResponse(event_stream(), media_type="application/x-ndjson")
@@ -369,6 +381,9 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
     async def resume_stream() -> AsyncGenerator[str, None]:
         bind_request_context(request_id=request_id, resumed=True)
         current_budget.set(budget_tracker)
+        # A resumed run is a fresh degradation window: earlier fallbacks are
+        # already recorded against this run_id from the first attempt.
+        reset_fallbacks()
         # Depth controller + report builder read the tracker from state, not
         # the ContextVar — without this, budget checks are silently skipped
         # on the resume path.
@@ -424,11 +439,19 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
             await _persist_complete(settings.database_url, request_id, "completed", confidence, budget_tracker.estimated_cost_usd)
             if report:
                 await _persist_report(settings.database_url, request_id, str(state.get("query", "")), report, confidence)
-                yield event_line("final_report", report=report, confidence=confidence)
+                degraded = take_fallbacks()
+                for agent in degraded:
+                    await _persist(record_event(
+                        settings.database_url, request_id, agent, "fallback",
+                        payload=json.dumps({"agent": agent}),
+                    ))
+                yield event_line("final_report", report=report, confidence=confidence, degraded=degraded)
             else:
-                yield event_line("final_report", report="No final report generated.", confidence=confidence)
+                yield event_line("final_report", report="No final report generated.", confidence=confidence,
+                                 degraded=take_fallbacks())
         finally:
             current_budget.set(None)
+            clear_fallbacks()
             unbind_request_context()
 
     return StreamingResponse(resume_stream(), media_type="application/x-ndjson")

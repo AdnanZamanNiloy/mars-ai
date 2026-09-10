@@ -11,6 +11,7 @@ from app.agents.evidence_utils import (
 from app.core.llm import LLMClient, clamp_confidence
 from app.core.schemas import SummarizerFactsModel
 from app.core.cache import cache_key, get_cache
+from app.core.degradation import record_fallback
 
 logger = get_logger(__name__)
 
@@ -204,6 +205,8 @@ async def summarizer_agent(
         return dedupe_semantic_facts(cleaned)
 
     # Heuristic fallback when the model output is malformed or empty.
+    # Reaching here means the model contributed nothing usable.
+    record_fallback("summarizer")
     fallback: List[Dict[str, Any]] = []
     for item in quality_results[:6]:
         snippet = item.get("snippet", "").strip()

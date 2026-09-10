@@ -3,6 +3,7 @@ from typing import Any, Dict, List
 from app.core.logging import get_logger
 
 from app.agents.evidence_utils import dedupe_semantic_facts, extract_domain, filter_facts_by_domain, normalize_claim_text
+from app.core.degradation import record_fallback
 from app.core.llm import LLMClient, clamp_confidence
 from app.core.schemas import CriticVerdictModel
 
@@ -131,6 +132,7 @@ async def critic_agent(
         )
     except Exception as exc:
         logger.warning("[Critic] LLM call failed, treating as insufficient", exc_info=exc)
+        record_fallback("critic")
         payload = {}
 
     is_sufficient = bool(payload.get("is_sufficient", False)) if isinstance(payload, dict) else False
