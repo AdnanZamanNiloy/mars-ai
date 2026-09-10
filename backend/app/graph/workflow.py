@@ -6,7 +6,7 @@ from typing import Any, Dict, List, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from app.agents.evidence_utils import dedupe_semantic_facts, filter_facts_by_domain, source_reliability_score
+from app.agents.evidence_utils import dedupe_semantic_facts, filter_facts_by_domain, source_reliability_score, verify_answer_support
 from app.agents.critic import critic_agent
 from app.agents.orchestrator import orchestrate
 from app.agents.planner import normalize_text, planner_agent
@@ -41,6 +41,7 @@ class ResearchState(TypedDict, total=False):
     deep_research: bool
     budget_tracker: Any
     verification_stats: Dict[str, Any]
+    answer_support: Dict[str, Any]
     confidence_breakdown: Dict[str, Any]
     confidence_history: List[float]
     contradictions: List[Dict[str, Any]]
@@ -76,6 +77,7 @@ class CriticUpdate(TypedDict):
 
 class SynthesizerUpdate(TypedDict):
     synthesized_answer: str
+    answer_support: Dict[str, Any]
 
 
 class FinalizeUpdate(TypedDict):
@@ -498,8 +500,15 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             query=state["query"],
             facts=usable,
         )
-        logger.info("synthesizer_done", answer_chars=len(answer), usable_facts=len(usable))
-        return {"synthesized_answer": answer}
+        # Report-contract verification: check the emitted answer's citations
+        # against the evidence (never the reverse). Observational only —
+        # it scores honesty, it does not rewrite.
+        support = verify_answer_support(answer, state.get("facts", []))
+        support_rate = support["rate"]
+        logger.info("synthesizer_done", answer_chars=len(answer), usable_facts=len(usable),
+                    support_rate=round(support_rate, 2) if support_rate is not None else None,
+                    unsupported=len(support["unsupported"]))
+        return {"synthesized_answer": answer, "answer_support": support}
 
     async def finalize_node(state: ResearchState) -> FinalizeUpdate:
         report = build_markdown_report(state)

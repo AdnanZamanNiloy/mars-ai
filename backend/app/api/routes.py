@@ -151,7 +151,12 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                     verified_count = sum(1 for f in facts if f.get("verified"))
                     await _persist(record_event(settings.database_url, request_id, "verifier", "end", payload=json.dumps({"verified": verified_count, "total": len(facts)})))
                 if snapshot.get("synthesized_answer") and _once("synthesizer"):
-                    await _persist(record_event(settings.database_url, request_id, "synthesizer", "end", payload=""))
+                    support = snapshot.get("answer_support", {}) or {}
+                    await _persist(record_event(settings.database_url, request_id, "synthesizer", "end", payload=json.dumps({
+                        "support_rate": support.get("rate"),
+                        "cited": support.get("cited"),
+                        "supported": support.get("supported"),
+                    })))
                 if snapshot.get("final_report") and _once("finalize"):
                     await _persist(record_event(settings.database_url, request_id, "finalize", "end", payload=""))
 
@@ -319,7 +324,9 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                         settings.database_url, request_id, agent, "fallback",
                         payload=json.dumps({"agent": agent}),
                     ))
-                yield event_line("final_report", report=report, confidence=confidence, degraded=degraded)
+                support = last_snapshot.get("answer_support", {}) or {}
+                yield event_line("final_report", report=report, confidence=confidence, degraded=degraded,
+                                 answer_support=support.get("rate"))
             else:
                 yield event_line("final_report", report="No final report generated.", confidence=confidence,
                                  degraded=take_fallbacks())
@@ -445,7 +452,9 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
                         settings.database_url, request_id, agent, "fallback",
                         payload=json.dumps({"agent": agent}),
                     ))
-                yield event_line("final_report", report=report, confidence=confidence, degraded=degraded)
+                support = last_snapshot.get("answer_support", {}) or {}
+                yield event_line("final_report", report=report, confidence=confidence, degraded=degraded,
+                                 answer_support=support.get("rate"))
             else:
                 yield event_line("final_report", report="No final report generated.", confidence=confidence,
                                  degraded=take_fallbacks())

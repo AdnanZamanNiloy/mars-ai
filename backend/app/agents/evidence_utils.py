@@ -245,3 +245,75 @@ def dedupe_semantic_facts(facts: List[Dict[str, Any]], threshold: float = 0.86) 
             deduped[merge_index] = candidate
 
     return deduped
+
+
+CITATION_RE = re.compile(r"\[(\d+)\]")
+LEGEND_RE = re.compile(r"^\[(\d+)\]\s+\S.*?—\s*(\S+)\s*$")
+SUPPORT_THRESHOLD = 0.30
+
+
+def verify_answer_support(
+    answer: str,
+    facts: List[Dict[str, Any]],
+    threshold: float = SUPPORT_THRESHOLD,
+) -> Dict[str, Any]:
+    """Post-synthesis verification (report-contract pattern): every cited
+    sentence must overlap verified evidence from its cited source.
+
+    The legend is parsed back out of the answer itself, so numbering can
+    never drift from what was actually emitted. Sentences without markers
+    are counted as uncited (not failed) — only cited-but-unsupported
+    sentences count against the rate.
+    """
+    body, _, legend_block = (answer or "").partition("\nSources:")
+    legend_urls: Dict[int, str] = {}
+    for line in legend_block.splitlines():
+        match = LEGEND_RE.match(line.strip())
+        if match:
+            try:
+                legend_urls[int(match.group(1))] = match.group(2)
+            except (TypeError, ValueError):
+                continue
+
+    verified_by_url: Dict[str, List[str]] = {}
+    for fact in facts or []:
+        if not fact.get("verified"):
+            continue
+        url = str(fact.get("source", "") or "")
+        claim = str(fact.get("claim", "") or "")
+        if url and claim:
+            verified_by_url.setdefault(url, []).append(claim)
+
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", body) if s.strip()]
+    cited = supported = uncited = 0
+    unsupported: List[str] = []
+    for sentence in sentences:
+        numbers = [int(n) for n in CITATION_RE.findall(sentence)]
+        if not numbers:
+            if len(sentence.split()) >= 8:
+                uncited += 1
+            continue
+        cited += 1
+        hit = False
+        for n in numbers:
+            url = legend_urls.get(n, "")
+            for claim in verified_by_url.get(url, []):
+                if _semantic_similarity(sentence, claim) >= threshold:
+                    hit = True
+                    break
+            if hit:
+                break
+        if hit:
+            supported += 1
+        else:
+            unsupported.append(sentence[:160])
+
+    return {
+        "sentences": len(sentences),
+        "cited": cited,
+        "supported": supported,
+        "uncited": uncited,
+        "unsupported": unsupported,
+        # None (not 0.0) when nothing was cited — unmeasured, not failed.
+        "rate": (supported / cited) if cited else None,
+    }

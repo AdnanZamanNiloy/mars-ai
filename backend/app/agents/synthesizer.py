@@ -27,6 +27,8 @@ Rules:
   relevant source number(s) from the provided Sources list, like [1] or [1] [3].
   A paragraph with no citation marker reads as opinion — avoid that.
 - Use ONLY the source numbers given. Never invent numbers, links, or sources.
+- HONESTY: state what the evidence does not cover; never present an
+  uncited assertion as established fact.
 
 Return valid JSON only in this schema:
 {"answer": "<final synthesized explanation with [n] citations>"}
