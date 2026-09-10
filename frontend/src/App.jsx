@@ -328,7 +328,10 @@ export default function App() {
           <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
             <IconMenu size={17} />
           </button>
-          <div className="thread" ref={threadRef}>
+          <div
+            className={`thread${view === "workspace" && messages.length === 0 ? " thread-center" : ""}`}
+            ref={threadRef}
+          >
             <div className="thread-inner">
               {view === "missions" ? (
                 <MissionsView
