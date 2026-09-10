@@ -28,6 +28,43 @@ WEIGHTS: Dict[str, float] = {
     "freshness": 0.0,  # not yet measured — no publish dates captured
 }
 
+# Freshness takes 0.05 from citation coverage ONLY when publish dates are
+# actually present; undated runs keep the exact legacy weights (WEIGHTS),
+# so historical scores stay comparable.
+WEIGHTS_FRESH: Dict[str, float] = {
+    **WEIGHTS,
+    "citation_coverage": 0.20,
+    "freshness": 0.05,
+}
+
+# Recency curve: fresh under a month, decaying to zero at two years.
+FRESHNESS_HALF_LIFE_DAYS = 730
+
+
+def _freshness(source_dates: List[str] | None) -> tuple[float, bool]:
+    """Mean recency over parseable dates. (0.0, False) when none parse —
+    unknown stays unmeasured, never faked."""
+    from datetime import date
+
+    from app.agents.evidence_utils import parse_published_date
+
+    ages: List[float] = []
+    today = date.today()
+    for raw in source_dates or []:
+        iso = parse_published_date(raw)
+        if not iso:
+            continue
+        try:
+            age_days = (today - date.fromisoformat(iso)).days
+        except (TypeError, ValueError):
+            continue
+        if age_days < 0:
+            age_days = 0  # future-dated metadata is a provider quirk, not freshness
+        ages.append(max(0.0, 1.0 - age_days / FRESHNESS_HALF_LIFE_DAYS))
+    if not ages:
+        return 0.0, False
+    return round(sum(ages) / len(ages), 3), True
+
 
 def _safe_conf(value: Any) -> float:
     try:
@@ -108,8 +145,11 @@ def compute_confidence(
     critique: Dict[str, Any],
     iteration: int,
     max_iterations: int,
+    source_dates: List[str] | None = None,
 ) -> Dict[str, Any]:
     """Return {"overall": float, "signals": {...}} with per-signal values."""
+    freshness_value, measured = _freshness(source_dates)
+    weights = WEIGHTS_FRESH if measured else WEIGHTS
     signals: Dict[str, float] = {
         "source_quality": round(_source_quality(facts), 3),
         "source_diversity": round(_source_diversity(facts), 3),
@@ -117,12 +157,15 @@ def compute_confidence(
         "claim_verification_strength": round(_claim_verification_strength(facts), 3),
         "cross_source_agreement": round(_cross_source_agreement(facts), 3),
         "critic_survival": round(_critic_survival(critique, iteration, max_iterations), 3),
-        "freshness": 0.0,
+        "freshness": freshness_value,
     }
-    overall = sum(WEIGHTS[name] * value for name, value in signals.items())
+    overall = sum(weights[name] * value for name, value in signals.items())
+    notes = []
+    if not measured:
+        notes.append("freshness not yet measured (no publish dates captured) — weighted 0")
     return {
         "overall": round(max(0.0, min(1.0, overall)), 3),
         "signals": signals,
-        "weights": WEIGHTS,
-        "notes": ["freshness not yet measured (no publish dates captured) — weighted 0"],
+        "weights": weights,
+        "notes": notes,
     }

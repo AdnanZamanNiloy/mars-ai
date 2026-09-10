@@ -58,3 +58,37 @@ def test_cross_source_agreement_needs_different_domains():
     ]
     result = compute_confidence(same_domain, {"is_sufficient": True}, 1, 3)
     assert result["signals"]["cross_source_agreement"] == 0.0
+
+
+def test_parse_published_date_formats():
+    from app.agents.evidence_utils import parse_published_date
+
+    assert parse_published_date("2026-09-10T12:00:00Z") == "2026-09-10"
+    assert parse_published_date("2026-09-10") == "2026-09-10"
+    assert parse_published_date("Wed, 21 Oct 2015 07:28:00 GMT") == "2015-10-21"
+    assert parse_published_date("Mar 17, 2026") == "2026-03-17"
+    assert parse_published_date("not a date") == ""
+    assert parse_published_date("") == ""
+    assert parse_published_date(None) == ""
+
+
+def test_freshness_unmeasured_keeps_legacy_weights():
+    from app.core.confidence import WEIGHTS, compute_confidence
+
+    result = compute_confidence([], {"is_sufficient": True}, 1, 3)
+    assert result["signals"]["freshness"] == 0.0
+    assert result["weights"] == WEIGHTS
+
+
+def test_freshness_measured_uses_fresh_weights():
+    from datetime import date, timedelta
+
+    from app.core.confidence import WEIGHTS_FRESH, compute_confidence
+
+    recent = (date.today() - timedelta(days=10)).isoformat()
+    old = (date.today() - timedelta(days=1000)).isoformat()
+    result = compute_confidence([], {"is_sufficient": True}, 1, 3,
+                                source_dates=[recent, old, "garbage"])
+    assert result["weights"] == WEIGHTS_FRESH
+    assert 0.0 < result["signals"]["freshness"] < 1.0
+    assert sum(WEIGHTS_FRESH.values()) == 1.0

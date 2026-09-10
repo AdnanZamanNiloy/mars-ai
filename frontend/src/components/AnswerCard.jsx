@@ -71,6 +71,8 @@ export function ReplayAnswerCard({ trace }) {
       source: c.source_url,
       verified: c.verified === 1 || c.verified === true,
       confidence: c.confidence,
+      agent: c.agent || "",
+      challenged: c.challenged === 1 || c.challenged === true,
     })),
     decisions: trace.decisions || [],
     snippets: (trace.sources || []).length,

@@ -35,6 +35,10 @@ class SearchResult:
     content_length: int = 0
     fetched_at: float = field(default_factory=time.time)
     is_content_fetched: bool = False
+    # Publish date when the provider supplies one (DDG news `date`,
+    # Wikipedia revision `timestamp`) or a fetch Last-Modified header.
+    # "" means unknown — never synthesized.
+    published_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -47,6 +51,7 @@ class SearchResult:
             "search_type": self.search_type,
             "reliability_score": round(self.reliability_score, 3),
             "content_length": self.content_length,
+            "published_at": self.published_at,
         }
 
 
@@ -171,14 +176,15 @@ def _clean_html(raw: str) -> str:
 
 
 async def _fetch_content(url: str):
+    """Fetch + clean page text. Returns (text, last_modified_header_or_empty)."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(url)
             if r.status_code == 200:
-                return _clean_html(r.text)
+                return _clean_html(r.text), str(r.headers.get("last-modified", "") or "")
     except Exception as exc:
         logger.warning("[Search] content fetch failed for %s: %s", url[:80], exc, exc_info=exc)
-    return ""
+    return "", ""
 
 
 # =============================================================================
@@ -230,11 +236,13 @@ class SearchClient:
             # Depth is setting-driven (search_fetch_top_n); fetched text is
             # consumed by the summarizer, which releases it afterwards.
             async def _attach(r):
-                content = await _fetch_content(r.url)
+                content, last_modified = await _fetch_content(r.url)
                 if content:
                     r.content = content
                     r.content_length = len(content)
                     r.is_content_fetched = True
+                    if not r.published_at:
+                        r.published_at = last_modified
 
             fetch_n = max(1, int(getattr(settings, "search_fetch_top_n", 3) or 3))
             await asyncio.gather(*(_attach(r) for r in ranked[:fetch_n]))
@@ -280,6 +288,7 @@ class SearchClient:
                 url=r["href"],
                 snippet=r["body"],
                 provider="ddg_text",
+                published_at=str(r.get("date", "") or ""),
             )
             for r in rows if r.get("href")
         ]
@@ -301,7 +310,8 @@ class SearchClient:
                 url=r["url"],
                 snippet=r["body"],
                 provider="ddg_news",
-                search_type="news"
+                search_type="news",
+                published_at=str(r.get("date", "") or ""),
             )
             for r in rows if r.get("url")
         ]
@@ -327,7 +337,8 @@ class SearchClient:
                     title=title,
                     url=f"https://en.wikipedia.org/wiki/{quote(title)}",
                     snippet=re.sub(r"<.*?>", "", item.get("snippet", "")),
-                    provider="wikipedia"
+                    provider="wikipedia",
+                    published_at=str(item.get("timestamp", "") or ""),
                 ))
 
             return results

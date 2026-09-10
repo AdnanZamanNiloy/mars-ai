@@ -45,7 +45,7 @@ def _run_fetch_count(monkeypatch, tmp_path, top_n: int, pool: int = 8) -> int:
 
     async def fake_fetch(url: str):
         calls.append(url)
-        return "full page content here"
+        return "full page content here", ""
 
     monkeypatch.setattr(SearchClient, "_ddg_text", fake_provider)
     monkeypatch.setattr(SearchClient, "_ddg_news", fake_provider)

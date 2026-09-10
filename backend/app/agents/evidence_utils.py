@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from difflib import SequenceMatcher
+from email.utils import parsedate_to_datetime
 from typing import Any, Dict, Iterable, List, Set
 from urllib.parse import urlparse
 
@@ -227,7 +229,8 @@ def dedupe_semantic_facts(facts: List[Dict[str, Any]], threshold: float = 0.86) 
         if not claim or not source:
             continue
 
-        candidate = {"claim": claim, "source": source, "confidence": max(0.0, min(1.0, confidence))}
+        candidate = {"claim": claim, "source": source, "confidence": max(0.0, min(1.0, confidence)),
+                     "agent": str(item.get("agent", "") or "")}
 
         merge_index = -1
         for idx, kept in enumerate(deduped):
@@ -427,3 +430,30 @@ def select_diverse(
         if len(selected) >= k:
             break
     return selected
+
+
+def parse_published_date(value: str) -> str:
+    """Best-effort parse of provider/fetch date strings to YYYY-MM-DD.
+
+    Accepts ISO 8601 (with Z), HTTP Last-Modified, and common short forms.
+    Returns "" when unparseable — unknown stays unknown, never guessed.
+    """
+    text = (value or "").strip()
+    if not text:
+        return ""
+    candidates = [text, text.replace("Z", "+00:00")]
+    for candidate in candidates:
+        try:
+            return datetime.fromisoformat(candidate).date().isoformat()
+        except (ValueError, TypeError):
+            pass
+    try:
+        return parsedate_to_datetime(text).date().isoformat()
+    except (TypeError, ValueError):
+        pass
+    for fmt in ("%Y-%m-%d", "%b %d, %Y", "%B %d, %Y", "%d %b %Y"):
+        try:
+            return datetime.strptime(text, fmt).date().isoformat()
+        except (TypeError, ValueError):
+            continue
+    return ""

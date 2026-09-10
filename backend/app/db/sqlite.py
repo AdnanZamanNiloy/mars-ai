@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import json
+import re
 
 import aiosqlite
 
@@ -50,6 +51,8 @@ CREATE TABLE IF NOT EXISTS claims (
     source_url TEXT NOT NULL,
     confidence REAL,
     verified INTEGER,
+    agent TEXT NOT NULL DEFAULT '',
+    challenged INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
 
@@ -144,6 +147,12 @@ async def init_db(database_path: str) -> None:
         review_cols = await db.execute("PRAGMA table_info(critic_reviews)")
         if "breakdown" not in {r[1] for r in await review_cols.fetchall()}:
             await db.execute("ALTER TABLE critic_reviews ADD COLUMN breakdown TEXT NOT NULL DEFAULT '{}'")
+        claim_cols = await db.execute("PRAGMA table_info(claims)")
+        claim_names = {r[1] for r in await claim_cols.fetchall()}
+        if "agent" not in claim_names:
+            await db.execute("ALTER TABLE claims ADD COLUMN agent TEXT NOT NULL DEFAULT ''")
+        if "challenged" not in claim_names:
+            await db.execute("ALTER TABLE claims ADD COLUMN challenged INTEGER NOT NULL DEFAULT 0")
         await db.execute(
             "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);"
         )
@@ -249,6 +258,7 @@ async def save_claims(database_path: str, run_id: str, facts: list) -> None:
             str(f.get("source") or f.get("source_url") or "").strip(),
             float(f.get("confidence", 0.0) or 0.0),
             1 if f.get("verified") else 0,
+            str(f.get("agent", "") or ""),
             _now(),
         )
         for f in facts
@@ -258,11 +268,44 @@ async def save_claims(database_path: str, run_id: str, facts: list) -> None:
         return
     async with aiosqlite.connect(database_path) as db:
         await db.executemany(
-            "INSERT INTO claims (run_id, claim, source_url, confidence, verified, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO claims (run_id, claim, source_url, confidence, verified, agent, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             rows,
         )
         await db.commit()
+
+
+async def mark_challenged_claims(database_path: str, run_id: str, contradictions: list) -> int:
+    """Flag claims that appear on either side of a detected contradiction.
+
+    Called once per run at finalization, when contradictions are known —
+    claims are saved incrementally, contradictions only at the end.
+    Returns the number of rows flagged. Matching is normalized-text
+    equality against both contradiction sides.
+    """
+    sides = set()
+    for c in contradictions or []:
+        if not isinstance(c, dict):
+            continue
+        for key in ("claim_a", "claim_b"):
+            text = re.sub(r"\s+", " ", str(c.get(key, "") or "").strip().lower())
+            if text:
+                sides.add(text)
+    if not sides:
+        return 0
+    flagged = 0
+    async with aiosqlite.connect(database_path) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT id, claim FROM claims WHERE run_id = ?", (run_id,))
+        ids = [
+            r["id"] for r in await cur.fetchall()
+            if re.sub(r"\s+", " ", str(r["claim"] or "").strip().lower()) in sides
+        ]
+        for claim_id in ids:
+            await db.execute("UPDATE claims SET challenged = 1 WHERE id = ?", (claim_id,))
+            flagged += 1
+        await db.commit()
+    return flagged
 
 
 async def record_event(
@@ -471,7 +514,7 @@ async def load_state_for_resume(database_path: str, run_id: str) -> dict | None:
             (run_id,),
         )
         claims = await _all(
-            "SELECT claim, source_url, confidence, verified FROM claims WHERE run_id = ? ORDER BY id",
+            "SELECT claim, source_url, confidence, verified, agent FROM claims WHERE run_id = ? ORDER BY id",
             (run_id,),
         )
         review_rows = await _all(
@@ -513,6 +556,7 @@ async def load_state_for_resume(database_path: str, run_id: str) -> dict | None:
             "source": c["source_url"],
             "confidence": c["confidence"] or 0.0,
             "verified": bool(c["verified"]),
+            "agent": c.get("agent", "") or "",
         }
         for c in claims
     ]
@@ -594,7 +638,7 @@ async def get_run_trace(database_path: str, run_id: str) -> dict | None:
             (run_id,),
         )
         claims = await _all(
-            "SELECT id, claim, source_url, confidence, verified, created_at "
+            "SELECT id, claim, source_url, confidence, verified, agent, challenged, created_at "
             "FROM claims WHERE run_id = ? ORDER BY id",
             (run_id,),
         )

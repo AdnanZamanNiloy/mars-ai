@@ -210,7 +210,8 @@ async def summarizer_agent(
         model_confidence = clamp_confidence(fact.get("confidence", 0.0))
         confidence = clamp_confidence((0.75 * model_confidence) + (0.25 * source_score))
         if claim and source:
-            cleaned.append({"claim": claim, "source": source, "confidence": confidence})
+            cleaned.append({"claim": claim, "source": source, "confidence": confidence,
+                            "agent": specialist_role})
 
     if cleaned:
         return dedupe_semantic_facts(cleaned)
@@ -230,6 +231,7 @@ async def summarizer_agent(
                 "claim": claim,
                 "source": item.get("url", ""),
                 "confidence": clamp_confidence((0.30 * 0.45) + (0.70 * source_reliability_score(item.get("url", "")))),
+                "agent": specialist_role,
             }
         )
     return dedupe_semantic_facts(fallback)

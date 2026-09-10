@@ -470,11 +470,16 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         )
 
         # Confidence Engine (Phase 2.4) replaces the inline weighted formula.
+        source_dates = [
+            r.get("published_at", "") for r in state.get("search_results", []) or []
+            if isinstance(r, dict) and r.get("published_at")
+        ]
         breakdown = compute_confidence(
             facts=state.get("facts", []),
             critique=critique,
             iteration=next_iteration,
             max_iterations=int(state.get("max_iterations", 3)),
+            source_dates=source_dates,
         )
         overall_conf = breakdown["overall"]
 

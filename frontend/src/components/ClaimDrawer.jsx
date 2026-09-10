@@ -32,11 +32,17 @@ export default function ClaimDrawer({ finding, onClose }) {
           <span className={`tag tone-${trust.tone === "good" ? "good" : trust.tone === "bad" ? "bad" : "muted"}`}>
             {trust.label} source
           </span>
+          {finding.challenged ? <span className="tag tone-bad">Challenged by critic</span> : null}
         </div>
 
         <div className="kv">
           <div className="k">Claim</div>
           <div className="v">{finding.claim || "—"}</div>
+        </div>
+
+        <div className="kv">
+          <div className="k">Analyzed by</div>
+          <div className="v">{finding.agent || "unknown specialist"}</div>
         </div>
 
         <div className="kv">

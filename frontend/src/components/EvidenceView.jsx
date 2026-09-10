@@ -78,6 +78,8 @@ export default function EvidenceView({ messages, onInspect }) {
                     {typeof r.verified === "boolean" ? (
                       <span className={`tag tone-${r.verified ? "good" : "bad"}`}>{r.verified ? "verified" : "unverified"}</span>
                     ) : null}
+                    {r.agent ? <span className="tag tone-muted">{r.agent}</span> : null}
+                    {r.challenged ? <span className="tag tone-bad">challenged</span> : null}
                     {typeof r.confidence === "number" ? <span>{Math.round(r.confidence * 100)}% confident</span> : null}
                   </span>
                 </span>

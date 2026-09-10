@@ -16,6 +16,7 @@ from app.db.sqlite import (
     complete_research_run,
     get_run_trace,
     load_state_for_resume,
+    mark_challenged_claims,
     mark_run_resumable_reset,
     record_event,
     save_agent_tasks,
@@ -243,6 +244,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                                     "verified": f.get("verified"),
                                     "verification_score": f.get("verification_score"),
                                     "verification_reason": f.get("verification_reason"),
+                                    "agent": f.get("agent", ""),
                                     "confidence": f.get("confidence"),
                                 }
                                 for f in new_facts
@@ -305,6 +307,10 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 settings.database_url, request_id, "completed",
                 confidence=confidence,
                 estimated_cost=budget_tracker.estimated_cost_usd,
+            ))
+            # Challenged flags land once contradictions are known (end of run).
+            await _persist(mark_challenged_claims(
+                settings.database_url, request_id, last_snapshot.get("contradictions") or [],
             ))
 
             if report:
