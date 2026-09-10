@@ -10,7 +10,6 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.core.config import get_settings
-from app.core.budget import BudgetTracker, current_budget
 from app.core.degradation import clear_fallbacks, reset_fallbacks, take_fallbacks
 from app.core.eval import summarize_batch
 from app.db.sqlite import (
@@ -149,12 +148,6 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 max_parallel_agents=settings.max_parallel_agents,
                 mode=payload.mode,
             )
-            # Per-run cost governor; ContextVar-scoped so the shared LLM
-            # client records usage for THIS request only.
-            budget_tracker = BudgetTracker(settings)
-            state["budget_tracker"] = budget_tracker
-            current_budget.set(budget_tracker)
-            last_budget_tokens = -1
             last_iteration = -1
             emitted_plan = False
             emitted_findings = 0
@@ -327,18 +320,10 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                                 facts[saved_facts:],
                             ))
                             saved_facts = len(facts)
-
-                        if budget_tracker.total_tokens != last_budget_tokens:
-                            last_budget_tokens = budget_tracker.total_tokens
-                            yield event_line("budget", **budget_tracker.snapshot())
-                            await _persist(record_event(
-                                settings.database_url, request_id, "budget", "budget_check",
-                                payload=json.dumps(budget_tracker.snapshot()),
-                            ))
             except TimeoutError:
                 await _persist(complete_research_run(
                     settings.database_url, request_id, "timeout",
-                    confidence=0.0, estimated_cost=budget_tracker.estimated_cost_usd,
+                    confidence=0.0, estimated_cost=None,
                 ))
                 yield event_line(
                     "error",
@@ -351,7 +336,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
             except Exception as exc:
                 await _persist(complete_research_run(
                     settings.database_url, request_id, "failed",
-                    confidence=0.0, estimated_cost=budget_tracker.estimated_cost_usd,
+                    confidence=0.0, estimated_cost=None,
                 ))
                 message = str(exc)
                 if "No LLM provider configured" in message:
@@ -373,7 +358,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
             await _persist(complete_research_run(
                 settings.database_url, request_id, "completed",
                 confidence=confidence,
-                estimated_cost=budget_tracker.estimated_cost_usd,
+                estimated_cost=None,
             ))
             # Challenged flags land once contradictions are known (end of run).
             await _persist(mark_challenged_claims(
@@ -464,21 +449,15 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
     await mark_run_resumable_reset(settings.database_url, run_id)
 
     request_id = run_id  # resume continues the SAME run identity
-    budget_tracker = BudgetTracker(settings)
 
     def event_line(event_type: str, **data: Any) -> str:
         return json.dumps({"type": event_type, **data}, ensure_ascii=True) + "\n"
 
     async def resume_stream() -> AsyncGenerator[str, None]:
         bind_request_context(request_id=request_id, resumed=True)
-        current_budget.set(budget_tracker)
         # A resumed run is a fresh degradation window: earlier fallbacks are
         # already recorded against this run_id from the first attempt.
         reset_fallbacks()
-        # Depth controller + report builder read the tracker from state, not
-        # the ContextVar — without this, budget checks are silently skipped
-        # on the resume path.
-        state["budget_tracker"] = budget_tracker
         last_iteration = int(state.get("iteration", 0))
         emitted_findings = 0
 
@@ -522,21 +501,19 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
                             await _persist_record(settings.database_url, request_id, iteration, critique,
                                                   breakdown=snapshot.get("confidence_breakdown") or {})
 
-                        if budget_tracker.total_tokens > 0:
-                            yield event_line("budget", **budget_tracker.snapshot())
             except TimeoutError:
-                await _persist_complete(settings.database_url, request_id, "timeout", 0.0, budget_tracker.estimated_cost_usd)
+                await _persist_complete(settings.database_url, request_id, "timeout", 0.0, None)
                 yield event_line("error", message="Resumed run timed out. Try again or raise RESEARCH_TIMEOUT_SEC.")
                 return
             except Exception as exc:
-                await _persist_complete(settings.database_url, request_id, "failed", 0.0, budget_tracker.estimated_cost_usd)
+                await _persist_complete(settings.database_url, request_id, "failed", 0.0, None)
                 yield event_line("error", message=f"Resumed run failed: {exc}")
                 return
 
             final_state = last_snapshot
             report = str(final_state.get("final_report", ""))
             confidence = float(final_state.get("confidence", 0.0))
-            await _persist_complete(settings.database_url, request_id, "completed", confidence, budget_tracker.estimated_cost_usd)
+            await _persist_complete(settings.database_url, request_id, "completed", confidence, None)
             await _persist(mark_challenged_claims(
                 settings.database_url, request_id, last_snapshot.get("contradictions") or [],
             ))
@@ -562,7 +539,6 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
                 yield event_line("final_report", report="No final report generated.", confidence=confidence,
                                  degraded=take_fallbacks())
         finally:
-            current_budget.set(None)
             clear_fallbacks()
             unbind_request_context()
 

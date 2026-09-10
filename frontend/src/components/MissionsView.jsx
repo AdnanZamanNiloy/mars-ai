@@ -65,7 +65,6 @@ export default function MissionsView({ missions, onOpen, onRemove, onNew }) {
               {typeof m.confidence === "number" ? (
                 <span>Confidence {Math.round(m.confidence * 100)}% ({confidenceLabel(m.confidence)})</span>
               ) : null}
-              {typeof m.cost === "number" ? <span>${m.cost.toFixed(4)}</span> : null}
               <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                 <IconClock size={12} /> {timeAgo(m.updatedAt)}
               </span>

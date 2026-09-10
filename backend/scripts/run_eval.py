@@ -141,8 +141,6 @@ async def run_one(client: httpx.AsyncClient, server: str, query: dict, timeout: 
                 if t == "progress" and evt.get("request_id"):
                     run_id = evt["request_id"]
                     metrics["run_id"] = run_id
-                elif t == "budget" and isinstance(evt.get("estimated_cost"), (int, float)):
-                    metrics["cost"] = float(evt["estimated_cost"])
                 elif t == "error":
                     metrics["status"] = "failed"
                     metrics["error"] = str(evt.get("message", "stream error"))[:200]

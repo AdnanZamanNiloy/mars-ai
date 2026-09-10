@@ -39,7 +39,6 @@ class ResearchState(TypedDict, total=False):
     confidence: float
     orchestration: Dict[str, Any]
     deep_research: bool
-    budget_tracker: Any
     verification_stats: Dict[str, Any]
     answer_support: Dict[str, Any]
     confidence_breakdown: Dict[str, Any]
@@ -254,10 +253,6 @@ def build_markdown_report(state: ResearchState) -> str:
         for item in improved_queries[:2]:
             if isinstance(item, str) and item.strip():
                 limitations.append(f"Potential follow-up search: {item.strip()}")
-
-    tracker = state.get("budget_tracker")
-    if tracker is not None and tracker.over_budget:
-        limitations.append(tracker.limitation_note())
 
     # Dynamic Research Depth (2.8): name an early stop on marginal gain.
     early_stop_note = depth_controller.stop_reason(state)
@@ -533,7 +528,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
 
         # Dynamic Research Depth (2.8) replaces the old two-condition check:
         # decides expand vs finalize from axis coverage, marginal confidence
-        # gain, remaining budget, and the iteration/depth ceiling.
+        # gain, and the iteration/depth ceiling.
         decision = depth_controller.decide(state)
         logger.info("depth_decision", decision=decision, iteration=int(state.get("iteration", 0)))
         if decision == "expand":

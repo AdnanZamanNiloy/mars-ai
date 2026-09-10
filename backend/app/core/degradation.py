@@ -5,7 +5,8 @@ looks exactly like a mediocre one. Agents call record_fallback() on every
 deterministic-fallback path so the stream can report WHICH parts of an
 answer came from fallbacks instead of the model.
 
-Scoped per request via ContextVar (same pattern as the budget tracker):
+Scoped per request via ContextVar, reset at stream start and drained at
+final_report.
 routes reset at stream start and drain at final_report. Outside a tracked
 request, record_fallback() is a no-op — unit tests and scripts that never
 reset simply record nothing.

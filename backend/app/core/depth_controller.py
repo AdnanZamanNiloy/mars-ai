@@ -3,11 +3,10 @@
 Decides, after every critic iteration, whether to expand (another
 planner→search→summarize pass) or finalize — based on evidence signals
 (axis coverage, verified-fact sufficiency, marginal confidence gain,
-remaining budget) rather than iteration count alone.
+iteration ceiling) rather than iteration count alone.
 
-This is deliberately distinct from:
-  - route_after_critic's old two-condition check (is_sufficient / ceiling)
-  - the Cost Governor (2.2), which only knows about budget
+This is deliberately distinct from route_after_critic's old two-condition
+check (is_sufficient / ceiling).
 
 `decide(state)` is called by workflow.route_after_critic and returns
 "expand" | "finalize". `stop_reason(state)` recomputes the same signals
@@ -20,9 +19,6 @@ from typing import Any, Dict, List, Literal
 from app.core.config import Settings, get_settings
 
 DECISION = Literal["expand", "finalize"]
-
-# Safety margin: below this fraction of remaining budget, expansion is disabled.
-BUDGET_SAFETY_MARGIN = 0.10
 
 # Axis coverage is a gap when an axis has fewer than this many verified facts.
 DEFAULT_MINIMUM_SOURCES = 2
@@ -126,7 +122,6 @@ def evaluate(state: Dict[str, Any], settings: Settings | None = None) -> Dict[st
     confidence = float(state.get("confidence", 0.0))
     history = list(state.get("confidence_history", []))
     improved = critique.get("improved_queries") or []
-    tracker = state.get("budget_tracker")
 
     minimum_sources = DEFAULT_MINIMUM_SOURCES
     for q in state.get("sub_questions", []):
@@ -145,12 +140,6 @@ def evaluate(state: Dict[str, Any], settings: Settings | None = None) -> Dict[st
         "sufficiency_met": sufficiency_met,
         "sufficiency_stop": bool(critique.get("is_sufficient", False)) or sufficiency_met,
         "marginal_gain_stop": _two_consecutive_stalls(history, settings.min_marginal_gain),
-        "budget_cutoff": bool(tracker is not None and tracker.over_budget),
-        "budget_low": bool(
-            tracker is not None
-            and tracker.limit_usd > 0
-            and (tracker.limit_usd - tracker.estimated_cost_usd) / tracker.limit_usd < BUDGET_SAFETY_MARGIN
-        ),
         "ceiling_reached": iteration >= ceiling,
         # Coverage-gap detection (manual 2.8): compare COVERED axes (verified
         # facts via source attribution) against the axes the planner scoped.
@@ -173,12 +162,7 @@ def decide(state: Dict[str, Any], settings: Settings | None = None) -> DECISION:
         return "finalize"
     if checks["marginal_gain_stop"]:
         return "finalize"
-    if checks["budget_cutoff"]:
-        return "finalize"
     if checks["ceiling_reached"]:
-        return "finalize"
-    if checks["budget_low"]:
-        # Below safety margin: expansion disabled even when evidence is thin.
         return "finalize"
 
     # Expansion trigger: critic sees a specific gap AND axis coverage is poor.
@@ -202,6 +186,4 @@ def stop_reason(state: Dict[str, Any], settings: Settings | None = None) -> str 
             "Stopped early on marginal information gain: confidence improved by "
             "less than the minimum gain threshold for two consecutive iterations."
         )
-    if checks["budget_cutoff"]:
-        return None  # budget tracker already adds its own note
     return None

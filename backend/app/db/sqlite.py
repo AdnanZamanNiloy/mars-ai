@@ -231,7 +231,7 @@ async def complete_research_run(
     run_id: str,
     status: str,
     confidence: float,
-    estimated_cost: float,
+    estimated_cost: float | None,
 ) -> None:
     async with aiosqlite.connect(database_path) as db:
         await db.execute(
@@ -725,7 +725,7 @@ async def mark_run_resumable_reset(database_path: str, run_id: str) -> None:
 async def get_run_trace(database_path: str, run_id: str) -> dict | None:
     """Research Replay (Phase 3.4): read-only reconstruction of a run.
 
-    Joins agent_events (node timing, retries, budget checks, failures) with
+    Joins agent_events (node timing, retries, fallbacks, failures) with
     agent_tasks / sources / claims so the trace answers "why did this report
     reach this confidence", not just "what was the answer".
     """

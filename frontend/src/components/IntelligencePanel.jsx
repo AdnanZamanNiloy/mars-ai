@@ -82,28 +82,6 @@ export default function IntelligencePanel({
         <ConfidenceBreakdown breakdown={run?.breakdown} />
       </section>
 
-      <section className="intel-section">
-        <div className="budget-line">
-          <span className="k">Budget usage</span>
-          {run?.budget ? (
-            <span className="v">
-              ${run.budget.cost.toFixed(4)}{" "}
-              <small>/ ${run.budget.limit != null ? run.budget.limit.toFixed(2) : "—"}</small>
-            </span>
-          ) : (
-            <span className="v"><small>No spend yet</small></span>
-          )}
-        </div>
-        <div className="bar" style={{ marginTop: 11 }}>
-          <div style={{ width: `${budgetPct(run)}%` }} className={run?.budget?.overBudget ? "" : "green"} />
-        </div>
-        <div className="budget-sub">
-          {run?.budget
-            ? `${budgetPct(run)}%${run.budget.calls != null ? ` · ${run.budget.calls} LLM calls` : ""}${run.budget.overBudget ? " · budget reached" : ""}`
-            : "Cost accrues as the model is called"}
-        </div>
-      </section>
-
       {run?.error && run?.resumable ? (
         <section className="intel-section">
           <button className="btn" onClick={onResume} disabled={run?.resuming} style={{ width: "100%" }}>
@@ -225,10 +203,4 @@ function deriveHealth(run) {
     { icon: IconAlert, label: "Critic passes", value: String(run.critiques.length), tone: run.critiques.length > 1 ? "warn" : "muted", hot: run.critiques.length > 1 },
     { icon: IconTarget, label: "Research confidence", value: typeof run.confidence === "number" ? `${Math.round(run.confidence * 100)}%` : "—", tone: "muted" },
   ];
-}
-
-function budgetPct(run) {
-  const b = run?.budget;
-  if (!b || b.limit == null || b.limit <= 0 || b.cost == null) return 0;
-  return Math.max(0, Math.min(100, Math.round((b.cost / b.limit) * 100)));
 }

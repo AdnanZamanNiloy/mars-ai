@@ -27,7 +27,7 @@ Agents:          app/agents/*.py (planner, search, summarizer, critic,
 Orchestration:   app/graph/workflow.py (LangGraph StateGraph)
 API:             app/api/routes.py (the /api/research/stream route)
 Core utilities:  app/core/*.py (config, llm client, and whatever you add
-                 for caching/budget/confidence/isolation per manual.md)
+                 for caching/confidence/isolation per manual.md)
 Persistence:     app/db/sqlite.py
 Frontend:        frontend/src/App.jsx consumes the NDJSON stream; components
                  in frontend/src/components/
@@ -259,7 +259,7 @@ New agents added per `manual.md` (verifier, orchestrator, depth controller, etc.
 
 ### 4.9 — New NDJSON event types need a frontend case in the same commit
 
-`app/api/routes.py`'s `event_line()` and `frontend/src/App.jsx`'s `applyEvent()` switch are an implicit contract. `applyEvent` has a `default: break` — a backend event type with no matching `case` is silently dropped, not an error. If you add an event type (e.g. `budget`, per `manual.md` 2.2), add the frontend case in the same commit, or it will look like the feature does nothing.
+`app/api/routes.py`'s `event_line()` and `frontend/src/App.jsx`'s `applyEvent()` switch are an implicit contract. `applyEvent` has a `default: break` — a backend event type with no matching `case` is silently dropped, not an error. If you add an event type (e.g. `decisions`, per `manual.md` 3.5), add the frontend case in the same commit, or it will look like the feature does nothing.
 
 ---
 

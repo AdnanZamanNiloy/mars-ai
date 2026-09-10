@@ -8,7 +8,6 @@ import json
 import aiosqlite
 
 import app.graph.workflow as wf
-from app.core.budget import BudgetTracker
 from app.core.config import Settings
 from app.core.llm import LLMClient
 
@@ -21,9 +20,7 @@ async def test_memory_tables_populated_and_joinable(tmp_path, monkeypatch):
     from app.db.sqlite import init_db
     await init_db(db_path)
 
-    tracker = BudgetTracker(settings)
     state = wf.build_initial_state("what is RAG", 3)
-    state["budget_tracker"] = tracker
 
     sub_questions = [{
         "id": 1, "question": "what is RAG definition", "axis": "definition",

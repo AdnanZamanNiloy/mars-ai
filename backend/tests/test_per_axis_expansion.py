@@ -1,7 +1,6 @@
 """Per-axis expansion: plans append gap questions, search skips answered ones."""
 
 import app.graph.workflow as wf
-from app.core.budget import BudgetTracker, current_budget
 from app.core.config import Settings
 from app.core.llm import LLMClient
 from app.graph.workflow import _merge_questions, _unanswered_questions
@@ -39,8 +38,6 @@ def test_unanswered_questions_skips_searched():
 async def test_expansion_searches_only_new_questions(monkeypatch):
     """Full-graph: pass 2 searches just the gap question, results accumulate."""
     settings = Settings(groq_api_key="k", _env_file=None)
-    tracker = BudgetTracker(settings)
-    token = current_budget.set(tracker)
 
     plans = [
         [_q(1, "What is RAG today?"), _q(2, "How does dense retrieval work now?")],
@@ -81,13 +78,11 @@ async def test_expansion_searches_only_new_questions(monkeypatch):
                      "snippet": "snip", "content": "content here"} for q in questions]
 
     state = wf.build_initial_state("What is RAG?", 3)
-    state["budget_tracker"] = tracker
     workflow = wf.create_workflow(LLMClient(settings), StubSearch())
 
     final = None
     async for snap in workflow.astream(state, stream_mode="values"):
         final = snap
-    current_budget.reset(token)
 
     assert calls["n"] == 2
     assert search_inputs[0] == ["What is RAG today?", "How does dense retrieval work now?"]
@@ -101,8 +96,6 @@ async def test_variant_queries_searched_and_attributed(monkeypatch):
     """Variants fan out in search and their results reach the parent
     contract's summarizer context (no orphans)."""
     settings = Settings(groq_api_key="k", _env_file=None)
-    tracker = BudgetTracker(settings)
-    token = current_budget.set(tracker)
     search_inputs = []
 
     async def fake_planner(llm, query, critique_feedback="", today=""):
@@ -134,13 +127,11 @@ async def test_variant_queries_searched_and_attributed(monkeypatch):
                     for i, q in enumerate(questions)]
 
     state = wf.build_initial_state("What is RAG?", 3)
-    state["budget_tracker"] = tracker
     workflow = wf.create_workflow(LLMClient(settings), StubSearch())
 
     final = None
     async for snap in workflow.astream(state, stream_mode="values"):
         final = snap
-    current_budget.reset(token)
 
     assert search_inputs[0] == ["What is RAG today?", "RAG definition overview 2026"], search_inputs
     assert len(final["facts"]) == 2, final["facts"]

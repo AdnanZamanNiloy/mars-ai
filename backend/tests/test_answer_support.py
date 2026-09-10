@@ -2,7 +2,6 @@
 
 import app.graph.workflow as wf
 from app.agents.evidence_utils import verify_answer_support
-from app.core.budget import BudgetTracker, current_budget
 from app.core.config import Settings
 from app.core.llm import LLMClient
 
@@ -58,8 +57,6 @@ def test_unknown_number_is_unsupported():
 async def test_synthesizer_node_records_support(monkeypatch):
     """Node computes support from the emitted answer and full facts."""
     settings = Settings(groq_api_key="k", _env_file=None)
-    tracker = BudgetTracker(settings)
-    token = current_budget.set(tracker)
 
     async def fake_planner(llm, query, critique_feedback="", today=""):
         return [{"id": 1, "question": "What is RAG today?", "axis": "definition",
@@ -89,13 +86,11 @@ async def test_synthesizer_node_records_support(monkeypatch):
                      "snippet": "snip", "content": "content"}]
 
     state = wf.build_initial_state("What is RAG?", 3)
-    state["budget_tracker"] = tracker
     workflow = wf.create_workflow(LLMClient(settings), StubSearch())
 
     final = None
     async for snap in workflow.astream(state, stream_mode="values"):
         final = snap
-    current_budget.reset(token)
 
     support = final.get("answer_support", {})
     assert support["cited"] == 2

@@ -184,7 +184,7 @@ def recommend(
         elif key == "high_cost":
             suggestions.append({
                 "problem": f"Average run cost ${finding['cost']:.4f}.",
-                "suggestion": "Lower research_max_cost_usd, or default expensive queries "
-                              "to quick mode via the composer.",
+                "suggestion": "Default expensive queries to quick mode via the composer, "
+                              "and reduce per-run work (fewer expansion passes).",
             })
     return suggestions

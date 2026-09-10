@@ -34,7 +34,6 @@ function blankRun(query, mode) {
     verifiedCount: 0,
     critiques: [],
     breakdown: null,
-    budget: null,
     decisions: [],
     report: "",
     confidence: null,
@@ -156,21 +155,6 @@ export default function App() {
           pushTrace({ key: "findings", text: "Claims extracted", kind: "active" });
         }
         break;
-      case "budget":
-        patchRun(tempId, {
-          budget: {
-            cost: typeof evt.estimated_cost === "number" ? evt.estimated_cost : null,
-            limit: typeof evt.limit === "number" ? evt.limit : null,
-            calls: typeof evt.llm_calls === "number" ? evt.llm_calls : null,
-            overBudget: Boolean(evt.over_budget),
-          },
-        });
-        pushTrace({
-          key: "budget",
-          text: `Budget $${(evt.estimated_cost ?? 0).toFixed(4)}${evt.limit != null ? ` / $${evt.limit.toFixed(2)}` : ""}`,
-          kind: evt.over_budget ? "warn" : "active",
-        });
-        break;
       case "decisions":
         if (Array.isArray(evt.items)) patchRun(tempId, { decisions: evt.items });
         pushTrace({ text: `${(evt.items || []).length} options evaluated`, kind: "done" });
@@ -189,7 +173,7 @@ export default function App() {
           if (run.runId) {
             saveMissions(upsertMission({
               runId: run.runId, query: run.query, mode: run.mode,
-              status: "completed", confidence: run.confidence, cost: run.budget?.cost ?? null,
+              status: "completed", confidence: run.confidence, cost: null,
               degraded: run.degraded,
             }));
           }
@@ -208,7 +192,7 @@ export default function App() {
           if (run.runId) {
             saveMissions(upsertMission({
               runId: run.runId, query: run.query, mode: run.mode,
-              status: resumable ? "resumable" : "failed", confidence: null, cost: run.budget?.cost ?? null,
+              status: resumable ? "resumable" : "failed", confidence: null, cost: null,
             }));
           }
           return { ...m, run };
@@ -232,7 +216,7 @@ export default function App() {
       tempId = resumeRun.tempId;
       patchRun(tempId, {
         error: "", resumable: false, resuming: true, done: false,
-        findings: [], verifiedCount: 0, budget: null, degraded: [],
+        findings: [], verifiedCount: 0, degraded: [],
       });
       pushTrace({ text: `Resuming run ${resumeRun.runId.slice(0, 8)} from checkpoint`, kind: "active" });
     } else {
@@ -265,7 +249,7 @@ export default function App() {
           if (run.runId) {
             saveMissions(upsertMission({
               runId: run.runId, query: run.query, mode: run.mode,
-              status: "aborted", confidence: null, cost: run.budget?.cost ?? null,
+              status: "aborted", confidence: null, cost: null,
             }));
           }
           return { ...m, run };
@@ -303,7 +287,7 @@ export default function App() {
       if (run?.runId && !run.done && !run.error) {
         saveMissions(upsertMission({
           runId: run.runId, query: run.query, mode: run.mode,
-          status: "aborted", confidence: null, cost: run.budget?.cost ?? null,
+          status: "aborted", confidence: null, cost: null,
         }));
       }
       return [];

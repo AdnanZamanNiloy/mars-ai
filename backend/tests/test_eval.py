@@ -131,7 +131,6 @@ def test_run_one_reads_quality_metrics_from_trace():
     stream_body = (
         '{"type": "progress", "request_id": "run-1", "message": "Query received"}\n'
         '{"type": "findings", "items": [{"claim": "c1", "source": "s", "confidence": 0.5}]}\n'
-        '{"type": "budget", "estimated_cost": 0.0012, "limit": 0.5, "llm_calls": 3, "over_budget": false}\n'
         '{"type": "final_report", "report": "# Final Answer\\nok", "confidence": 0.7}\n'
     )
     trace_body = {
@@ -171,7 +170,8 @@ def test_run_one_reads_quality_metrics_from_trace():
     assert metrics["recommended_option"] == "B"
     assert metrics["contradictions"] == 2
     assert metrics["confidence"] == 0.7
-    assert metrics["cost"] == 0.0012
+    # No cost governor: stream budget events (if any) are ignored, cost stays None.
+    assert metrics["cost"] is None
 
 
 def test_run_eval_rejects_malformed_queries_file(tmp_path):

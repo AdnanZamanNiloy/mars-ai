@@ -137,7 +137,7 @@ def _critic_survival(critique: Dict[str, Any], iteration: int, max_iterations: i
         return 1.0
     if iteration >= max_iterations:
         return 0.4  # forced through the ceiling
-    return 0.6  # stopped early for another reason (budget cutoff etc.)
+    return 0.6  # stopped early for another reason (timeout, manual stop, etc.)
 
 
 def compute_confidence(

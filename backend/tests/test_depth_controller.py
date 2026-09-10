@@ -76,29 +76,6 @@ def test_marginal_gain_stall_stops_even_with_gaps():
     assert reason and "marginal" in reason
 
 
-def test_budget_cutoff_blocks_expansion():
-    class FakeTracker:
-        over_budget = True
-        limit_usd = 0.5
-        estimated_cost_usd = 0.6
-
-    state = _state(confidence=0.5, confidence_history=[0.3, 0.4, 0.5])
-    state["budget_tracker"] = FakeTracker()
-    assert dc.decide(state) == "finalize"
-
-
-def test_low_remaining_budget_disables_expansion():
-    class LowTracker:
-        over_budget = False
-        limit_usd = 1.0
-        estimated_cost_usd = 0.95  # 5% remaining < safety margin
-
-    state = _state(confidence=0.5, confidence_history=[0.3, 0.4, 0.5])
-    state["budget_tracker"] = LowTracker()
-    assert dc.evaluate(state)["budget_low"] is True
-    assert dc.decide(state) == "finalize"
-
-
 def test_ceiling_reached_finalizes():
     state = _state(iteration=3, max_iterations=3)
     assert dc.evaluate(state)["ceiling_reached"] is True
