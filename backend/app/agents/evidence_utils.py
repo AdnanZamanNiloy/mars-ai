@@ -327,6 +327,10 @@ DATE_STAMP_RE = re.compile(
     re.IGNORECASE,
 )
 
+# UI cruft glued into snippets ("Learn more", often truncated to "Learn mor"
+# by length cuts). Stripped anywhere they occur, not just at edges.
+LINK_TEXT_RE = re.compile(r"\b(?:Learn|Read|Show|See|Click|Continue)\s+mo(?:r(?:e)?)?\b\.?", re.IGNORECASE)
+
 MIN_CLEAN_CLAIM_CHARS = 50
 
 
@@ -339,6 +343,8 @@ def clean_snippet_text(snippet: str, max_chars: int = 300, min_chars: int = MIN_
     """
     text = re.sub(r"\s+", " ", (snippet or "")).strip()
     text = DATE_STAMP_RE.sub("", text).strip()
+    text = LINK_TEXT_RE.sub("", text).strip()
+    text = re.sub(r"\s+", " ", text).strip()
     if len(text) < min_chars:
         return ""
     # Trim to the last complete sentence; fall back to a comma break so a

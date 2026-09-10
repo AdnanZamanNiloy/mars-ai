@@ -123,6 +123,12 @@ RULE 1 — QUESTIONS, NOT TOPIC LABELS
   BAD  → "energy"
   GOOD → "cost per megawatt-hour of nuclear vs solar energy 2024"
 
+  AMBIGUITY — if the query has multiple distinct senses ("transformer":
+  electrical device vs ML architecture; "apple": fruit vs company), emit
+  one sense-disambiguating question PER sense ("transformer electrical
+  device definition", "transformer machine learning model architecture")
+  instead of letting evidence for different senses mash together.
+
   VARIANTS — every sub_question MUST include 1-2 variants: alternate
   phrasings with different keywords but the same intent. Different
   phrasings retrieve different sources; a question without variants

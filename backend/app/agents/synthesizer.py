@@ -29,6 +29,9 @@ Rules:
 - Use ONLY the source numbers given. Never invent numbers, links, or sources.
 - HONESTY: state what the evidence does not cover; never present an
   uncited assertion as established fact.
+- SENSES: if evidence spans distinct meanings of the query term, address
+  each sense in its own paragraph ("As an electrical device, ... In machine
+  learning, ...") — never blend them into one definition.
 
 Return valid JSON only in this schema:
 {"answer": "<final synthesized explanation with [n] citations>"}
@@ -93,8 +96,9 @@ async def synthesizer_agent(llm: LLMClient, query: str, facts: List[Dict[str, An
 
     # Deterministic fallback keeps output coherent if LLM JSON parsing fails.
     # No boilerplate openers: lead with diverse evidence sentences (MMR
-    # keeps near-duplicate definitions from filling all three slots).
-    diverse = select_diverse(top_facts, k=3)
+    # threshold 0.40 splits observed paraphrase pairs (0.43-0.52) from
+    # cross-sense claims (~0.18)).
+    diverse = select_diverse(top_facts, k=3, max_similarity=0.40)
     body_facts = [str(item.get("claim", "")).strip() for item in diverse if item.get("claim")]
     if not body_facts:
         return f"No reliable evidence was retrieved for {_normalize_query_concept(query)}."

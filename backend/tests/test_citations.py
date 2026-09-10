@@ -220,3 +220,38 @@ def test_fallback_assembly_prefers_diverse_claims():
     answer = asyncio.run(synthesizer_agent(ExplodingLLM(), "What is transfer learning?", dupes))
     assert "Fine-tuning pretrained networks" in answer
     assert answer.count("reuses a model trained on one task") == 1
+
+
+def test_link_text_artifacts_stripped():
+    from app.agents.evidence_utils import clean_snippet_text
+
+    out = clean_snippet_text(
+        "Transformers are employed for widely varying purposes. Learn mor The question "
+        "arises about function composition in electrical networks today."
+    )
+    assert "Learn mor" not in out
+    out2 = clean_snippet_text(
+        "A full explanation of attention mechanisms is available here. Read more about "
+        "transformer variants and their growing adoption in production systems now."
+    )
+    assert "Read more" not in out2
+
+
+def test_fallback_mmr_collapses_paraphrase_dupes():
+    from app.agents.synthesizer import synthesizer_agent
+
+    class ExplodingLLM:
+        async def generate_json(self, *a, **k):
+            raise RuntimeError("down")
+
+    dupes = [
+        {"claim": "Transformer, device that transfers electric energy from one alternating-current circuit to other circuits",
+         "source": "https://a.com/1", "confidence": 0.95},
+        {"claim": "In electrical engineering, a transformer is a passive component that transfers electrical energy between circuits",
+         "source": "https://b.com/2", "confidence": 0.9},
+        {"claim": "The Transformer architecture uses self-attention for sequence modeling tasks",
+         "source": "https://c.com/3", "confidence": 0.85},
+    ]
+    answer = asyncio.run(synthesizer_agent(ExplodingLLM(), "What is transformer?", dupes))
+    assert "self-attention" in answer
+    assert answer.count("transfers electric") + answer.count("transfers electrical") == 1
