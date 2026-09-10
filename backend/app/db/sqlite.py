@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS evaluation_runs (
     recommended_option TEXT,
     cost REAL,
     checks_passed INTEGER NOT NULL,
+    degraded TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 """
@@ -129,6 +130,11 @@ async def init_db(database_path: str) -> None:
         await db.execute("PRAGMA busy_timeout=5000;")
         # executescript handles the multi-statement CREATE TABLE block.
         await db.executescript(CREATE_TABLE_SQL)
+        # Additive migration: existing evaluation_runs tables predate the
+        # degraded column — add it in place, never rebuild the table.
+        cols = await db.execute("PRAGMA table_info(evaluation_runs)")
+        if "degraded" not in {r[1] for r in await cols.fetchall()}:
+            await db.execute("ALTER TABLE evaluation_runs ADD COLUMN degraded TEXT NOT NULL DEFAULT ''")
         await db.execute(
             "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);"
         )
@@ -354,11 +360,13 @@ async def save_final_report(database_path: str, run_id: str, report_markdown: st
 
 async def save_evaluation_run(database_path: str, row: dict) -> None:
     """Evaluation Lab (4.1): one row per eval query per batch run."""
+    degraded = row.get("degraded") or []
+    degraded_str = ",".join(sorted({str(a) for a in degraded if str(a).strip()}))
     async with aiosqlite.connect(database_path) as db:
         await db.execute(
             "INSERT INTO evaluation_runs (eval_batch, query_id, query, mode, run_id, status, "
             "confidence, claims, verified, sources, contradictions, recommended_option, cost, "
-            "checks_passed, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "checks_passed, degraded, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 str(row.get("eval_batch", "")),
                 str(row.get("query_id", "")),
@@ -374,6 +382,7 @@ async def save_evaluation_run(database_path: str, row: dict) -> None:
                 row.get("recommended_option"),
                 row.get("cost"),
                 1 if row.get("passed") else 0,
+                degraded_str,
                 _now(),
             ),
         )
@@ -396,7 +405,7 @@ async def eval_batch_rows(database_path: str, eval_batch: str) -> list:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             "SELECT query_id, confidence, claims, verified, sources, contradictions, cost, "
-            "checks_passed FROM evaluation_runs WHERE eval_batch = ? ORDER BY id",
+            "checks_passed, degraded FROM evaluation_runs WHERE eval_batch = ? ORDER BY id",
             (eval_batch,),
         )
         return [
@@ -409,6 +418,7 @@ async def eval_batch_rows(database_path: str, eval_batch: str) -> list:
                 "contradictions": r["contradictions"],
                 "cost": r["cost"],
                 "passed": bool(r["checks_passed"]),
+                "degraded": [a for a in str(r["degraded"] or "").split(",") if a],
             }
             for r in await cur.fetchall()
         ]

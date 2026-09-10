@@ -187,3 +187,92 @@ def test_run_eval_rejects_malformed_queries_file(tmp_path):
     )
     assert proc.returncode == 2
     assert "must be a list" in proc.stderr
+
+
+def test_migration_adds_degraded_column_to_old_table(tmp_path):
+    """Pre-degraded evaluation_runs tables gain the column in place."""
+    import aiosqlite
+
+    db_path = str(tmp_path / "old_eval.db")
+
+    async def _setup():
+        async with aiosqlite.connect(db_path) as db:
+            await db.execute(
+                "CREATE TABLE evaluation_runs (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                " eval_batch TEXT NOT NULL, query_id TEXT NOT NULL, query TEXT NOT NULL,"
+                " mode TEXT NOT NULL, run_id TEXT, status TEXT NOT NULL, confidence REAL,"
+                " claims INTEGER, verified INTEGER, sources INTEGER, contradictions INTEGER,"
+                " recommended_option TEXT, cost REAL, checks_passed INTEGER NOT NULL,"
+                " created_at TEXT NOT NULL)"
+            )
+            await db.execute(
+                "INSERT INTO evaluation_runs (eval_batch, query_id, query, mode, status,"
+                " checks_passed, created_at) VALUES ('b0','q','q?','quick','completed',1,'now')"
+            )
+            await db.commit()
+
+    asyncio.run(_setup())
+    asyncio.run(init_db(db_path))
+    rows = asyncio.run(eval_batch_rows(db_path, "b0"))
+    assert len(rows) == 1
+    assert rows[0]["degraded"] == []
+
+
+def test_degraded_round_trip(tmp_path):
+    db_path = str(tmp_path / "deg.db")
+    asyncio.run(init_db(db_path))
+    asyncio.run(save_evaluation_run(db_path, {
+        "eval_batch": "b1", "query_id": "q1", "query": "q?", "mode": "quick",
+        "run_id": "r1", "status": "completed", "confidence": 0.6, "claims": 5,
+        "verified": 2, "sources": 6, "contradictions": 0,
+        "recommended_option": None, "cost": 0.001, "passed": True,
+        "degraded": ["synthesizer", "planner", "planner"],
+    }))
+    rows = asyncio.run(eval_batch_rows(db_path, "b1"))
+    assert rows[0]["degraded"] == ["planner", "synthesizer"]
+
+
+def test_summarize_counts_degraded():
+    rows = [
+        {**_metrics(), "passed": True, "degraded": []},
+        {**_metrics(), "passed": True, "degraded": ["planner"]},
+    ]
+    summary = summarize_batch(rows)
+    assert summary["degraded"] == 1
+    assert summary["degraded_rate"] == 0.5
+    assert "degraded rows" in format_trend(summary, None)
+
+
+def test_run_one_reads_degraded_from_trace_fallbacks():
+    """Degraded agents come from persisted fallback events, not the stream."""
+    import httpx
+    from scripts.run_eval import run_one
+
+    stream_body = (
+        '{"type": "progress", "request_id": "run-9", "message": "ok"}\n'
+        '{"type": "final_report", "report": "# Final Answer\\nok", "confidence": 0.6}\n'
+    )
+    trace_body = {
+        "status": "completed",
+        "claims": [{"claim": "c1", "verified": 1}],
+        "sources": [{}],
+        "decisions": [],
+        "events": [
+            {"node": "synthesizer", "event_type": "fallback"},
+            {"node": "planner", "event_type": "fallback"},
+            {"node": "search", "event_type": "end"},
+        ],
+        "final_report": {"report_markdown": "# Final Answer\nok", "confidence": 0.6},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/trace"):
+            return httpx.Response(200, json=trace_body)
+        return httpx.Response(200, content=stream_body.encode())
+
+    async def _run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await run_one(client, "http://test", {"query": "q?", "mode": "quick"}, 30.0)
+
+    metrics = asyncio.run(_run())
+    assert metrics["degraded"] == ["planner", "synthesizer"]

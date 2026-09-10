@@ -73,6 +73,7 @@ async def run_one(client: httpx.AsyncClient, server: str, query: dict, timeout: 
         "recommended_option": None,
         "cost": None,
         "error": None,
+        "degraded": [],
     }
     run_id: str | None = None
     try:
@@ -126,6 +127,12 @@ async def run_one(client: httpx.AsyncClient, server: str, query: dict, timeout: 
         metrics["sources"] = len(trace.get("sources") or [])
         metrics["decisions"] = len(decisions)
         metrics["contradictions"] = count_section_lines(report_md, "# Contradictions")
+        # Persisted fallback events — stream-observed degraded would miss
+        # fallbacks from retries the stream never surfaced cleanly.
+        metrics["degraded"] = sorted({
+            str(e.get("node", "")) for e in (trace.get("events") or [])
+            if e.get("event_type") == "fallback" and e.get("node")
+        })
         rec = next((o for o in decisions if o.get("is_recommended")), None)
         metrics["recommended_option"] = rec.get("option_label") if rec else None
         conf = (trace.get("final_report") or {}).get("confidence")
@@ -194,6 +201,7 @@ async def main() -> int:
                 f"decisions={metrics['decisions']} contradictions={metrics['contradictions']} "
                 f"conf={metrics['confidence']} cost={metrics['cost']}"
                 + (f" error={metrics['error']}" if metrics.get("error") else "")
+                + (f" DEGRADED={','.join(metrics['degraded'])}" if metrics.get("degraded") else "")
             )
             await save_evaluation_run(db_path, {
                 "eval_batch": batch,
@@ -210,14 +218,21 @@ async def main() -> int:
                 "recommended_option": metrics["recommended_option"],
                 "cost": metrics["cost"],
                 "passed": checks["passed"],
+                "degraded": metrics.get("degraded") or [],
             })
 
-    current = summarize_batch(await eval_batch_rows(db_path, batch))
+    rows = await eval_batch_rows(db_path, batch)
+    clean = [r for r in rows if not r.get("degraded")]
+    skipped = len(rows) - len(clean)
+    current = summarize_batch(clean)
     batches = await latest_eval_batches(db_path, limit=2)
     previous = None
     if len(batches) == 2:
-        previous = summarize_batch(await eval_batch_rows(db_path, batches[1]))
-    print(f"\nbatch {batch} summary:\n{format_trend(current, previous)}")
+        prev_rows = await eval_batch_rows(db_path, batches[1])
+        previous = summarize_batch([r for r in prev_rows if not r.get("degraded")])
+    print(f"\nbatch {batch} summary (trend over {len(clean)} clean rows"
+          + (f", {skipped} degraded excluded" if skipped else "") + "):"
+          f"\n{format_trend(current, previous)}")
     return 1 if failures else 0
 
 

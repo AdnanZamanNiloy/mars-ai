@@ -55,6 +55,8 @@ def summarize_batch(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             "avg_verified": 0.0,
             "contradiction_rate": 0.0,
             "avg_cost": 0.0,
+            "degraded": 0,
+            "degraded_rate": 0.0,
         }
     n = len(rows)
 
@@ -62,6 +64,7 @@ def summarize_batch(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         vals = [r.get(key) for r in rows if isinstance(r.get(key), (int, float))]
         return sum(vals) / len(vals) if vals else 0.0
 
+    degraded = sum(1 for r in rows if r.get("degraded"))
     return {
         "queries": n,
         "pass_rate": sum(1 for r in rows if r.get("passed")) / n,
@@ -70,6 +73,8 @@ def summarize_batch(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "avg_verified": _mean("verified"),
         "contradiction_rate": sum(1 for r in rows if (r.get("contradictions") or 0) > 0) / n,
         "avg_cost": _mean("cost"),
+        "degraded": degraded,
+        "degraded_rate": degraded / n,
     }
 
 
@@ -83,6 +88,7 @@ def format_trend(current: Dict[str, Any], previous: Dict[str, Any] | None) -> st
         _line("avg verified", current["avg_verified"], previous["avg_verified"] if previous else None, ".1f"),
         _line("contradiction rate", current["contradiction_rate"], previous["contradiction_rate"] if previous else None, "%"),
         _line("avg cost $", current["avg_cost"], previous["avg_cost"] if previous else None, ".4f"),
+        _line("degraded rows", float(current["degraded"]), float(previous["degraded"]) if previous else None, ".0f"),
     ]
     return "\n".join(lines)
 
