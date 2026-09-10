@@ -12,6 +12,7 @@ import httpx
 from ddgs import DDGS
 
 from app.core.config import Settings
+from app.core.llm import _real_key
 from app.agents.evidence_utils import source_reliability_score
 from app.agents.planner import SubQuestion
 from app.core.cache import cache_key, get_cache
@@ -175,16 +176,84 @@ def _clean_html(raw: str) -> str:
     return text.strip()[:6000]
 
 
+# Phrases that mark bot-block / JS-gate pages. Matched only when the cleaned
+# text is short — long articles may legitimately mention captchas.
+BLOCK_PAGE_PHRASES = (
+    "access denied",
+    "verify you are human",
+    "enable javascript",
+    "please complete the security check",
+    "unusual traffic from your computer network",
+)
+
+
+def _looks_like_block_page(text: str) -> bool:
+    lowered = (text or "").lower()
+    return len(lowered) < 600 and any(p in lowered for p in BLOCK_PAGE_PHRASES)
+
+
+def _extract_pdf_text(content: bytes, url: str) -> str:
+    """Best-effort first pages of a PDF. PyMuPDF is optional: without it,
+    PDFs stay unfetched rather than crashing the run."""
+    try:
+        try:
+            import pymupdf
+        except ImportError:
+            import fitz as pymupdf
+    except ImportError:
+        logger.warning("[Search] PyMuPDF missing, skipping PDF: %s", url[:80])
+        return ""
+    try:
+        pages = []
+        with pymupdf.open(stream=content, filetype="pdf") as doc:
+            for page in doc[:5]:
+                pages.append(page.get_text())
+        return re.sub(r"\s+", " ", "\n".join(pages)).strip()[:6000]
+    except Exception as exc:
+        logger.warning("[Search] PDF extract failed for %s: %s", url[:80], exc, exc_info=exc)
+        return ""
+
+
 async def _fetch_content(url: str):
     """Fetch + clean page text. Returns (text, last_modified_header_or_empty)."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(url)
             if r.status_code == 200:
-                return _clean_html(r.text), str(r.headers.get("last-modified", "") or "")
+                content_type = str(r.headers.get("content-type", "") or "").lower()
+                if "application/pdf" in content_type or url.lower().split("?")[0].endswith(".pdf"):
+                    return _extract_pdf_text(r.content, url), str(r.headers.get("last-modified", "") or "")
+                text = _clean_html(r.text)
+                if _looks_like_block_page(text):
+                    logger.warning("[Search] block page detected, dropping: %s", url[:80])
+                    return "", ""
+                return text, str(r.headers.get("last-modified", "") or "")
     except Exception as exc:
         logger.warning("[Search] content fetch failed for %s: %s", url[:80], exc, exc_info=exc)
     return "", ""
+
+
+def _has_tavily_key(settings: Settings) -> bool:
+    """A real Tavily key (not empty, not an example placeholder)."""
+    return bool(_real_key(getattr(settings, "tavily_api_key", "")))
+
+
+def _tavily_to_results(payload: Any, query: str) -> List["SearchResult"]:
+    """Map a Tavily /search response to ranked SearchResults. Pure — the
+    network call stays in _tavily_search so this is unit-testable offline."""
+    results = []
+    items = payload.get("results", []) if isinstance(payload, dict) else []
+    for row in items:
+        if not isinstance(row, dict) or not row.get("url"):
+            continue
+        results.append(SearchResult(
+            title=str(row.get("title", "") or ""),
+            url=str(row.get("url") or ""),
+            snippet=str(row.get("content", "") or "")[:1500],
+            provider="tavily",
+            published_at=str(row.get("published_date", "") or ""),
+        ))
+    return results
 
 
 # =============================================================================
@@ -223,8 +292,15 @@ class SearchClient:
             collected = []
 
             async with self.semaphore:
-                collected.extend(await self._ddg_text(query))
-                collected.extend(await self._ddg_news(query))
+                # Tavily replaces DDG text/news when configured: one paid call
+                # with clean markdown beats free snippets. Wikipedia always
+                # runs (free, high-trust encyclopedia). Any Tavily failure
+                # falls back to DDG inside _tavily_search.
+                if _has_tavily_key(settings):
+                    collected.extend(await self._tavily_search(query))
+                else:
+                    collected.extend(await self._ddg_text(query))
+                    collected.extend(await self._ddg_news(query))
                 collected.extend(await self._wiki(query))
 
             if not collected:
@@ -270,6 +346,31 @@ class SearchClient:
     # =========================
     # PROVIDERS
     # =========================
+
+    async def _tavily_search(self, query):
+        """Tavily web search (paid, free tier available). Falls back to DDG
+        on any failure — a bad paid call must never be worse than free."""
+        api_key = _real_key(self.settings.tavily_api_key)
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                r = await client.post(
+                    "https://api.tavily.com/search",
+                    json={
+                        "api_key": api_key,
+                        "query": query if isinstance(query, str) else str(query),
+                        "search_depth": "basic",
+                        "max_results": 8,
+                        "include_answer": False,
+                    },
+                )
+                r.raise_for_status()
+                payload = r.json()
+        except Exception as exc:
+            logger.warning("[Search] Tavily failed, falling back to DDG: %s", exc, exc_info=exc)
+            results = await self._ddg_text(query)
+            results.extend(await self._ddg_news(query))
+            return results
+        return _tavily_to_results(payload, query)
 
     async def _ddg_text(self, query):
         def _search():

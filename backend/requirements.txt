@@ -11,6 +11,7 @@ pydantic-settings==2.15.0
 diskcache==5.6.3
 structlog==26.1.0
 slowapi==0.1.10
+pymupdf>=1.24  # optional at runtime: PDF extraction only; missing lib skips PDFs
 pytest==9.1.1
 pytest-asyncio==1.4.0
 respx==0.23.1
