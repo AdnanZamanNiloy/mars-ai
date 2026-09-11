@@ -13,6 +13,7 @@ import EvidenceView from "./components/EvidenceView";
 import KnowledgeView from "./components/KnowledgeView";
 import EvalView from "./components/EvalView";
 import AgentsView from "./components/AgentsView";
+import Landing from "./components/Landing";
 import { IconChevronLeft, IconMenu } from "./components/icons";
 
 let seq = 1;
@@ -82,7 +83,7 @@ function blankRun(query, mode) {
 }
 
 export default function App() {
-  const [view, setView] = useState("workspace");
+  const [view, setView] = useState("landing");
   const [missions, setMissions] = useState(() => loadMissions());
   const [knowledge, setKnowledge] = useState(() => loadKnowledge());
   const [messages, setMessages] = useState([]);
@@ -402,6 +403,9 @@ export default function App() {
     : activeRun;
 
   return (
+    view === "landing" ? (
+      <Landing onStart={() => setView("workspace")} />
+    ) : (
     <div className="shell">
       <ErrorBoundary>
       <Sidebar
@@ -521,6 +525,7 @@ export default function App() {
                  `${selectedFinding.claim || ""}||${selectedFinding.source || ""}`) : false}
       />
     </div>
+    )
   );
 }
 
