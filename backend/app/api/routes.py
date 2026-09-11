@@ -317,6 +317,27 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
 
             yield event_line("progress", request_id=request_id, message="Query received")
 
+            # Pre-flight provider probe: a run with zero reachable LLM
+            # providers is doomed to degrade to extraction — fail in seconds
+            # with the per-provider reasons instead of minutes of garbage.
+            llm_client = getattr(request.app.state, "llm", None)
+            if llm_client is not None:
+                probe_ok, probe_detail = await llm_client.probe_all()
+                if not probe_ok:
+                    await _persist(complete_research_run(
+                        settings.database_url, request_id, "failed",
+                        confidence=0.0, estimated_cost=None,
+                    ))
+                    yield event_line(
+                        "error",
+                        message=(
+                            f"No LLM provider is reachable right now — {probe_detail}. "
+                            "Add or switch providers in the Providers tab, or wait "
+                            "for provider quotas to reset."
+                        ),
+                    )
+                    return
+
             try:
                 # Outer ceiling on total request time — individual LLM/search
                 # timeouts don't bound the planner→search→summarize→critic loop.
@@ -583,6 +604,23 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
 
         try:
             yield event_line("progress", request_id=request_id, message=f"Resuming run {request_id[:8]}")
+
+            # Same pre-flight as a fresh stream: a resumed run with zero
+            # reachable providers would just fail again, minutes later.
+            llm_client = getattr(request.app.state, "llm", None)
+            if llm_client is not None:
+                probe_ok, probe_detail = await llm_client.probe_all()
+                if not probe_ok:
+                    await _persist_complete(settings.database_url, request_id, "failed", 0.0, None)
+                    yield event_line(
+                        "error",
+                        message=(
+                            f"No LLM provider is reachable right now — {probe_detail}. "
+                            "Add or switch providers in the Providers tab, or wait "
+                            "for provider quotas to reset."
+                        ),
+                    )
+                    return
 
             # Resume skips planner/search: sub-questions and sources already
             # exist for this run, so re-enter at critic with existing evidence.

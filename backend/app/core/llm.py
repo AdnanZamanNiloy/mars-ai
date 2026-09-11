@@ -158,6 +158,100 @@ class LLMClient:
         self._llm_semaphore = asyncio.Semaphore(max(1, int(getattr(settings, "max_parallel_llm", 2) or 2)))
         # Last failure per provider, surfaced when the whole chain fails.
         self._last_errors: Dict[str, str] = {}
+        # The custom/active-provider leg shares one breaker keyed to the
+        # resolved (endpoint, model) identity. Switching providers (Providers
+        # tab) must NOT inherit the previous provider's failure state — a
+        # dead provider A timed out once would otherwise block healthy
+        # provider B for the full cooldown.
+        self._custom_identity: tuple | None = None
+
+    async def probe_targets(self) -> List[Dict[str, str]]:
+        """Providers a pre-flight probe should ping. Exclusive active
+        provider → that one only; otherwise the full env chain."""
+        custom, exclusive = await self._resolve_custom()
+        targets: List[Dict[str, str]] = []
+        if custom:
+            targets.append({
+                "name": str(custom.get("name", "custom")),
+                "endpoint": custom["endpoint"],
+                "api_key": custom["api_key"],
+                "model": custom["model"],
+                "style": "openai",
+            })
+        if not exclusive:
+            groq_key = _real_key(self.settings.groq_api_key)
+            if groq_key:
+                targets.append({
+                    "name": "groq",
+                    "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+                    "api_key": groq_key,
+                    "model": self.settings.groq_model,
+                    "style": "openai",
+                })
+            hf_key = _real_key(self.settings.huggingface_api_key)
+            if hf_key:
+                targets.append({
+                    "name": "huggingface",
+                    "endpoint": f"https://api-inference.huggingface.co/models/{self.settings.huggingface_model}",
+                    "api_key": hf_key,
+                    "model": self.settings.huggingface_model,
+                    "style": "hf",
+                })
+        return targets
+
+    async def probe_all(self, timeout: float = 10.0) -> tuple[bool, str]:
+        """Pre-flight check for the research stream: one tiny parallel ping
+        per configured provider, each capped at `timeout` seconds.
+
+        Returns (any_ok, failure_detail). Fail-open on internal errors —
+        a probe bug must never block research; the pipeline's own
+        degradation handling still applies. When every provider fails the
+        run is doomed (it would degrade to extraction), so the caller can
+        fail fast with the per-provider reasons instead of wasting the
+        research budget.
+        """
+        try:
+            targets = await self.probe_targets()
+        except Exception as exc:
+            logger.warning("probe target resolution failed, skipping pre-flight: %s", exc, exc_info=exc)
+            return True, ""
+        if not targets:
+            return False, (
+                "no LLM provider is configured "
+                "(set GROQ_API_KEY / CUSTOM_LLM_* in .env, or add and select one in the Providers tab)"
+            )
+
+        async def _ping(target: Dict[str, str]) -> tuple[bool, str, str]:
+            try:
+                if target["style"] == "hf":
+                    payload: Dict[str, Any] = {
+                        "inputs": "Reply with exactly: ok",
+                        "parameters": {"max_new_tokens": 4, "return_full_text": False},
+                    }
+                else:
+                    payload = {
+                        "model": target["model"],
+                        "max_tokens": 8,
+                        "messages": [{"role": "user", "content": "Reply with exactly: ok"}],
+                    }
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.post(
+                        target["endpoint"],
+                        headers={"Authorization": f"Bearer {target['api_key']}", "Content-Type": "application/json"},
+                        json=payload,
+                    )
+                    response.raise_for_status()
+                return True, target["name"], ""
+            except Exception as exc:
+                detail = str(exc).strip() or type(exc).__name__
+                return False, target["name"], f"{type(exc).__name__}: {detail[:140]}"
+
+        results = await asyncio.gather(*(_ping(t) for t in targets))
+        any_ok = any(ok for ok, _, _ in results)
+        if any_ok:
+            return True, ""
+        detail = "; ".join(f"{name}: {err}" for _, name, err in results)
+        return False, detail
 
     async def generate_json(
         self,
@@ -229,6 +323,14 @@ class LLMClient:
         if exclusive:
             groq_key = ""
             hf_key = ""
+        # Identity-keyed breaker reset (see __init__): switching to a
+        # DIFFERENT endpoint+model gets a fresh breaker, never the previous
+        # provider's failure count. The first resolution (None → identity)
+        # keeps any pre-existing state — only a real switch resets.
+        identity = (custom["endpoint"], custom["model"]) if custom else None
+        if identity is not None and self._custom_identity is not None and identity != self._custom_identity:
+            self.custom_breaker = CircuitBreaker(threshold=3, cooldown_sec=60.0)
+        self._custom_identity = identity
         attempted = 0
         async with self._llm_semaphore:
             if custom and not self.custom_breaker.is_open():

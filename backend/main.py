@@ -23,6 +23,7 @@ async def lifespan(app: FastAPI):
     await init_db(settings.database_url)
 
     app.state.settings = settings
+    app.state.llm = llm
     app.state.workflow = workflow
     yield
 

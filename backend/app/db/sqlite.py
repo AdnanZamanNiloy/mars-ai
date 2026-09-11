@@ -146,7 +146,7 @@ CREATE TABLE IF NOT EXISTS llm_providers (
 );
 """
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 async def init_db(database_path: str) -> None:

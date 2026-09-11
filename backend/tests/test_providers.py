@@ -184,3 +184,109 @@ async def test_probe_timeout_clamped_and_optional(tmp_path, _secret):
             huge = (await client.post(f"/api/providers/{pid}/test", json={"timeout_sec": 9999})).json()
             assert huge["ok"] is True
             assert route.call_count == 2
+
+
+async def test_breaker_resets_when_active_provider_switches(db_path):
+    """Switching the active provider must not inherit the previous
+    provider's breaker state: a provider that timed out once would
+    otherwise block the freshly-selected healthy one for the cooldown.
+    Exercises the real reset inside _generate_with_fallback."""
+    import respx
+    import httpx
+
+    from app.core import providers as provider_store
+    from app.core.llm import LLMClient
+
+    row_a = await provider_store.save_provider(
+        db_path, name="prov-a", base_url="https://a.example.com/v1",
+        model="model-a", api_key="key-a",
+    )
+    await provider_store.set_active_provider(db_path, row_a["id"])
+    settings = _settings(database_url=db_path)
+    client = LLMClient(settings)
+
+    with respx.mock(assert_all_called=False) as mock:
+        route_a = mock.post("https://a.example.com/v1/chat/completions").mock(
+            side_effect=httpx.ReadTimeout(""))  # empty message: also covers the formatter
+        # A times out: exclusive selection fails fast (no env fallback),
+        # and the timeout opens A's breaker.
+        with pytest.raises(AllProvidersFailedError, match="prov-a"):
+            await client.generate_json("sp", "up")
+        assert client.custom_breaker.is_open()
+
+        # User switches to provider B. Despite A's open breaker, B must be
+        # attempted — the identity switch resets the breaker.
+        await provider_store.set_active_provider(db_path, row_a["id"])  # same row replaced below
+        await provider_store.save_provider(
+            db_path, name="prov-b", base_url="https://b.example.com/v1",
+            model="model-b", api_key="key-b",
+        )
+        rows = await provider_store.list_providers(db_path)
+        row_b = next(r for r in rows if r["name"] == "prov-b")
+        await provider_store.set_active_provider(db_path, row_b["id"])
+
+        route_b = mock.post("https://b.example.com/v1/chat/completions").mock(
+            return_value=httpx.Response(200, json={"choices": [{"message": {"content": "{\"ok\": true}"}}]}))
+        result = await client.generate_json("sp", "up")
+        assert result == {"ok": True}
+        assert route_b.call_count == 1, "switched provider must be attempted despite stale breaker"
+        assert route_a.call_count == 1
+
+
+async def test_probe_all_reports_dead_providers(db_path):
+    """Pre-flight probe, env chain (no active provider): all providers
+    failing -> (False, per-provider detail); one succeeding -> (True, '')."""
+    import respx
+    import httpx
+
+    from app.core import providers as provider_store
+    from app.core.llm import LLMClient
+
+    settings = _settings(groq_api_key="k", huggingface_api_key="hf", database_url=db_path)
+    client = LLMClient(settings)
+    assert await provider_store.get_active_provider(db_path) is None
+
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post("https://api.groq.com/openai/v1/chat/completions").mock(
+            return_value=httpx.Response(429, json={"error": "quota"}))
+        mock.post("https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct").mock(
+            return_value=httpx.Response(503, json={"error": "loading"}))
+        ok, detail = await client.probe_all(timeout=5.0)
+    assert ok is False
+    assert "groq" in detail and "huggingface" in detail
+
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post("https://api.groq.com/openai/v1/chat/completions").mock(
+            return_value=httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]}))
+        mock.post("https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct").mock(
+            return_value=httpx.Response(503, json={"error": "loading"}))
+        ok, detail = await client.probe_all(timeout=5.0)
+    assert ok is True and detail == ""
+
+
+async def test_exclusive_probe_pings_active_only(db_path):
+    """While a provider is active, the probe must NOT ping Groq/HF —
+    selection is exclusive, and pinging irrelevant keys wastes quota."""
+    import respx
+    import httpx
+
+    from app.core import providers as provider_store
+    from app.core.llm import LLMClient
+
+    row = await provider_store.save_provider(
+        db_path, name="only", base_url="https://only.example.com/v1",
+        model="m", api_key="key",
+    )
+    await provider_store.set_active_provider(db_path, row["id"])
+    settings = _settings(groq_api_key="k", huggingface_api_key="hf", database_url=db_path)
+    client = LLMClient(settings)
+
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post("https://only.example.com/v1/chat/completions").mock(
+            return_value=httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]}))
+        groq_route = mock.post("https://api.groq.com/openai/v1/chat/completions").mock(
+            return_value=httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]}))
+        ok, _ = await client.probe_all(timeout=5.0)
+    assert ok is True
+    assert route.call_count == 1
+    assert groq_route.call_count == 0, "exclusive selection must not ping the env chain"

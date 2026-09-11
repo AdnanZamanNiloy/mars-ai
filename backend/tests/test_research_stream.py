@@ -188,3 +188,61 @@ async def test_all_new_findings_emitted_not_just_three(tmp_path):
     assert regular, events
     streamed = [item["claim"] for e in regular for item in e["items"]]
     assert sorted(streamed) == [f"Claim number {i}" for i in range(6)], streamed
+
+
+async def test_preflight_fails_fast_when_no_provider_reachable(tmp_path, monkeypatch):
+    """A run with zero reachable LLM providers would only degrade to
+    extraction after minutes. The pre-flight probe must end it in seconds
+    with a clear error event — and never reach the workflow."""
+    import respx
+    import httpx as _httpx
+
+    from app.core.llm import LLMClient
+
+    settings = Settings(groq_api_key="test-key", database_url=str(tmp_path / "pf.db"), _env_file=None)
+    app = _build_app(StubFastWorkflow(), settings)
+    app.state.llm = LLMClient(settings)
+
+    async def _boom(*a, **k):
+        raise AssertionError("workflow must not run when the pre-flight probe fails")
+
+    app.state.workflow = type("NoRun", (), {"astream": staticmethod(_boom)})()
+
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post("https://api.groq.com/openai/v1/chat/completions").mock(
+            return_value=_httpx.Response(429, json={"error": "TPD exhausted"}))
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await _post_stream(client, "valid research query here")
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    types = [e["type"] for e in events]
+    assert "error" in types, events
+    assert "final_report" not in types, events
+    error_event = next(e for e in events if e["type"] == "error")
+    assert "No LLM provider is reachable" in error_event["message"]
+    assert "groq" in error_event["message"]
+
+
+async def test_preflight_passes_when_a_provider_responds(tmp_path):
+    """One reachable provider is enough: the run proceeds normally."""
+    import respx
+    import httpx as _httpx
+
+    from app.core.llm import LLMClient
+    from app.db.sqlite import init_db
+
+    db_path = str(tmp_path / "pf2.db")
+    await init_db(db_path)
+    settings = Settings(groq_api_key="test-key", database_url=db_path, _env_file=None)
+    app = _build_app(StubFastWorkflow(), settings)
+    app.state.llm = LLMClient(settings)
+
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post("https://api.groq.com/openai/v1/chat/completions").mock(
+            return_value=_httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]}))
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await _post_stream(client, "valid research query here")
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    assert any(e["type"] == "final_report" for e in events), events
