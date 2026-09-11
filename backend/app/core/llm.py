@@ -74,18 +74,19 @@ def _real_key(value: Any) -> str:
     return text
 
 
-def _is_auth_error(exc: BaseException) -> bool:
-    """401/403 must fail fast to fallback — retrying bad credentials only
-    burns time and worsens rate limiting."""
+def _is_non_retryable_error(exc: BaseException) -> bool:
+    """Client errors fail fast to fallback: 401/403 (bad credentials) and
+    400/404/405/422 (malformed endpoint, model, or payload) will not resolve
+    by retrying — retrying only burns time and worsens rate limiting."""
     return (
         isinstance(exc, httpx.HTTPStatusError)
         and exc.response is not None
-        and exc.response.status_code in (401, 403)
+        and exc.response.status_code in (400, 401, 403, 404, 405, 422)
     )
 
 
 def _is_retryable(exc: BaseException) -> bool:
-    if _is_auth_error(exc):
+    if _is_non_retryable_error(exc):
         return False
     return isinstance(exc, (httpx.HTTPError, RuntimeError))
 
@@ -187,7 +188,9 @@ class LLMClient:
     def _custom_config(self) -> Dict[str, str] | None:
         """Validated custom-provider trio, or None when not configured."""
         key = _real_key(self.settings.custom_llm_api_key)
-        base = str(self.settings.custom_llm_base_url or "").strip().rstrip("/")
+        # Defensive: strip URL fragments/params users paste from docs
+        # ("https://host/v1# comment" must not become the endpoint).
+        base = str(self.settings.custom_llm_base_url or "").split("#")[0].strip().rstrip("/")
         model = str(self.settings.custom_llm_model or "").strip()
         if not (key and base and model):
             return None

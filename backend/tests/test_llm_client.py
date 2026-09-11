@@ -256,3 +256,25 @@ def test_validator_accepts_custom_only():
     settings = Settings(custom_llm_api_key="k", custom_llm_base_url="https://x/v1",
                         custom_llm_model="m", _env_file=None)
     assert settings.custom_llm_model == "m"
+
+
+async def test_client_error_fails_fast(hf_client):
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post(GROQ_URL).mock(
+            return_value=httpx.Response(404, json={"error": "model not found"}))
+        mock.post(HF_URL).mock(
+            return_value=httpx.Response(200, json=[{"generated_text": json.dumps({"via": "hf"})}]))
+        result = await hf_client.generate_json("sp", "up")
+        assert result == {"via": "hf"}
+        assert route.call_count == 1
+
+
+def test_custom_config_strips_url_fragment():
+    from app.core.config import Settings
+    from app.core.llm import LLMClient
+
+    settings = Settings(custom_llm_api_key="k",
+                        custom_llm_base_url="https://host.example/v1# pasted comment …",
+                        custom_llm_model="m", _env_file=None)
+    cfg = LLMClient(settings)._custom_config()
+    assert cfg["endpoint"] == "https://host.example/v1/chat/completions"
