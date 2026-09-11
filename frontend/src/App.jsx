@@ -186,7 +186,7 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [selectedFinding, setSelectedFinding] = useState(null);
   const [traceLog, setTraceLog] = useState([]);
-  const [intelCollapsed, setIntelCollapsed] = useState(false);
+  const [intelCollapsed, setIntelCollapsed] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [replaying, setReplaying] = useState(false);
 
@@ -374,6 +374,7 @@ export default function App() {
 
     runRef.current = tempId;
     setRunning(true);
+    setIntelCollapsed(false);
     try {
       if (resumeRun) {
         await resumeResearch({ runId: resumeRun.runId, signal: controller.signal, onEvent: (e) => handleEvent(tempId, e) });
@@ -435,6 +436,7 @@ export default function App() {
     setSelectedFinding(null);
     setComposer("");
     setRunning(false);
+    setIntelCollapsed(true);
     go("workspace");
   }, []);
 
@@ -462,6 +464,7 @@ export default function App() {
       }));
       setTraceLog(events.length > 0 ? events : [{ at: new Date().toISOString(), kind: "done", text: "Trace loaded — no node events recorded" }]);
       setSelectedFinding(null);
+      setIntelCollapsed(false);
       go("workspace");
     } catch (err) {
       setMessages([{
@@ -815,7 +818,7 @@ function WelcomeHero({ composer }) {
       <h2>What should MARS <span className="accent">investigate</span>?</h2>
       <p>
         A team of research agents plans the inquiry, gathers sources, verifies claims,
-        challenges conclusions and synthesizes a cited report — streaming live to this console.
+        challenges conclusions and synthesizes a cited report live to this console.
       </p>
       {composer ? <div className="hero-composer">{composer}</div> : null}
     </div>
