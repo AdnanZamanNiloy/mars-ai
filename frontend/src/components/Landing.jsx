@@ -41,7 +41,7 @@ export default function Landing({ onStart }) {
           decision ready report.
         </p>
         <button type="button" className="landing-cta" onClick={onStart}>
-          Enter Command Center
+          Start Research
         </button>
       </main>
 

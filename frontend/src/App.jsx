@@ -509,6 +509,19 @@ export default function App() {
         : titleMessage.query))
     : (VIEW_TITLES[view] || "Command Center");
 
+  /* Browser tab title follows the session: "query — MARS" while research
+   * is on screen, plain "MARS" everywhere else. Favicon stays put. */
+  useEffect(() => {
+    try {
+      const q = (pageTitle && pageTitle !== "New Research" && view === "workspace")
+        ? pageTitle
+        : "";
+      document.title = q ? `${q} — MARS` : "MARS";
+    } catch {
+      /* non-DOM environment */
+    }
+  }, [pageTitle, view]);
+
   const renameMission = useCallback((runId, title) => {
     saveMissions(updateMission(runId, { title }));
   }, [saveMissions]);
