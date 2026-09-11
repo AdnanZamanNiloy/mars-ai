@@ -576,16 +576,14 @@ function ThreadMessage({ message, running, onResume, onChallenge, onRegenerate, 
     const { trace } = message;
     const report = trace.final_report?.report_markdown || "";
     return (
+      <>
+      <UserMessage text={message.query} />
       <MarsMessageShell
         id={message.id}
         text={report}
         canRegenerate={!running && message.query.length > 0}
         onRegenerate={() => onRegenerate(message.query)}
       >
-        <div className="replay-banner">
-          <span className="tag tone-blue">replay</span>
-          <span>Read-only record of “{message.query}” · status: {trace.status}{(trace.plan || []).length ? ` · ${(trace.plan || []).length} planned questions` : ""}</span>
-        </div>
         <ThinkingSteps steps={steps} />
         {trace.final_report ? (
           <ReplayAnswerCard trace={trace} />
@@ -593,6 +591,7 @@ function ThreadMessage({ message, running, onResume, onChallenge, onRegenerate, 
           <div className="error-box">This run has no final report recorded.</div>
         )}
       </MarsMessageShell>
+      </>
     );
   }
   if (message.kind === "notice") {
