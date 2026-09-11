@@ -39,7 +39,7 @@ async def test_memory_tables_populated_and_joinable(tmp_path, monkeypatch):
         "verified": True, "verification_score": 0.8, "verification_reason": "ok",
     }]
 
-    async def fake_planner(llm, query, critique_feedback="", today=""):
+    async def fake_planner(llm, query, critique_feedback="", today="", **kwargs):
         return sub_questions
 
     async def fake_summarizer(llm, query, search_results=None, specialist_role="general"):

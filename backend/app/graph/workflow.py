@@ -337,11 +337,30 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
                 + "\nAlready researched (do not repeat — only add gap-closing questions): "
                 + already
             ).strip()
+
+        # Search-informed planning (gpt-researcher parity): one real search on
+        # the raw query grounds the plan in the web's actual terminology and
+        # entities instead of decomposing blind. Initial pass only — expansion
+        # already has critique feedback to aim at. Best-effort: a failed
+        # context search must never block planning.
+        context_snippets: List[str] = []
+        if not expanding:
+            try:
+                raw_results = await search_client.run_search([state["query"]])
+                context_snippets = [
+                    f"{str(r.get('title', '') or '').strip()}: {str(r.get('snippet', '') or '').strip()[:220]}"
+                    for r in (raw_results or [])[:6]
+                    if isinstance(r, dict) and (r.get("title") or r.get("snippet"))
+                ]
+            except Exception as exc:
+                logger.warning("planner_context_search_failed", error=str(exc), exc_info=exc)
+
         sub_questions = await planner_agent(
             llm=llm,
             query=state["query"],
             critique_feedback=feedback,
             today=datetime.date.today().isoformat(),
+            context_snippets=context_snippets or None,
         )
         # Hardware guardrail: cap the plan at the orchestrated target agents.
         orchestration = state.get("orchestration", {})
@@ -528,6 +547,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
                 "degraded": take_fallbacks(),
                 "total_facts": len(all_facts),
                 "verified_count": sum(1 for f in all_facts if f.get("verified")),
+                "mode": state.get("mode", "standard"),
             },
         )
         # Report-contract verification: check the emitted answer's citations

@@ -71,7 +71,7 @@ async def test_financial_and_general_get_different_prompts_end_to_end():
     async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None, **kwargs):
         return {"is_sufficient": True, "reason": "ok", "improved_queries": [], "confidence": 0.9}
 
-    async def fake_planner(llm, query, critique_feedback="", today=""):
+    async def fake_planner(llm, query, critique_feedback="", today="", **kwargs):
         return state["sub_questions"]
 
     async def fake_synthesizer(llm, query, facts=None, context=None):

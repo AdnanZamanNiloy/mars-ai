@@ -58,7 +58,7 @@ async def test_synthesizer_node_records_support(monkeypatch):
     """Node computes support from the emitted answer and full facts."""
     settings = Settings(groq_api_key="k", _env_file=None)
 
-    async def fake_planner(llm, query, critique_feedback="", today=""):
+    async def fake_planner(llm, query, critique_feedback="", today="", **kwargs):
         return [{"id": 1, "question": "What is RAG today?", "axis": "definition",
                  "search_type": "encyclopedia", "priority": 1, "depends_on": [],
                  "coverage_goal": "", "domain": "general", "minimum_sources": 1,

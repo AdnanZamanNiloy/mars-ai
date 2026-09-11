@@ -32,7 +32,7 @@ def test_only_deep_and_executive_exceed_default_cap():
     executive = build_initial_state(hard, 3, mode="executive")
     audit = build_initial_state(hard, 3, mode="audit")
     redteam = build_initial_state(hard, 3, mode="redteam")
-    assert standard["orchestration"]["target_agents"] == 3  # clamped to default cap
+    assert standard["orchestration"]["target_agents"] == 4  # standard plans 4 angles
     assert audit["orchestration"]["target_agents"] <= 3
     assert redteam["orchestration"]["target_agents"] <= 3
     assert deep["orchestration"]["target_agents"] > 3  # explicit opt-in modes exceed it

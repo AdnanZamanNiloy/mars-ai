@@ -356,6 +356,7 @@ async def planner_agent(
     query: str,
     critique_feedback: str = "",
     today: str = "",
+    context_snippets: List[str] | None = None,
 ) -> List[Dict[str, Any]]:
 
     # No fast-path bypass: every query goes through LLM planning with the
@@ -370,11 +371,22 @@ async def planner_agent(
 
     feedback_block = f"\nCritique feedback: {critique_feedback}" if critique_feedback else ""
     date_block = f"\nToday is {today.strip()} — use this year in time-sensitive questions." if today.strip() else ""
+    context_block = ""
+    snippets = [s for s in (context_snippets or []) if str(s).strip()]
+    if snippets:
+        context_block = (
+            "\nWeb context — top search results for the raw query. Use it to "
+            "ground and disambiguate the sub-questions (real terminology, "
+            "entities, and numbers the plan should target), never to answer "
+            "the query itself:\n"
+            + "\n".join(f"- {s}" for s in snippets[:6])
+        )
 
     user_prompt = f"""
 Query: {query}
 {feedback_block}
 {date_block}
+{context_block}
 
 Generate a structured research plan.
 Return JSON only.

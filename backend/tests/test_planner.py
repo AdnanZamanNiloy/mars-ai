@@ -178,3 +178,38 @@ def test_planner_prompt_has_temporal_and_variant_markers():
 def test_fallback_plan_has_empty_variants():
     for item in fallback_plan("What is RAG?"):
         assert item["variants"] == []
+
+
+async def test_planner_receives_web_context_snippets():
+    """Search-informed planning: the planner prompt must carry the raw
+    query's real search snippets so the plan targets what the web actually
+    contains (gpt-researcher parity) — never plan blind."""
+    captured = {}
+
+    class SpyLLM(FakeLLM):
+        async def generate_json(self, system_prompt, user_prompt, retries=3, response_model=None):
+            captured["user"] = user_prompt
+            return await super().generate_json(system_prompt, user_prompt, retries, response_model)
+
+    await planner_agent(
+        SpyLLM(LLM_PLAN), QUERY,
+        context_snippets=[
+            "Rooppur nuclear power plant: 2,400 MW VVER-1200 reactors, Rosatom turnkey contract",
+            "Solar LCOE in Bangladesh fell below grid parity in 2024 per IRENA",
+        ],
+    )
+    assert "Web context" in captured["user"]
+    assert "Rooppur nuclear power plant" in captured["user"]
+    assert "ground" in captured["user"], "context block must tell the planner to ground, not answer"
+
+
+async def test_planner_omits_empty_context_block():
+    captured = {}
+
+    class SpyLLM(FakeLLM):
+        async def generate_json(self, system_prompt, user_prompt, retries=3, response_model=None):
+            captured["user"] = user_prompt
+            return await super().generate_json(system_prompt, user_prompt, retries, response_model)
+
+    await planner_agent(SpyLLM(LLM_PLAN), QUERY, context_snippets=["", "  "])
+    assert "Web context" not in captured["user"]

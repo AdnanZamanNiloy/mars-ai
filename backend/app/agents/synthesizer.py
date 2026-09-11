@@ -29,6 +29,10 @@ intelligence report. You do not dump search results; you present knowledge.
    sentences.
 6. Never write "the research found", "the agents discovered", or "according
    to the research". Present the knowledge directly.
+7. LENGTH: default under 900 words. When the input carries an explicit
+   length hint (deep-research modes), follow the hint instead. Slow
+   providers cannot serve unbounded generation, and a timed-out synthesis
+   degrades to extraction.
 
 ━━━ REQUIRED STRUCTURE (exact order) ━━━
 
@@ -49,12 +53,22 @@ intelligence report. You do not dump search results; you present knowledge.
      paragraphs and bullets. Inside a sense you may use `### ` sub-headings
      (Origin, Core Innovation, Architecture, Scale of Modern Models — or
      whatever fits the subject).
-   - Otherwise, add at most 2-3 short `## ` sections, one per research
-     angle from the provided angle list (title = the angle, never the raw
-     question restated). Skip straight to Evidence & Confidence when no
-     angle adds anything.
+   - Otherwise, add 2-4 `## ` sections, one per research angle from the
+     provided angle list (title = the angle, never the raw question
+     restated). Skip straight to Evidence & Confidence when no angle adds
+     anything.
+   - SYNTHESIZE, DON'T PARAPHRASE: each section must weave together 2+ of
+     the provided sources into a cause/effect or comparison narrative.
+     Single-source recitation is what makes a report read like raw notes.
+   - DISAGREEMENT IS DATA: where sources conflict, present both positions
+     side by side with their numbers and sources — never average them and
+     never silently pick one.
 
-4. `## Evidence & Confidence`
+5. `## Key Figures` — ONLY when the evidence contains quantitative claims:
+   bullets with the number, unit, period, and scope attached, each cited
+   [n]. Omit the section when the evidence has no solid numbers.
+
+6. `## Evidence & Confidence`
    Overall confidence score, what is well supported, what could not be
    verified, and the major gaps. Mandatory even at high confidence.
 
@@ -102,6 +116,20 @@ async def synthesizer_agent(
         )
     ctx = context or {}
 
+    # Mode-aware depth (3.7): deep/executive runs are allowed a longer,
+    # more analytical report — that depth is the product. Quick/standard
+    # stay tight for latency. Bounded: providers degrade to extraction on
+    # unbounded generation.
+    mode = str(ctx.get("mode", "standard") or "standard")
+    if mode in ("deep", "executive"):
+        length_hint = (
+            "LENGTH: this is a deep-research brief — up to 1400 words. "
+            "Go deeper per angle: mechanisms, numbers with context, and "
+            "explicit treatment of conflicting evidence."
+        )
+    else:
+        length_hint = "LENGTH: keep the report under 900 words."
+
     top_facts = _stratified_top_facts(usable_facts, per_angle=10, cap=40)
     numbered = _numbered_sources(top_facts)
     source_lines = "\n".join(f"[{s['n']}] {s['domain']}" + (f" ({s['url']})" if s["url"] else "")
@@ -114,6 +142,7 @@ async def synthesizer_agent(
 
     user_prompt = (
         f"Main query: {query}\n\n"
+        f"{length_hint}\n\n"
         f"Angles to cover (one section each, in this order):\n"
         + ("\n".join(f"- {sq}" for sq in angles) + "\n\n" if angles else "")
         + f"Evidence facts: {top_facts}\n\n"

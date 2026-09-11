@@ -45,7 +45,7 @@ async def test_expansion_searches_only_new_questions(monkeypatch):
     ]
     search_inputs = []
 
-    async def fake_planner(llm, query, critique_feedback="", today=""):
+    async def fake_planner(llm, query, critique_feedback="", today="", **kwargs):
         return plans.pop(0)
 
     async def fake_summarizer(llm, query, search_results=None, specialist_role="general"):
@@ -86,9 +86,12 @@ async def test_expansion_searches_only_new_questions(monkeypatch):
         final = snap
 
     assert calls["n"] == 2
-    assert search_inputs[0] == [("What is RAG today?", "encyclopedia"),
+    # Search-informed planning: the first call is the raw-query context
+    # search, the second is the planned fan-out.
+    assert search_inputs[0] == ["What is RAG?"], search_inputs
+    assert search_inputs[1] == [("What is RAG today?", "encyclopedia"),
                                 ("How does dense retrieval work now?", "encyclopedia")]
-    assert search_inputs[1] == [("What are RAG benchmarks this year?", "encyclopedia")], search_inputs
+    assert search_inputs[2] == [("What are RAG benchmarks this year?", "encyclopedia")], search_inputs
     assert len(final["sub_questions"]) == 3
     assert len(final["search_results"]) == 3
     assert "# Final Answer" in final["final_report"]
@@ -100,7 +103,7 @@ async def test_variant_queries_searched_and_attributed(monkeypatch):
     settings = Settings(groq_api_key="k", _env_file=None)
     search_inputs = []
 
-    async def fake_planner(llm, query, critique_feedback="", today=""):
+    async def fake_planner(llm, query, critique_feedback="", today="", **kwargs):
         return [{**_q(1, "What is RAG today?"),
                  "variants": ["RAG definition overview 2026"]}]
 
@@ -136,7 +139,8 @@ async def test_variant_queries_searched_and_attributed(monkeypatch):
     async for snap in workflow.astream(state, stream_mode="values"):
         final = snap
 
-    assert search_inputs[0] == [("What is RAG today?", "encyclopedia"),
+    assert search_inputs[0] == ["What is RAG?"], search_inputs
+    assert search_inputs[1] == [("What is RAG today?", "encyclopedia"),
                                 ("RAG definition overview 2026", "encyclopedia")], search_inputs
     assert len(final["facts"]) == 2, final["facts"]
     assert "# Final Answer" in final["final_report"]

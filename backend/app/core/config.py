@@ -52,9 +52,10 @@ class Settings(BaseSettings):
     max_parallel_llm: int = 2
     max_iterations: int = 3
     # Retrieval depth: how many top-ranked results per sub-question get full
-    # content fetched (was hardcoded 3). Each fetch is ~6KB cleaned text kept
-    # only until summarization — raise gradually, watching research latency.
-    search_fetch_top_n: int = 5
+    # content fetched. Each fetch is ~6KB cleaned text kept only until
+    # summarization; 8 pages per angle is the deep-research floor (concurrency
+    # bounded by MAX_PARALLEL_SEARCH, content released after verification).
+    search_fetch_top_n: int = 8
     # Query fan-out: max search queries issued per pass (questions + their
     # alternate phrasings). Bounds latency when plans carry variants.
     search_max_queries_per_pass: int = 8

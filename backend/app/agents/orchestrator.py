@@ -119,7 +119,10 @@ LEVEL_TARGETS: Dict[str, int] = {
 #   a fast second pass).
 MODE_PRESETS: Dict[str, Dict[str, Any]] = {
     "quick":     {"max_agents": 2, "max_iterations": 1, "deep_research": False},
-    "standard":  {"max_agents": 3, "max_iterations": 3, "deep_research": False},
+    # standard plans 4 angles (up from 3): more distinct evidence axes per
+    # run is the main quality lever over single-shot chatbots. Concurrency
+    # stays bounded by MAX_PARALLEL_SEARCH / MAX_PARALLEL_LLM.
+    "standard":  {"max_agents": 4, "max_iterations": 3, "deep_research": False},
     "deep":      {"max_agents": 5, "max_iterations": 5, "deep_research": True},
     "executive": {"max_agents": 5, "max_iterations": 4, "deep_research": True},
     "audit":     {"max_agents": 3, "max_iterations": 4, "deep_research": False},

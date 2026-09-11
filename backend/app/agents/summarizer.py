@@ -18,7 +18,7 @@ from app.core.degradation import record_fallback
 
 logger = get_logger(__name__)
 
-PROMPT_VERSION = "summarizer-v14"  # BUMP on any claim-shape change (cleaning,
+PROMPT_VERSION = "summarizer-v15"  # BUMP on any claim-shape change (cleaning,
 # fields, thresholds): the cache key embeds this, and stale entries would
 # otherwise serve pre-fix claims indefinitely (AGENTS.md 4.10).
 # v3: full fetched page content feeds the prompt (was snippet-only) and
@@ -45,6 +45,8 @@ PROMPT_VERSION = "summarizer-v14"  # BUMP on any claim-shape change (cleaning,
 # budgets were being exhausted by 16-source prompts), and the heuristic
 # fallback ranks candidates by query/sub-question overlap (min 0.2) instead
 # of taking the first sentences that clear a 0.15 bar.
+# v15: wider extraction window (12 sources, 1000-char excerpts) — evidence
+# volume per angle is the main depth lever over single-shot chatbots.
 
 # Specialist prompt additions (Phase 3.1): routed by the delegation
 # contract's domain via AgentContext.specialist_role(). Each specialist
@@ -189,9 +191,8 @@ async def summarizer_agent(
     # sub-question per pass, and 16 sources x (snippet + full content)
     # measured ~6K tokens per call — enough to exhaust free-tier daily
     # token quotas within a handful of runs (observed live on Groq TPD).
-    # 10 sources with 800-char excerpts keeps extraction quality while
-    # roughly halving tokens per call; ranking already put the best
-    # sources first.
+    # 12 sources with 1000-char excerpts balances extraction quality
+    # against token spend; ranking already put the best sources first.
     compact_results = [
         {
             "title": item.get("title", ""),
@@ -200,10 +201,10 @@ async def summarizer_agent(
             # Full fetched page text (when the fetch loop got it) — the LLM
             # extracts far more claims from pages than from snippets alone,
             # mirroring upstream's summarize-scraped-pages shape.
-            "content": item.get("content", "")[:800],
+            "content": item.get("content", "")[:1000],
             "sub_question": item.get("sub_question", ""),
         }
-        for item in quality_results[:10]
+        for item in quality_results[:12]
     ]
     sub_question_by_url = {
         str(item.get("url", "")): str(item.get("sub_question", "") or "")

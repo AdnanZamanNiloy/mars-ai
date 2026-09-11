@@ -65,6 +65,6 @@ def test_fetch_breadth_small_setting(monkeypatch, tmp_path):
     assert _run_fetch_count(monkeypatch, tmp_path, 2) == 2
 
 
-def test_fetch_top_n_default_is_five():
+def test_fetch_top_n_default_is_eight():
     settings = Settings(groq_api_key="k", _env_file=None)
-    assert settings.search_fetch_top_n == 5
+    assert settings.search_fetch_top_n == 8
