@@ -25,6 +25,17 @@ HF_FALLBACK_MODELS: List[str] = [
 ]
 
 
+class AllProvidersFailedError(RuntimeError):
+    """Every configured provider refused the call within this attempt.
+
+    Distinct from "no keys configured": keys exist but each provider failed
+    (rate limit, quota, auth, outage). Deterministic within a request —
+    retrying the same chain immediately only burns the research budget —
+    so generate_json treats it as fail-fast and the caller's deterministic
+    fallback engages.
+    """
+
+
 class CircuitBreaker:
     """Per-provider failure counter with a cooldown window.
 
@@ -60,6 +71,20 @@ class CircuitBreaker:
                 self.cooldown_sec,
             )
 
+    def record_timeout(self) -> None:
+        """Open immediately on a single per-attempt timeout. A timeout
+        already burned llm_timeout_sec (25s) of the 90s research budget,
+        so waiting for `threshold` failures like fast errors do would let
+        one slow provider eat the whole run — including re-runs on every
+        outer generate_json retry. Cooldown still re-probes afterwards."""
+        self._consecutive_failures += 1
+        if self._opened_at is None:
+            self._opened_at = time.monotonic()
+            logger.warning(
+                "[LLM] circuit breaker OPEN after timeout (cooldown %.0fs)",
+                self.cooldown_sec,
+            )
+
     def _reset(self) -> None:
         self._consecutive_failures = 0
         self._opened_at = None
@@ -74,19 +99,25 @@ def _real_key(value: Any) -> str:
     return text
 
 
-def _is_non_retryable_error(exc: BaseException) -> bool:
-    """Client errors fail fast to fallback: 401/403 (bad credentials) and
-    400/404/405/422 (malformed endpoint, model, or payload) will not resolve
-    by retrying — retrying only burns time and worsens rate limiting."""
+def _is_fail_fast_error(exc: BaseException) -> bool:
+    """401/403/402 must fail fast to fallback — retrying bad credentials or
+    an empty wallet only burns time and worsens rate limiting."""
     return (
         isinstance(exc, httpx.HTTPStatusError)
         and exc.response is not None
-        and exc.response.status_code in (400, 401, 403, 404, 405, 422)
+        and exc.response.status_code in (401, 402, 403)
     )
 
 
 def _is_retryable(exc: BaseException) -> bool:
-    if _is_non_retryable_error(exc):
+    if _is_fail_fast_error(exc):
+        return False
+    if isinstance(exc, httpx.TimeoutException):
+        # A per-attempt timeout means this provider cannot serve the prompt
+        # inside llm_timeout_sec; retrying the same slow call would burn the
+        # 90s research budget before the fallback chain is ever reached.
+        # Fail fast to the next provider instead. Fast failures (connect
+        # errors, 5xx, 429) stay retryable below.
         return False
     return isinstance(exc, (httpx.HTTPError, RuntimeError))
 
@@ -102,10 +133,12 @@ def _wait_with_retry_after(retry_state) -> float:
     ):
         try:
             delay = float(exc.response.headers.get("retry-after", ""))
-            # Capped well below the research timeout: honoring a 30s+
-            # Retry-After inside a 90s research budget would convert every
-            # rate-limit burst into a run timeout.
-            return min(max(delay, 1.0), 10.0)
+            # Capped far below the research timeout: honoring a 10s+
+            # Retry-After per attempt (up to ~30s per call) would convert
+            # every rate-limit burst into a run timeout. Short blips are
+            # still honored; long walls fail fast to the next provider or
+            # the deterministic fallback instead of stalling the run.
+            return min(max(delay, 1.0), 3.0)
         except (TypeError, ValueError):
             pass
     return wait_exponential_jitter(initial=0.4, max=3)(retry_state)
@@ -118,6 +151,13 @@ class LLMClient:
         # startup), is bounded, and resets on success — not per-request state.
         self.groq_breaker = CircuitBreaker(threshold=3, cooldown_sec=60.0)
         self.custom_breaker = CircuitBreaker(threshold=3, cooldown_sec=60.0)
+        # Concurrency cap across ALL LLM calls (planner, N summarizer workers,
+        # critic, synthesizer). Without it, one expansion pass fires up to
+        # max_parallel_agents simultaneous prompts — the observed cause of
+        # Groq 429/TPD exhaustion on free tiers. Starts low per AGENTS.md §5.
+        self._llm_semaphore = asyncio.Semaphore(max(1, int(getattr(settings, "max_parallel_llm", 2) or 2)))
+        # Last failure per provider, surfaced when the whole chain fails.
+        self._last_errors: Dict[str, str] = {}
 
     async def generate_json(
         self,
@@ -131,6 +171,13 @@ class LLMClient:
         When `response_model` is provided, the parsed payload is validated
         against the Pydantic model; validation failures are treated like any
         other failed attempt and trigger a retry instead of returning garbage.
+
+        Timeouts are never retried at this level: every provider already had
+        its single budgeted chance inside _generate_with_fallback, so
+        re-running the whole chain would multiply slow-provider time past
+        the research timeout. The caller falls back immediately instead.
+        AllProvidersFailedError is likewise never retried: providers did not
+        become healthy 0.7s later inside the same request.
         """
         for attempt in range(retries):
             try:
@@ -140,6 +187,8 @@ class LLMClient:
                     validated = response_model.model_validate(payload)
                     return validated.model_dump()
                 return payload
+            except (httpx.TimeoutException, AllProvidersFailedError) as exc:
+                raise
             except Exception as exc:
                 if attempt == retries - 1:
                     raise
@@ -153,44 +202,86 @@ class LLMClient:
         groq_key = _real_key(self.settings.groq_api_key)
         hf_key = _real_key(self.settings.huggingface_api_key)
         custom = self._custom_config()
-        if custom and not self.custom_breaker.is_open():
-            try:
-                text = await self._call_custom(system_prompt, user_prompt, custom)
-                self.custom_breaker.record_success()
-                return text
-            except Exception as exc:
-                self.custom_breaker.record_failure()
-                logger.warning(
-                    "[LLM] Custom provider call failed (breaker failures=%d), falling back: %s",
-                    self.custom_breaker._consecutive_failures,
-                    exc,
-                    exc_info=exc,
-                )
-        if groq_key and not self.groq_breaker.is_open():
-            try:
-                text = await self._call_groq(system_prompt, user_prompt)
-                self.groq_breaker.record_success()
-                return text
-            except Exception as exc:
-                self.groq_breaker.record_failure()
-                logger.warning(
-                    "[LLM] Groq call failed (breaker failures=%d), falling back: %s",
-                    self.groq_breaker._consecutive_failures,
-                    exc,
-                    exc_info=exc,
-                )
+        attempted = 0
+        async with self._llm_semaphore:
+            if custom and not self.custom_breaker.is_open():
+                attempted += 1
+                try:
+                    text = await self._call_custom(system_prompt, user_prompt, custom)
+                    self.custom_breaker.record_success()
+                    return text
+                except Exception as exc:
+                    self._last_errors["custom"] = f"{type(exc).__name__}: {exc}"
+                    self._record_provider_failure(self.custom_breaker, exc)
+                    logger.warning(
+                        "[LLM] Custom provider call failed (breaker failures=%d), falling back: %s",
+                        self.custom_breaker._consecutive_failures,
+                        exc,
+                        exc_info=exc,
+                    )
+            if groq_key and not self.groq_breaker.is_open():
+                attempted += 1
+                try:
+                    text = await self._call_groq(system_prompt, user_prompt)
+                    self.groq_breaker.record_success()
+                    return text
+                except Exception as exc:
+                    self._last_errors["groq"] = f"{type(exc).__name__}: {exc}"
+                    self._record_provider_failure(self.groq_breaker, exc)
+                    logger.warning(
+                        "[LLM] Groq call failed (breaker failures=%d), falling back: %s",
+                        self.groq_breaker._consecutive_failures,
+                        exc,
+                        exc_info=exc,
+                    )
 
-        if hf_key:
-            return await self._call_huggingface(system_prompt, user_prompt)
+            if hf_key:
+                attempted += 1
+                try:
+                    return await self._call_huggingface(system_prompt, user_prompt)
+                except Exception as exc:
+                    self._last_errors["huggingface"] = f"{type(exc).__name__}: {exc}"
+                    raise
 
-        raise RuntimeError("No LLM provider configured. Set GROQ_API_KEY, HUGGINGFACE_API_KEY, or the CUSTOM_LLM_* trio.")
+        if attempted == 0:
+            # Keys existed but every provider's breaker was open — or nothing
+            # was configured at all. The nothing-configured case keeps the
+            # legacy message (routes.py matches it for a friendly NDJSON
+            # error); breaker-open is a different failure with its own error.
+            if not (custom or groq_key or hf_key):
+                raise RuntimeError("No LLM provider configured. Set GROQ_API_KEY, HUGGINGFACE_API_KEY, or the CUSTOM_LLM_* trio.")
+            configured = [name for name, ok in (
+                ("custom", bool(custom)), ("groq", bool(groq_key)), ("huggingface", bool(hf_key)),
+            ) if ok]
+            raise AllProvidersFailedError(
+                "All LLM providers skipped this attempt — circuit breakers open "
+                f"for: {', '.join(configured)}. Wait for the breaker cooldown "
+                "(60s) or check provider quotas."
+            )
+        def _brief(msg: str) -> str:
+            first = (msg or "").strip().splitlines()[0] if (msg or "").strip() else "unknown error"
+            return first[:160]
+
+        detail = "; ".join(f"{name}: {_brief(msg)}" for name, msg in self._last_errors.items())
+        raise AllProvidersFailedError(
+            f"All {attempted} configured LLM provider(s) failed — {detail or 'unknown errors'}. "
+            "The run will continue on deterministic fallbacks."
+        )
+
+    @staticmethod
+    def _record_provider_failure(breaker: CircuitBreaker, exc: Exception) -> None:
+        """Timeouts open the breaker immediately (one 25s stall is enough
+        signal inside a 90s budget); fast failures use the normal
+        threshold counter."""
+        if isinstance(exc, httpx.TimeoutException):
+            breaker.record_timeout()
+        else:
+            breaker.record_failure()
 
     def _custom_config(self) -> Dict[str, str] | None:
         """Validated custom-provider trio, or None when not configured."""
         key = _real_key(self.settings.custom_llm_api_key)
-        # Defensive: strip URL fragments/params users paste from docs
-        # ("https://host/v1# comment" must not become the endpoint).
-        base = str(self.settings.custom_llm_base_url or "").split("#")[0].strip().rstrip("/")
+        base = str(self.settings.custom_llm_base_url or "").strip().rstrip("/")
         model = str(self.settings.custom_llm_model or "").strip()
         if not (key and base and model):
             return None
@@ -207,8 +298,14 @@ class LLMClient:
         retry=retry_if_exception(_is_retryable),
     )
     async def _call_custom(self, system_prompt: str, user_prompt: str, custom: Dict[str, str]) -> str:
-        """Generic OpenAI-compatible chat completions call."""
-        async with httpx.AsyncClient(timeout=self.settings.llm_timeout_sec) as client:
+        """Generic OpenAI-compatible chat completions call.
+
+        Uses custom_llm_timeout_sec (not the shared llm_timeout_sec):
+        slower third-party providers routinely need 30-60s on planner-sized
+        prompts, and a premature ReadTimeout opens the breaker and degrades
+        the whole run.
+        """
+        async with httpx.AsyncClient(timeout=self.settings.custom_llm_timeout_sec) as client:
             response = await client.post(
                 custom["endpoint"],
                 headers={
@@ -218,6 +315,9 @@ class LLMClient:
                 json={
                     "model": custom["model"],
                     "temperature": 0.1,
+                    # generate_json always JSON-parses the reply, so request
+                    # JSON mode instead of hoping the model obeys the prompt.
+                    "response_format": {"type": "json_object"},
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
@@ -243,6 +343,9 @@ class LLMClient:
         payload = {
             "model": self.settings.groq_model,
             "temperature": 0.1,
+            # generate_json always JSON-parses the reply, so request JSON
+            # mode instead of hoping the model obeys the prompt.
+            "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},

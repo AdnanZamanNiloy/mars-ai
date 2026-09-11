@@ -140,14 +140,31 @@ def _critic_survival(critique: Dict[str, Any], iteration: int, max_iterations: i
     return 0.6  # stopped early for another reason (timeout, manual stop, etc.)
 
 
+# When the summarizer ran on its deterministic fallback, the fact pool is
+# extractive rather than model-written: every claim lexically overlaps its
+# own source by construction, so source/verification signals read high no
+# matter how good the evidence actually is. Capping below the sufficiency
+# threshold (0.75) keeps a degraded run from finalizing as "High" confidence
+# and keeps the honest signals (degraded list) attached to the breakdown.
+DEGRADED_CAP = 0.55
+EXTRACTIVE_FALLBACK_AGENTS = frozenset({"summarizer", "synthesizer"})
+
+
 def compute_confidence(
     facts: List[Dict[str, Any]],
     critique: Dict[str, Any],
     iteration: int,
     max_iterations: int,
     source_dates: List[str] | None = None,
+    degraded: List[str] | None = None,
 ) -> Dict[str, Any]:
-    """Return {"overall": float, "signals": {...}} with per-signal values."""
+    """Return {"overall": float, "signals": {...}} with per-signal values.
+
+    `degraded` is the per-request fallback list (degradation.take_fallbacks):
+    when an evidence-producing stage ran deterministically, the overall score
+    is capped — a degraded run must never look more confident than a healthy
+    one that was forced through the ceiling.
+    """
     freshness_value, measured = _freshness(source_dates)
     weights = WEIGHTS_FRESH if measured else WEIGHTS
     signals: Dict[str, float] = {
@@ -160,11 +177,20 @@ def compute_confidence(
         "freshness": freshness_value,
     }
     overall = sum(weights[name] * value for name, value in signals.items())
+    overall = round(max(0.0, min(1.0, overall)), 3)
     notes = []
     if not measured:
         notes.append("freshness not yet measured (no publish dates captured) — weighted 0")
+    degraded_agents = {str(a) for a in (degraded or []) if a}
+    extractive = sorted(degraded_agents & EXTRACTIVE_FALLBACK_AGENTS)
+    if extractive:
+        notes.append(
+            "confidence capped: " + ", ".join(extractive)
+            + " ran on deterministic extraction — claims are unrewritten source text"
+        )
+        overall = round(min(overall, DEGRADED_CAP), 3)
     return {
-        "overall": round(max(0.0, min(1.0, overall)), 3),
+        "overall": overall,
         "signals": signals,
         "weights": weights,
         "notes": notes,

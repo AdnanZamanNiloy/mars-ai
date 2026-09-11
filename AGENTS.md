@@ -125,6 +125,87 @@ These are real bugs found by reading the code, not hypotheticals. Each one below
   thresholds MUST bump PROMPT_VERSION, or verification will chase ghosts.
 ```
 
+[FIXED — provider-timeout trap] app/core/llm.py (retries vs research budget)
+  Every provider call retried 4x in tenacity plus 3x in generate_json, each
+  attempt burning the full 25s llm_timeout_sec — a slow free-tier model held
+  the planner past the 90s research timeout before Groq/fallback was ever
+  reached, and the UI sat on "Planner analyzing" until the route killed the
+  run. Rule: timeouts fail fast to the next provider (never retried at
+  either level), one timeout trips the circuit breaker immediately, and
+  Retry-After honors are capped at 3s. Any retry policy whose worst case
+  exceeds the research budget reintroduces this bug — do the multiplication
+  before adding attempts. Corollary (2026-09, custom-provider era): the
+  shared 25s timeout also broke the OTHER way — a slower OpenAI-compatible
+  host needs 30-90s on big prompts, and a premature ReadTimeout trips the
+  breaker and degrades whole runs; hence the separate
+  CUSTOM_LLM_TIMEOUT_SEC. Also: `str(httpx.ReadTimeout())` is "" — never
+  format provider errors with `.splitlines()[0]` (IndexError inside a
+  `raise` replaces the fail-fast error with a retryable one), and never
+  cache an agent's EMPTY result on LLM failure (the summarizer did —
+  the [] poisoned its cache key for a full TTL hour, extending degradation
+  past provider recovery).
+
+[FIXED — script-UA block] app/agents/search.py (Wikipedia 403)
+  Wikipedia returns 403 "Please set a user-agent" to httpx's default UA, so
+  every _wiki call degraded to [] and live runs lost a free high-trust
+  source. Generic page fetch now sends a browser UA (upstream parity);
+  the MediaWiki API keeps an identifying UA per its UA policy. Any new
+  HTTP client with a default UA against a policy-gated host repeats this.
+
+[FIXED — overlapping backends] ops, not code (stale-code verification)
+  Two uvicorn processes briefly shared port 8000 across a racy kill/relaunch
+  (plus a concurrent browser run), so a "verification" run was served by a
+  stale process and a real regression hunt chased a ghost for an hour.
+  Restarts are now kill-by-PID → poll until the port releases → launch →
+  confirm a single listener, and live verifications assert the request_id
+  appears in the fresh backend log. Never trust a live result without that
+  provenance check.
+
+[FIXED — silent full-LLM outage scored "High"] app/core/llm.py, app/core/confidence.py, app/graph/workflow.py
+  Live run: custom provider 402 (no credits), Groq 429 (free-tier TPD
+  200K exhausted), HUGGINGFACE_API_KEY a placeholder — so ALL LLM calls
+  failed and the run "completed" on the extractive fallbacks with off-topic
+  sentences (a Malawi electrification paragraph on a Bangladesh query) —
+  while the Confidence Engine scored it 0.772 "High" and the UI showed a
+  confident, authoritative report. `degraded` was emitted on the wire but
+  never rendered. Four compounding causes, all fixed:
+  (a) generate_json retried the whole provider chain 3x on the
+      deterministic "No LLM provider configured" error; now
+      AllProvidersFailedError fails fast with per-provider detail
+      (app/core/llm.py).
+  (b) No LLM concurrency cap: 3 parallel ~6K-token summarizer prompts are
+      what exhausted Groq's TPD in the first place; LLMClient now holds a
+      MAX_PARALLEL_LLM semaphore (default 2) around every call.
+  (c) compute_confidence ignored degradation; extractive-fallback claims
+      trivially self-verify, so source/verification signals read high.
+      Degraded summarizer/synthesizer now caps overall at 0.55 — below the
+      0.75 sufficiency threshold — with an explanatory note in breakdown.
+  (d) Frontend never rendered degraded/answer_support/decisions;
+      AnswerCard now shows a degraded-run banner, the Decision Layer, and
+      citation support. A degraded run must never be mistakable for a
+      healthy one.
+  Rule: any new signal that makes evidence CHEAPER to produce (fallbacks,
+  caching, fewer fetches) must be checked against the confidence engine —
+  self-verifying evidence inflates every lexical signal by construction.
+
+[FIXED — findings stream truncation] app/api/routes.py
+  The findings emitter sliced `facts[emitted:emitted+3]` but set
+  `emitted_findings = len(facts)`, so facts 4..N of any large batch were
+  never streamed (only the one-time verified_update re-emit rescued them).
+  Now emits every new fact. Off-by-one slicing paired with a
+  consume-the-whole-batch marker is the pattern to watch for.
+
+[FIXED — critic definition gate forced loops] app/agents/critic.py
+  The deterministic gate required an " is " claim in the first 5 facts
+  unconditionally. Comparative/analytical queries ("A vs B economics?")
+  rarely produce one, so is_sufficient was forced False every iteration —
+  guaranteed expansion loops (more search + LLM spend) and every such
+  report stamped "incomplete" regardless of quality. Definitional shape is
+  now required only when query_type=factual or the query itself is
+  definitional ("what is/define/explain"). Gate conditions must be
+  query-type-aware, not written for the most common demo query.
+```
+
 If you find a new instance of any of these patterns anywhere in the codebase while working on something else, fix it or flag it in your commit message — don't leave it for later just because it's outside your current task's file scope.
 
 ---

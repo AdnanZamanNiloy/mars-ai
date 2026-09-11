@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import re
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -226,7 +227,8 @@ def dedupe_semantic_facts(facts: List[Dict[str, Any]], threshold: float = 0.86) 
             continue
 
         candidate = {"claim": claim, "source": source, "confidence": max(0.0, min(1.0, confidence)),
-                     "agent": str(item.get("agent", "") or "")}
+                     "agent": str(item.get("agent", "") or ""),
+                     "sub_question": str(item.get("sub_question", "") or "")}
 
         merge_index = -1
         for idx, kept in enumerate(deduped):
@@ -247,6 +249,10 @@ def dedupe_semantic_facts(facts: List[Dict[str, Any]], threshold: float = 0.86) 
 
 
 CITATION_RE = re.compile(r"\[(\d+)\]")
+# The legend sits under a Sources heading — "## Sources" (current) or the
+# legacy bare "Sources:" line. Both must resolve or citation support silently
+# degrades to "everything unsupported".
+SOURCES_HEADING_RE = re.compile(r"\n+#{0,6}\s*Sources:?\s*\n")
 LEGEND_RE = re.compile(r"^\[(\d+)\]\s+\S.*?—\s*(\S+)\s*$")
 SUPPORT_THRESHOLD = 0.30
 
@@ -264,7 +270,12 @@ def verify_answer_support(
     are counted as uncited (not failed) — only cited-but-unsupported
     sentences count against the rate.
     """
-    body, _, legend_block = (answer or "").partition("\nSources:")
+    match = SOURCES_HEADING_RE.search(answer or "")
+    if match:
+        body = (answer or "")[: match.start()]
+        legend_block = (answer or "")[match.end():]
+    else:
+        body, _, legend_block = (answer or "").partition("\nSources:")
     legend_urls: Dict[int, str] = {}
     for line in legend_block.splitlines():
         match = LEGEND_RE.match(line.strip())
@@ -319,18 +330,91 @@ def verify_answer_support(
 
 
 # Leading date stamps search engines prepend to snippets ("Mar 17, 2026 ·",
-# "2 days ago ·"). They leak into fallback answers as garbage prefixes.
+# "2 days ago ·", "Dec 20, 2024 13 minutes read"). They leak into fallback
+# answers as garbage prefixes. The separator is optional so bare dates and
+# read-time furniture ("13 minutes read") are stripped too.
 DATE_STAMP_RE = re.compile(
     r"^(?:[A-Z][a-z]{2,8}\s+\d{1,2},\s+\d{4}|\d+\s+(?:day|hour|minute|second)s?\s+ago)"
-    r"\s*[·\-–|]\s*",
+    r"(?:\s*[·\-–|]\s*|\s+\d+\s+min(?:ute)?s?\s+read\b\s*|\s+)",
     re.IGNORECASE,
 )
+
+# Leading markdown heading marker ("# What are transformers?") — page-title
+# leak. Only the leading run is stripped, so C# and mid-text hashes survive.
+LEADING_HASH_RE = re.compile(r"^#+\s*")
 
 # UI cruft glued into snippets ("Learn more", often truncated to "Learn mor"
 # by length cuts). Stripped anywhere they occur, not just at edges.
 LINK_TEXT_RE = re.compile(r"\b(?:Learn|Read|Show|See|Click|Continue)\s+mo(?:r(?:e)?)?\b\.?", re.IGNORECASE)
 
+# Wikipedia/page-excerpt seams that survive tag stripping and read as
+# garbage mid-claim. Claims carrying them are excerpt fragments, not facts:
+#   "Main article: Attention (machine learning) §History" (nav header leak)
+#   "model.( [...] A 380M-parameter model" (excerpt splice)
+#   'attention "Attention (machine learning)") units' (link-title + paren)
+#   "### Key Components ####" (markdown heading markers from pages)
+WIKI_NAV_RE = re.compile(
+    r"^(Main article|See also|Further information|References|External links|Notes)\s*:",
+    re.IGNORECASE,
+)
+EXCERPT_SEAM_RE = re.compile(r"\[\s*\.\.\.|\(\s*\.\.\.")
+LINK_TITLE_PAREN_RE = re.compile(r'\s*"[^"]{2,80}"\)')
+HEADING_MARK_RE = re.compile(r"#{2,}\s*")
+# Leading markdown quote markers ("> > > However RNNs may struggle ...") —
+# nested blockquotes flattened into text. Mid-text "a > b" is untouched.
+BLOCKQUOTE_RE = re.compile(r"^(?:>\s*)+")
+
+# Unreadable page soup, never a presentable claim: LaTeX command leaks
+# ("{\displaystyle ...", "\sqrt{N}") and instructional boilerplate leads
+# ("Use this page to revise ..."). Seen live in Wikipedia/fetched content.
+LATEX_SOUP_RE = re.compile(r"\\[a-zA-Z]{3,}")
+BOILERPLATE_LEAD_RE = re.compile(
+    r"^(Use this page to\b|This (article|post|guide|page|blog) will\b)",
+    re.IGNORECASE,
+)
+
+# A claim ending on a dangling subordinator/preposition ("...applications,
+# including") is a mid-sentence cut the trimmers could not see — usually
+# because the cut sits past max_chars or the source itself was truncated.
+# Complete claims end on content words; only complement-requiring function
+# words are listed (pronouns like "them" can be legitimate objects).
+DANGLING_END_RE = re.compile(
+    r"\b(including|such\s+as|as\s+well\s+as|with|from|through|using|by|and|or|"
+    r"to|of|in|on|for|as|like|via|per|within|without|between|among)\s*\.?\s*$",
+    re.IGNORECASE,
+)
+# Bare "Title: subtitle" with no sentence anywhere ("Exploring Transformer
+# Models: Key Uses, Examples, and Innovations") — a page heading mined as a
+# claim. The title case density tells it apart from headed real sentences
+# ("Transformers are used for many purposes: power delivery ..."): titles
+# capitalize nearly every word, prose does not. A lone trailing period does
+# not save a title.
+TITLE_PREFIX_RE = re.compile(r"^([^.!?]{2,80}):\s*[^.!?]{2,80}\.?$")
+
+
+def _looks_like_title_prefix(head: str) -> bool:
+    words = re.findall(r"[A-Za-z][a-z]*", head or "")
+    if len(words) < 2:
+        return False
+    capped = sum(1 for w in words if w[0].isupper())
+    return capped / len(words) > 0.5
+
 MIN_CLEAN_CLAIM_CHARS = 50
+
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+def split_into_sentences(text: str, max_sentences: int = 12) -> List[str]:
+    """Split page/snippet text into candidate claim sentences.
+
+    Heuristic fallback extraction works sentence-by-sentence: seam and
+    overlap gates apply per sentence, so one furniture fragment no longer
+    vetoes a whole page of good claims. Over-splits on abbreviations
+    ("U.S.") are harmless — the fragments fail min-length downstream.
+    """
+    chunks = [chunk.strip() for chunk in _SENTENCE_SPLIT_RE.split(text or "")]
+    return [chunk for chunk in chunks if chunk][:max_sentences]
 
 
 def looks_truncated(text: str) -> bool:
@@ -354,9 +438,38 @@ def clean_snippet_text(snippet: str, max_chars: int = 300, min_chars: int = MIN_
     when nothing salvageable remains.
     """
     text = re.sub(r"\s+", " ", (snippet or "")).strip()
+    # Decode entities early (&quot without semicolon is not a valid charref,
+    # so the HTML parser leaves it literal — seen live as 'Concepts&quot').
+    text = html.unescape(text).strip()
     text = DATE_STAMP_RE.sub("", text).strip()
+    text = LEADING_HASH_RE.sub("", text).strip()
+    text = BLOCKQUOTE_RE.sub("", text).strip()
     text = LINK_TEXT_RE.sub("", text).strip()
     text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return ""
+    # Drop excerpt seams outright: a claim spliced from page furniture
+    # ("Main article: ...", "[...]", link-title parens) is never salvageable
+    # by trimming, and one seam claim in a degraded answer reads as broken.
+    if WIKI_NAV_RE.match(text):
+        return ""
+    if EXCERPT_SEAM_RE.search(text):
+        return ""
+    if LINK_TITLE_PAREN_RE.search(text):
+        return ""
+    if LATEX_SOUP_RE.search(text):
+        return ""
+    if BOILERPLATE_LEAD_RE.match(text):
+        return ""
+    if TITLE_PREFIX_RE.match(text):
+        head = text.split(":", 1)[0]
+        if _looks_like_title_prefix(head):
+            return ""
+    # Questions are not claims ("How does a transformer work?") — a claim
+    # ending in "?" is a heading glued to a question, never a finding.
+    if text.endswith("?"):
+        return ""
+    text = HEADING_MARK_RE.sub("", text).strip()
     if len(text) < min_chars:
         return ""
     # Trim to the last complete sentence; fall back to a comma break so a
@@ -376,18 +489,42 @@ def clean_snippet_text(snippet: str, max_chars: int = 300, min_chars: int = MIN_
     text = text.strip()
     if len(text) < min_chars:
         return ""
+    # Unbalanced parens mean a mid-excerpt cut whose tail only looks whole
+    # ("...even number of nega" from "(e.g., whether ... nega|tive ...)").
+    # The stub-tail check can't catch cuts that land after 3+ letters.
+    if text.count("(") != text.count(")"):
+        return ""
+    # Dangling function-word ending ("...applications, including") — a cut
+    # no trimmer could see. Complete claims end on content words.
+    if DANGLING_END_RE.search(text):
+        return ""
     return text
 
 
 def claim_query_overlap(query: str, claim: str) -> float:
     """Word overlap between the research query and a claim (0-1). Guards
     the evidence pool against off-topic drift (crypto tips in a transfer
-    learning run): zero shared vocabulary means unrelated."""
+    learning run): zero shared vocabulary means unrelated.
+
+    Morphological variants count (transformers ~ transformer): without
+    this, every plural/case variant scores 0 and good claims are dropped.
+    Kept conservative — prefix matches require 5+ chars so short words
+    ("in" vs "instrument") never match."""
     q_words = _tokenize(query or "")
     c_words = _tokenize(claim or "")
     if not q_words:
         return 0.0
-    return len(q_words & c_words) / len(q_words)
+    hits = 0
+    for qw in q_words:
+        if qw in c_words:
+            hits += 1
+            continue
+        if len(qw) >= 5 and any(
+            len(cw) >= 5 and (cw.startswith(qw) or qw.startswith(cw))
+            for cw in c_words
+        ):
+            hits += 1
+    return hits / len(q_words)
 
 
 MIN_QUERY_OVERLAP = 0.15

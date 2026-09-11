@@ -7,9 +7,9 @@ Schema rule (AGENTS.md 4.2): every field here must match the keys the
 corresponding agent's system prompt documents AND the keys its parsing
 code reads. Keep the three in sync.
 """
-from typing import List, Literal
+from typing import Any, List, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class SubQuestionModel(BaseModel):
@@ -54,6 +54,24 @@ class FactModel(BaseModel):
 
 class SummarizerFactsModel(BaseModel):
     facts: List[FactModel] = Field(min_length=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_fact_lists(cls, data: Any) -> Any:
+        """Accept the shapes models actually return: a bare list, or the
+        list under `claims`/`results`/`items` instead of `facts` (observed
+        live: fast models answer in a near-miss schema). Rejecting a good
+        fact list over its key name wastes calls and quota, then cascades
+        into rate limits — normalize instead. Genuinely malformed payloads
+        (no list anywhere) still fail validation and retry as before."""
+        if isinstance(data, list):
+            return {"facts": data}
+        if isinstance(data, dict):
+            for key in ("facts", "claims", "results", "items"):
+                value = data.get(key)
+                if isinstance(value, list):
+                    return {"facts": value}
+        return data
 
 
 class CriticVerdictModel(BaseModel):

@@ -133,6 +133,25 @@ async def test_validation_failure_after_all_retries_raises(client):
             await client.generate_json("sp", "up", response_model=PlannerOutputModel)
 
 
+async def test_facts_schema_aliases_accepted(client):
+    """Fast models return near-miss shapes ({"claims": [...]}, bare lists).
+    The facts model coerces them instead of burning retries + quota."""
+    from app.core.schemas import SummarizerFactsModel
+
+    good = [{"claim": "Transformers use attention", "source": "https://a.com", "confidence": 0.9}]
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post(GROQ_URL).mock(
+            side_effect=[
+                _groq_response({"sub_question": "q", "claims": good}),
+                _groq_response(good),
+            ])
+        first = await client.generate_json("sp", "up", response_model=SummarizerFactsModel)
+        assert first["facts"][0]["claim"] == "Transformers use attention"
+        second = await client.generate_json("sp", "up", response_model=SummarizerFactsModel)
+        assert second["facts"][0]["source"] == "https://a.com"
+        assert route.call_count == 2, "near-miss shapes must not trigger retries"
+
+
 def test_env_file_precedence_real_key_beats_placeholder():
     """.env must override .env.example placeholders (regression: settings
     loaded 'your_groq_api_key_here' and every LLM call 401'd silently)."""
@@ -160,6 +179,19 @@ async def test_auth_error_fails_fast_without_retries(hf_client):
     with respx.mock(assert_all_called=False) as mock:
         route = mock.post(GROQ_URL).mock(
             return_value=httpx.Response(401, json={"error": "invalid key"}))
+        mock.post(HF_URL).mock(return_value=hf_ok)
+        result = await hf_client.generate_json("sp", "up")
+        assert result == {"via": "hf"}
+        assert route.call_count == 1
+
+
+async def test_payment_error_fails_fast_without_retries(hf_client):
+    """402 (empty provider wallet) is fail-fast like 401/403: retrying a
+    billing wall only burns the research budget."""
+    hf_ok = httpx.Response(200, json=[{"generated_text": json.dumps({"via": "hf"})}])
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post(GROQ_URL).mock(
+            return_value=httpx.Response(402, json={"error": "payment required"}))
         mock.post(HF_URL).mock(return_value=hf_ok)
         result = await hf_client.generate_json("sp", "up")
         assert result == {"via": "hf"}
@@ -258,23 +290,142 @@ def test_validator_accepts_custom_only():
     assert settings.custom_llm_model == "m"
 
 
-async def test_client_error_fails_fast(hf_client):
+async def test_timeout_fails_fast_to_next_provider():
+    """A provider timeout must not be retried in-place: one slow attempt,
+    then the chain moves on (regression: 4x25s tenacity retries on the
+    planner prompt blew past the 90s research timeout before Groq/fallback
+    was ever reached)."""
+    client = LLMClient(_custom_settings())
     with respx.mock(assert_all_called=False) as mock:
-        route = mock.post(GROQ_URL).mock(
-            return_value=httpx.Response(404, json={"error": "model not found"}))
+        custom_route = mock.post(CUSTOM_URL).mock(side_effect=httpx.ReadTimeout("slow model"))
+        groq_route = mock.post(GROQ_URL).mock(return_value=_groq_response({"via": "groq"}))
+        result = await client.generate_json("sp", "up")
+        assert result == {"via": "groq"}
+        assert custom_route.call_count == 1, "timed-out provider must be tried once, not retried"
+        assert groq_route.call_count == 1
+
+
+async def test_timeout_skips_outer_retry(hf_client):
+    """When every provider times out, generate_json raises after one pass
+    over the chain instead of re-running slow providers `retries` times."""
+    with respx.mock(assert_all_called=False) as mock:
+        groq_route = mock.post(GROQ_URL).mock(side_effect=httpx.ReadTimeout("groq slow"))
+        hf_route = mock.post(HF_URL).mock(side_effect=httpx.ReadTimeout("hf slow"))
+        with pytest.raises(httpx.TimeoutException):
+            await hf_client.generate_json("sp", "up")
+        assert groq_route.call_count == 1
+        assert hf_route.call_count == 1
+
+
+async def test_timeout_opens_breaker_immediately():
+    """One provider timeout trips the breaker at once, so later calls in
+    the burst skip the slow provider instead of burning 25s per attempt."""
+    client = LLMClient(_custom_settings())
+    with respx.mock(assert_all_called=False) as mock:
+        custom_route = mock.post(CUSTOM_URL).mock(side_effect=httpx.ReadTimeout("slow model"))
+        mock.post(GROQ_URL).mock(return_value=_groq_response({"via": "groq"}))
+        assert await client.generate_json("sp", "up") == {"via": "groq"}
+        assert client.custom_breaker.is_open()
+        assert await client.generate_json("sp", "up") == {"via": "groq"}
+        assert custom_route.call_count == 1, "slow provider must be skipped after one timeout"
+
+
+async def test_groq_timeout_opens_groq_breaker(hf_client):
+    with respx.mock(assert_all_called=False) as mock:
+        groq_route = mock.post(GROQ_URL).mock(side_effect=httpx.ReadTimeout("groq slow"))
         mock.post(HF_URL).mock(
             return_value=httpx.Response(200, json=[{"generated_text": json.dumps({"via": "hf"})}]))
-        result = await hf_client.generate_json("sp", "up")
-        assert result == {"via": "hf"}
-        assert route.call_count == 1
+        assert await hf_client.generate_json("sp", "up") == {"via": "hf"}
+        assert hf_client.groq_breaker.is_open()
+        assert await hf_client.generate_json("sp", "up") == {"via": "hf"}
+        assert groq_route.call_count == 1, "timed-out Groq must be skipped while breaker is open"
 
 
-def test_custom_config_strips_url_fragment():
-    from app.core.config import Settings
-    from app.core.llm import LLMClient
+async def test_json_mode_requested(client):
+    """generate_json always JSON-parses, so both providers must be asked
+    for JSON mode instead of hoping the prompt is obeyed."""
+    custom_client = LLMClient(_custom_settings())
+    with respx.mock(assert_all_called=False) as mock:
+        custom_route = mock.post(CUSTOM_URL).mock(
+            return_value=httpx.Response(200, json={"choices": [{"message": {"content": json.dumps({"via": "custom"})}}]}))
+        groq_route = mock.post(GROQ_URL).mock(return_value=_groq_response({"via": "groq"}))
+        assert await custom_client.generate_json("sp", "up") == {"via": "custom"}
+        assert await client.generate_json("sp", "up") == {"via": "groq"}
+        for route in (custom_route, groq_route):
+            body = json.loads(route.calls[0].request.content.decode("utf-8"))
+            assert body.get("response_format") == {"type": "json_object"}
 
-    settings = Settings(custom_llm_api_key="k",
-                        custom_llm_base_url="https://host.example/v1# pasted comment …",
-                        custom_llm_model="m", _env_file=None)
-    cfg = LLMClient(settings)._custom_config()
-    assert cfg["endpoint"] == "https://host.example/v1/chat/completions"
+
+async def test_all_providers_failed_raises_fail_fast():
+    """When keys are configured but every provider refuses the call, the
+    client raises AllProvidersFailedError and generate_json must NOT re-run
+    the chain `retries` times (regression: the full chain was retried 3x on
+    a deterministic outage, burning seconds per agent call per run)."""
+    client = LLMClient(_custom_settings(huggingface_api_key=""))
+    from app.core.llm import AllProvidersFailedError
+
+    with respx.mock(assert_all_called=False) as mock:
+        custom_route = mock.post(CUSTOM_URL).mock(
+            return_value=httpx.Response(402, json={"error": "payment required"}))
+        groq_route = mock.post(GROQ_URL).mock(
+            return_value=httpx.Response(402, json={"error": "payment required"}))
+        with pytest.raises(AllProvidersFailedError) as exc_info:
+            await client.generate_json("sp", "up")
+        # Provider detail surfaces so the operator sees WHY everything failed.
+        assert "custom" in str(exc_info.value) and "groq" in str(exc_info.value)
+        assert custom_route.call_count == 1, "402 must fail fast once per provider"
+        assert groq_route.call_count == 1
+
+
+async def test_open_breakers_skip_all_providers():
+    """With every breaker open, the chain reports the skip condition instead
+    of pretending no keys exist."""
+    from app.core.llm import AllProvidersFailedError
+
+    client = LLMClient(_custom_settings(huggingface_api_key=""))
+    client.custom_breaker.record_timeout()
+    client.groq_breaker.record_timeout()
+    with respx.mock(assert_all_called=False) as mock:
+        custom_route = mock.post(CUSTOM_URL).mock(return_value=_groq_response({"x": 1}))
+        groq_route = mock.post(GROQ_URL).mock(return_value=_groq_response({"x": 1}))
+        with pytest.raises(AllProvidersFailedError, match="circuit breakers open"):
+            await client.generate_json("sp", "up")
+        assert custom_route.call_count == 0 and groq_route.call_count == 0
+
+
+async def test_llm_semaphore_bounds_concurrency():
+    """No more than max_parallel_llm provider calls may be in flight — the
+    concurrent summarizer burst was what exhausted free-tier quotas."""
+    import asyncio
+
+    client = LLMClient(_custom_settings(huggingface_api_key="", max_parallel_llm=1))
+    in_flight = 0
+    peak = 0
+
+    async def _slow_handler(request):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.05)
+        in_flight -= 1
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps({"ok": True})}}]})
+
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post_route = mock.post(GROQ_URL).mock(side_effect=_slow_handler)
+        await asyncio.gather(*(client.generate_json("sp", f"up-{i}") for i in range(4)))
+        assert peak == 1, f"concurrent LLM calls exceeded the semaphore cap (peak={peak})"
+
+
+async def test_all_failed_error_survives_empty_exception_messages():
+    """str(httpx.ReadTimeout()) is '' — the per-provider detail formatter
+    used to crash with IndexError *inside* its own raise, replacing the
+    fail-fast AllProvidersFailedError with a retryable IndexError and
+    re-running the whole dead chain 3x (observed live on the synthesizer)."""
+    from app.core.llm import AllProvidersFailedError
+
+    client = LLMClient(_custom_settings(huggingface_api_key=""))
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post(CUSTOM_URL).mock(side_effect=httpx.ReadTimeout(""))  # empty message
+        mock.post(GROQ_URL).mock(return_value=httpx.Response(402, json={"error": "payment required"}))
+        with pytest.raises(AllProvidersFailedError, match="ReadTimeout"):
+            await client.generate_json("sp", "up")

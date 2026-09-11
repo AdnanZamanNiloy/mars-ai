@@ -9,6 +9,7 @@ from app.agents.evidence_utils import (
     filter_search_results_by_domain,
     MIN_QUERY_OVERLAP,
     source_reliability_score,
+    split_into_sentences,
 )
 from app.core.llm import LLMClient, clamp_confidence
 from app.core.schemas import SummarizerFactsModel
@@ -17,9 +18,33 @@ from app.core.degradation import record_fallback
 
 logger = get_logger(__name__)
 
-PROMPT_VERSION = "summarizer-v2"  # BUMP on any claim-shape change (cleaning,
+PROMPT_VERSION = "summarizer-v14"  # BUMP on any claim-shape change (cleaning,
 # fields, thresholds): the cache key embeds this, and stale entries would
 # otherwise serve pre-fix claims indefinitely (AGENTS.md 4.10).
+# v3: full fetched page content feeds the prompt (was snippet-only) and
+# facts carry their sub_question for grouped synthesis.
+# v4: excerpt-seam hygiene (nav headers, [...]/... splices, link-title
+# parens, markdown heading marks) drops page-furniture fragments.
+# v6: LaTeX-soup and boilerplate-lead drops (unreadable math markup,
+# "Use this page to" instructional leads).
+# v7: bare "Title: subtitle" heading claims dropped.
+# v8: title rule fixed (trailing period no longer saves a title; title-case
+# density separates headings from headed sentences) + question-shaped claims
+# ("How does X work?") dropped — questions are not findings.
+# v9: article self-reference leads ("This article will explore ...") dropped.
+# v10: unbalanced-paren cuts dropped (mid-word tails past the stub check).
+# v11: dangling function-word endings ("..., including") dropped + HTML
+# entity decoding in both cleaners (&quot seen live).
+# v12: leading blockquote markers stripped + full cache break (a stale
+# entry from the overlapping-backend incident served pre-rule facts).
+# v13: dangling rule covers trailing-period variants ("..., including." —
+# normalize strips the period downstream, resurrecting the cut).
+# v14: output schema in the system prompt now matches the parser
+# ({"facts": [...]}, was a contradictory per-source claims[] schema), the
+# prompt footprint shrank (10 sources, shorter excerpts — free-tier TPM/TPD
+# budgets were being exhausted by 16-source prompts), and the heuristic
+# fallback ranks candidates by query/sub-question overlap (min 0.2) instead
+# of taking the first sentences that clear a 0.15 bar.
 
 # Specialist prompt additions (Phase 3.1): routed by the delegation
 # contract's domain via AgentContext.specialist_role(). Each specialist
@@ -127,26 +152,19 @@ RULE 6 — MAX 5 CLAIMS PER SOURCE
 Return ONLY valid JSON. No markdown fences. No text outside JSON.
  
 {
-  "sub_question": "<the sub-question this source was searched for>",
-  "source_url": "<url>",
-  "source_credibility": "<high|medium|low>",
-  "claims": [
+  "facts": [
     {
       "claim": "<rewritten factual claim in your own words>",
-      "confidence": <0.0 to 1.0>,
-      "direct_quote": "<optional: ≤15-word verbatim fragment if precision requires it>"
+      "source": "<the source URL the claim came from>",
+      "confidence": <0.0 to 1.0>
     }
   ]
 }
-""".strip()
- 
- 
-SUMMARIZER_USER_TEMPLATE = """
-Sub-question being researched: {sub_question}
-Source URL: {source_url}
-Source content:
-{content}
-""".strip()
+
+The response is ONE facts list across all provided sources. Every fact's
+"source" MUST be one of the URLs given in the input. Optionally attach a
+"direct_quote" (≤15-word verbatim fragment) when precision requires it.
+ """.strip()
 
 
 def specialist_system_prompt(role: str = "general") -> str:
@@ -167,22 +185,39 @@ async def summarizer_agent(
 
     system_prompt = specialist_system_prompt(specialist_role)
 
+    # Prompt footprint is a real budget line: this agent runs once per
+    # sub-question per pass, and 16 sources x (snippet + full content)
+    # measured ~6K tokens per call — enough to exhaust free-tier daily
+    # token quotas within a handful of runs (observed live on Groq TPD).
+    # 10 sources with 800-char excerpts keeps extraction quality while
+    # roughly halving tokens per call; ranking already put the best
+    # sources first.
     compact_results = [
         {
             "title": item.get("title", ""),
             "url": item.get("url", ""),
-            "snippet": item.get("snippet", "")[:500],
+            "snippet": item.get("snippet", "")[:400],
+            # Full fetched page text (when the fetch loop got it) — the LLM
+            # extracts far more claims from pages than from snippets alone,
+            # mirroring upstream's summarize-scraped-pages shape.
+            "content": item.get("content", "")[:800],
             "sub_question": item.get("sub_question", ""),
         }
-        for item in quality_results[:16]
+        for item in quality_results[:10]
     ]
+    sub_question_by_url = {
+        str(item.get("url", "")): str(item.get("sub_question", "") or "")
+        for item in quality_results
+        if item.get("url")
+    }
 
     user_prompt = (
         f"Research query: {query}\n\n"
         f"Search evidence: {compact_results}\n\n"
         "Extract only high-quality claims from reliable sources as JSON in this schema: "
         '{"facts": [{"claim": "...", "source": "https://...", "confidence": 0.0}]}'
-        ". Keep claims concise, source-grounded, and normalized. Ignore weak, promotional, or opinion-blog sources."
+        ". Prefer the full page content over the snippet when both are present. "
+        "Keep claims concise, source-grounded, and normalized. Ignore weak, promotional, or opinion-blog sources."
     )
 
     cache = get_cache(llm.settings)
@@ -213,10 +248,15 @@ async def summarizer_agent(
         except Exception as exc:
             logger.warning("[Summarizer] LLM call failed, using heuristic fallback", exc_info=exc)
             facts = []
-        try:
-            cache.set(key, facts, expire=llm.settings.cache_ttl_sec)
-        except Exception as exc:
-            logger.warning("[Summarizer] cache write failed, continuing uncached: %s", exc, exc_info=exc)
+        # Cache only successful, non-empty extractions. Caching the empty
+        # list on provider failure poisoned the key for a full TTL hour —
+        # the summarizer kept "recovering" from cache after the provider
+        # was healthy again, silently extending the degradation window.
+        if facts:
+            try:
+                cache.set(key, facts, expire=llm.settings.cache_ttl_sec)
+            except Exception as exc:
+                logger.warning("[Summarizer] cache write failed, continuing uncached: %s", exc, exc_info=exc)
 
     cleaned: List[Dict[str, Any]] = []
     for fact in facts:
@@ -238,27 +278,55 @@ async def summarizer_agent(
         confidence = clamp_confidence((0.75 * model_confidence) + (0.25 * source_score))
         if claim and source:
             cleaned.append({"claim": claim, "source": source, "confidence": confidence,
-                            "agent": specialist_role})
+                            "agent": specialist_role,
+                            "sub_question": sub_question_by_url.get(source, "")})
 
     if cleaned:
         return dedupe_semantic_facts(cleaned)
 
     # Heuristic fallback when the model output is malformed or empty.
-    # Reaching here means the model contributed nothing usable.
+    # Reaching here means the model contributed nothing usable. Work
+    # sentence-by-sentence from full fetched content first (far richer than
+    # snippets) and cover more sources — a thin fallback is what makes
+    # degraded answers look empty. Per-sentence gates mean one furniture
+    # fragment vetoes its sentence, never the whole page.
+    #
+    # Relevance: candidates are scored against BOTH the top-level query and
+    # the fact's own sub-question (the sub-question is the more specific
+    # relevance target), ranked, and only the best sentences per source are
+    # kept. Taking the first sentences that clear a bare 0.15 overlap let
+    # off-topic passages through (live: a UN transcript's Malawi
+    # electrification paragraph surfaced as a top claim on a
+    # Bangladesh-nuclear-vs-solar query).
     record_fallback("summarizer")
+    MIN_FALLBACK_OVERLAP = 0.2
     fallback: List[Dict[str, Any]] = []
-    for item in quality_results[:6]:
-        claim = clean_snippet_text(item.get("snippet", ""))
-        if not claim:
+    for item in quality_results[:12]:
+        raw = (item.get("content", "") or "")[:1500] or item.get("snippet", "")
+        if not raw:
             continue
-        if claim_query_overlap(query, claim) < MIN_QUERY_OVERLAP:
-            continue
-        fallback.append(
-            {
-                "claim": claim,
-                "source": item.get("url", ""),
-                "confidence": clamp_confidence((0.30 * 0.45) + (0.70 * source_reliability_score(item.get("url", "")))),
-                "agent": specialist_role,
-            }
-        )
+        sub_q = str(item.get("sub_question", "") or "")
+        scored: List[tuple[float, str]] = []
+        for sent in split_into_sentences(raw):
+            claim = clean_snippet_text(sent)
+            if not claim:
+                continue
+            relevance = max(
+                claim_query_overlap(query, claim),
+                claim_query_overlap(sub_q, claim) if sub_q else 0.0,
+            )
+            if relevance < MIN_FALLBACK_OVERLAP:
+                continue
+            scored.append((relevance, claim))
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        for relevance, claim in scored[:3]:
+            fallback.append(
+                {
+                    "claim": claim,
+                    "source": item.get("url", ""),
+                    "confidence": clamp_confidence((0.30 * 0.45) + (0.70 * source_reliability_score(item.get("url", "")))),
+                    "agent": specialist_role,
+                    "sub_question": sub_q,
+                }
+            )
     return dedupe_semantic_facts(fallback)

@@ -277,7 +277,10 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                         facts = snapshot.get("facts", [])
                         has_verified = any("verified" in f for f in facts)
                         if len(facts) > emitted_findings:
-                            new_facts = facts[emitted_findings : emitted_findings + 3]
+                            # Emit EVERY new fact. The old `+3` slice emitted
+                            # three but marked the whole batch consumed, so
+                            # facts 4..N of a large batch never streamed.
+                            new_facts = facts[emitted_findings:]
                             findings = [
                                 {
                                     "claim": f.get("claim", ""),

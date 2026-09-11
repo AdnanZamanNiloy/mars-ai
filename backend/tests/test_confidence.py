@@ -92,3 +92,43 @@ def test_freshness_measured_uses_fresh_weights():
     assert result["weights"] == WEIGHTS_FRESH
     assert 0.0 < result["signals"]["freshness"] < 1.0
     assert sum(WEIGHTS_FRESH.values()) == 1.0
+
+
+def test_degraded_summarizer_caps_confidence_below_sufficiency():
+    """A run whose evidence came from the extractive fallback must not be
+    scored above the sufficiency threshold: every fallback claim trivially
+    overlaps its own source, so verification signals read high regardless of
+    actual quality (live: a fully-degraded run scored 0.772 'High')."""
+    import importlib
+
+    from app.core.config import get_settings  # noqa: F401
+
+    confidence = importlib.import_module("app.core.confidence")
+
+    facts = [
+        {"claim": f"Claim {i} about energy economics", "source": f"https://src{i}.org/a",
+         "confidence": 0.8, "verified": True, "verification_score": 0.95}
+        for i in range(6)
+    ]
+    critique = {"is_sufficient": False, "reason": "ok"}
+    healthy = confidence.compute_confidence(facts, critique, 1, 3)
+    degraded = confidence.compute_confidence(facts, critique, 1, 3, degraded=["summarizer"])
+    assert degraded["overall"] <= confidence.DEGRADED_CAP
+    assert degraded["overall"] < 0.75, "degraded run crossed the sufficiency threshold"
+    assert degraded["overall"] < healthy["overall"]
+    assert any("capped" in note for note in degraded["notes"])
+
+
+def test_degraded_penalty_ignores_non_extractive_agents():
+    """Planner/critic fallbacks do not make the EVIDENCE extractive — no cap."""
+    from app.core.confidence import compute_confidence
+
+    facts = [
+        {"claim": f"Claim {i} about energy economics", "source": f"https://src{i}.org/a",
+         "confidence": 0.8, "verified": True, "verification_score": 0.95}
+        for i in range(6)
+    ]
+    critique = {"is_sufficient": False, "reason": "ok"}
+    healthy = compute_confidence(facts, critique, 1, 3)
+    flagged = compute_confidence(facts, critique, 1, 3, degraded=["planner", "critic"])
+    assert flagged["overall"] == healthy["overall"]

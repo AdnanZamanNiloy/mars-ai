@@ -38,6 +38,7 @@ function blankRun(query, mode) {
     report: "",
     confidence: null,
     degraded: [],
+    answerSupport: null,
     done: false,
     error: "",
     resumable: false,
@@ -69,7 +70,11 @@ export default function App() {
 
   useEffect(() => {
     const el = threadRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    // Follow the stream only while the user is already near the bottom;
+    // yanking the view on every event fights anyone scrolling back up.
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   const patchRun = useCallback((tempId, patch) => {
@@ -147,7 +152,11 @@ export default function App() {
               for (const item of evt.items) byClaim.set(item.claim, item);
               findings = [...byClaim.values()];
             } else {
-              findings = [...m.run.findings, ...evt.items];
+              // Key on claim+source: two distinct claims can share text, and
+              // empty-claim items must not collapse into one "" key.
+              const byKey = new Map(m.run.findings.map((f) => [`${f.claim}||${f.source}`, f]));
+              for (const item of evt.items) byKey.set(`${item.claim}||${item.source}`, item);
+              findings = [...byKey.values()];
             }
             return { ...m, run: { ...m.run, findings,
               verifiedCount: findings.filter((f) => f.verified === true).length } };
@@ -167,6 +176,7 @@ export default function App() {
             report: evt.report || "",
             confidence: typeof evt.confidence === "number" ? evt.confidence : null,
             degraded: Array.isArray(evt.degraded) ? evt.degraded : [],
+            answerSupport: typeof evt.answer_support === "number" ? evt.answer_support : null,
             done: true,
             resuming: false,
           };

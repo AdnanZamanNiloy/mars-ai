@@ -494,11 +494,18 @@ async def save_verification_results(database_path: str, run_id: str, facts: list
 
 async def save_citations(database_path: str, run_id: str, report_markdown: str) -> int:
     """Parse the emitted Sources legend back into citation rows, so the
-    [n] markers in the report resolve to URLs without reparsing markdown."""
+    [n] markers in the report resolve to URLs without reparsing markdown.
+    Handles both the current `## Sources` heading and the legacy bare
+    `Sources:` line."""
     import re as _re
 
     count = 0
-    _, _, legend = (report_markdown or "").partition("\nSources:")
+    text = report_markdown or ""
+    match = _re.search(r"\n+#{0,6}\s*Sources:?\s*\n", text)
+    if match:
+        legend = text[match.end():]
+    else:
+        _, _, legend = text.partition("\nSources:")
     async with aiosqlite.connect(database_path) as db:
         for line in legend.splitlines():
             match = _re.match(r"^\[(\d+)\]\s+(\S+)\s+—\s*(\S+)\s*$", line.strip())

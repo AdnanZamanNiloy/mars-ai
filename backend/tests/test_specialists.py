@@ -68,13 +68,13 @@ async def test_financial_and_general_get_different_prompts_end_to_end():
         })
         return []
 
-    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None):
+    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None, **kwargs):
         return {"is_sufficient": True, "reason": "ok", "improved_queries": [], "confidence": 0.9}
 
     async def fake_planner(llm, query, critique_feedback="", today=""):
         return state["sub_questions"]
 
-    async def fake_synthesizer(llm, query, facts=None):
+    async def fake_synthesizer(llm, query, facts=None, context=None):
         return "answer"
 
     settings = Settings(groq_api_key="k", _env_file=None)

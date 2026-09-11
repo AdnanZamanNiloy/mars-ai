@@ -81,3 +81,46 @@ def test_diversity_coverage_counts_distinct_types():
         {},
     ]
     assert diversity_coverage(plan) == {"encyclopedia", "statistical"}
+
+
+def test_comparative_query_without_definition_can_pass():
+    """Regression: the gate required an ' is ' claim unconditionally, which
+    forced every comparative/analytical query ('A vs B economics?') to loop
+    to the iteration ceiling and be stamped incomplete no matter how good
+    the evidence was. Definitional shape is only required for definitional
+    queries (query_type=factual or a 'what is/define/explain' query)."""
+    facts = [
+        {"claim": "Solar LCOE in Bangladesh fell below grid parity in 2024", "source": "https://a.org/x",
+         "confidence": 0.9, "verified": True},
+        {"claim": "Nuclear capital costs exceed solar by a wide margin per MW", "source": "https://b.edu/y",
+         "confidence": 0.9, "verified": True},
+        {"claim": "Levelized cost comparisons favor solar for new capacity", "source": "https://c.gov/z",
+         "confidence": 0.9, "verified": True},
+        {"claim": "Financing terms drive the lifetime economics of both options", "source": "https://d.org/w",
+         "confidence": 0.9, "verified": True},
+    ]
+    result = asyncio.run(critic_agent(FakeLLM(True), "Compare the economics of nuclear vs solar energy in Bangladesh",
+                                      facts, iteration=1, max_iterations=3, query_type="comparative"))
+    assert result["is_sufficient"] is True
+
+
+def test_definitional_query_still_requires_definition():
+    facts = [
+        {"claim": "Solar LCOE fell below grid parity in 2024", "source": "https://a.org/x",
+         "confidence": 0.9, "verified": True},
+        {"claim": "Nuclear capital costs exceed solar per MW", "source": "https://b.edu/y",
+         "confidence": 0.9, "verified": True},
+        {"claim": "Levelized cost comparisons favor solar", "source": "https://c.gov/z",
+         "confidence": 0.9, "verified": True},
+        {"claim": "Financing terms drive lifetime economics", "source": "https://d.org/w",
+         "confidence": 0.9, "verified": True},
+    ]
+    result = asyncio.run(critic_agent(FakeLLM(True), "What is RAG?", facts, iteration=1, max_iterations=3))
+    assert result["is_sufficient"] is False
+
+
+def test_gate_failure_reason_names_the_failing_signal():
+    facts = [_fact(0, "en.wikipedia.org", True, 0.9), _fact(1, "en.wikipedia.org", True, 0.9)]
+    result = _run(facts)
+    assert result["is_sufficient"] is False
+    assert "facts=" in result["reason"] and "sources=" in result["reason"]

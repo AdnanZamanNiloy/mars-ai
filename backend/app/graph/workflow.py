@@ -17,6 +17,7 @@ from app.agents.verifier import verify_facts
 from app.core.llm import LLMClient
 from app.core.confidence import compute_confidence
 from app.core.contradictions import find_contradictions
+from app.core.degradation import take_fallbacks
 from app.core.decision import build_decision_layer
 from app.core import depth_controller
 from app.core.isolation import AgentContext, build_contexts
@@ -287,17 +288,19 @@ def build_markdown_report(state: ResearchState) -> str:
         lines.extend(["# Contradictions", *contradiction_lines, ""])
 
     # Decision Intelligence Layer (3.5, Feature 18): options → recommendation
-    # → rationale, structurally SEPARATE from the findings above.
+    # → rationale, structurally SEPARATE from the findings above. Factual
+    # queries produce no options — no section rather than a placeholder.
     decision_options = build_decision_layer(state)
-    decision_lines = []
-    for o in decision_options:
-        marker = " (RECOMMENDED)" if o.get("is_recommended") else ""
-        decision_lines.append(f"- Option {o.get('option_label', '?')}{marker}: {o.get('description', '')}")
-        if o.get("rationale"):
-            decision_lines.append(f"  Rationale: {o['rationale']}")
-        if o.get("risk_note"):
-            decision_lines.append(f"  Risk: {o['risk_note']}")
-    lines.extend(["# Decision Layer", *decision_lines, ""])
+    if decision_options:
+        decision_lines = []
+        for o in decision_options:
+            marker = " (RECOMMENDED)" if o.get("is_recommended") else ""
+            decision_lines.append(f"- Option {o.get('option_label', '?')}{marker}: {o.get('description', '')}")
+            if o.get("rationale"):
+                decision_lines.append(f"  Rationale: {o['rationale']}")
+            if o.get("risk_note"):
+                decision_lines.append(f"  Risk: {o['risk_note']}")
+        lines.extend(["# Decision Layer", *decision_lines, ""])
 
     lines.extend([
         "# Limitations",
@@ -361,7 +364,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         # (variants ride the parent contract, so nothing orphans).
         # Accumulated results stay bounded (passes × ~10 snippets) and the
         # verifier still releases raw content after each pass.
-        fresh: List[str] = []
+        fresh: List[Any] = []
         answered = {
             normalize_text(str(r.get("sub_question", ""))) for r in previous
         } - {""}
@@ -370,14 +373,25 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             text = _extract_question_text(item)
             if text and text not in by_text:
                 by_text[text] = item
-        for text in _unanswered_questions(state.get("sub_questions", []), previous):
-            fresh.append(text)
+
+        def _question_search_type(text: str) -> str:
+            """The contract's search_type steers retrieval (news topic vs
+            general). Variants inherit their parent's type — they are
+            rephrasings, not new contracts."""
             item = by_text.get(text)
             if isinstance(item, dict):
+                return str(item.get("search_type", "") or "")
+            return ""
+
+        for text in _unanswered_questions(state.get("sub_questions", []), previous):
+            fresh.append((text, _question_search_type(text)))
+            item = by_text.get(text)
+            if isinstance(item, dict):
+                parent_type = _question_search_type(text)
                 for v in item.get("variants", []) or []:
                     vs = str(v or "").strip()
                     if vs and normalize_text(vs) not in answered:
-                        fresh.append(vs)
+                        fresh.append((vs, parent_type))
         cap = max(1, int(getattr(getattr(search_client, "settings", None),
                                "search_max_queries_per_pass", 8) or 8))
         fresh = fresh[:cap]
@@ -387,7 +401,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             fallback = state.get("query", "").strip()
             if not fallback:
                 return {"search_results": previous}
-            fresh = [fallback]
+            fresh = [(fallback, "")]
         results = await search_client.run_search(fresh)
         seen_urls = {r.get("url") for r in previous if r.get("url")}
         merged = [*previous, *(r for r in results if r.get("url") not in seen_urls)]
@@ -462,9 +476,12 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             iteration=next_iteration,
             max_iterations=int(state.get("max_iterations", 3)),
             contradictions=contradictions,
+            query_type=str(state.get("orchestration", {}).get("query_type", "")),
         )
 
         # Confidence Engine (Phase 2.4) replaces the inline weighted formula.
+        # Degraded stages cap the score: a run whose evidence came from the
+        # extractive fallback must not finalize as "High" confidence.
         source_dates = [
             r.get("published_at", "") for r in state.get("search_results", []) or []
             if isinstance(r, dict) and r.get("published_at")
@@ -475,6 +492,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             iteration=next_iteration,
             max_iterations=int(state.get("max_iterations", 3)),
             source_dates=source_dates,
+            degraded=take_fallbacks(),
         )
         overall_conf = breakdown["overall"]
 
@@ -496,10 +514,21 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
     async def synthesizer_node(state: ResearchState) -> SynthesizerUpdate:
         # Only verification-passed facts are usable evidence (Phase 2.3).
         usable = _verified_facts(state.get("facts", []))
+        all_facts = state.get("facts", [])
         answer = await synthesizer_agent(
             llm=llm,
             query=state["query"],
             facts=usable,
+            # Decision-grade context the report contract needs: conflicts
+            # to flag, confidence for the honesty baseline, degraded stages
+            # and pool counts for Confidence & Gaps.
+            context={
+                "contradictions": state.get("contradictions", []),
+                "confidence": state.get("confidence", None),
+                "degraded": take_fallbacks(),
+                "total_facts": len(all_facts),
+                "verified_count": sum(1 for f in all_facts if f.get("verified")),
+            },
         )
         # Report-contract verification: check the emitted answer's citations
         # against the evidence (never the reverse). Observational only —

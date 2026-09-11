@@ -197,3 +197,34 @@ async def test_eval_batches_rejects_bad_limit(tmp_path):
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/api/eval/batches?limit=abc")
     assert response.status_code == 422
+
+
+class StubManyFactsWorkflow:
+    """One snapshot carrying 6 facts — the old emitter sliced only 3 per
+    snapshot while marking the whole batch consumed, so facts 4..N never
+    streamed to the UI."""
+
+    async def astream(self, state, stream_mode=None):
+        yield {"facts": [
+            {"claim": f"Claim number {i}", "source": f"https://s{i}.com", "confidence": 0.8}
+            for i in range(6)
+        ], "iteration": 1, "critique": {"is_sufficient": True, "reason": "ok"}}
+        yield {"final_report": "# Final Answer\nok", "confidence": 0.8}
+
+
+async def test_all_new_findings_emitted_not_just_three(tmp_path):
+    from app.db.sqlite import init_db
+
+    db_path = str(tmp_path / "findings.db")
+    await init_db(db_path)
+    settings = Settings(groq_api_key="test-key", database_url=db_path, _env_file=None)
+    app = _build_app(StubManyFactsWorkflow(), settings)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/research/stream", json={"query": "valid research query here"})
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    regular = [e for e in events if e.get("type") == "findings" and not e.get("verified_update")]
+    assert regular, events
+    streamed = [item["claim"] for e in regular for item in e["items"]]
+    assert sorted(streamed) == [f"Claim number {i}" for i in range(6)], streamed

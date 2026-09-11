@@ -55,14 +55,14 @@ async def test_expansion_searches_only_new_questions(monkeypatch):
 
     calls = {"n": 0}
 
-    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None):
+    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None, **kwargs):
         calls["n"] += 1
         if calls["n"] >= 2:
             return {"is_sufficient": True, "reason": "ok", "improved_queries": [], "confidence": 0.9}
         return {"is_sufficient": False, "reason": "thin", "improved_queries": ["RAG benchmarks 2026"],
                 "confidence": 0.4}
 
-    async def fake_synthesizer(llm, query, facts):
+    async def fake_synthesizer(llm, query, facts, context=None):
         return "synthesized answer"
 
     monkeypatch.setattr(wf, "planner_agent", fake_planner)
@@ -74,7 +74,8 @@ async def test_expansion_searches_only_new_questions(monkeypatch):
     class StubSearch:
         async def run_search(self, questions):
             search_inputs.append(list(questions))
-            return [{"url": f"https://test.com/{q[:10]}", "sub_question": q,
+            return [{"url": f"https://test.com/{q[0][:10] if isinstance(q, (tuple, list)) else q[:10]}",
+                     "sub_question": q[0] if isinstance(q, (tuple, list)) else q,
                      "snippet": "snip", "content": "content here"} for q in questions]
 
     state = wf.build_initial_state("What is RAG?", 3)
@@ -85,8 +86,9 @@ async def test_expansion_searches_only_new_questions(monkeypatch):
         final = snap
 
     assert calls["n"] == 2
-    assert search_inputs[0] == ["What is RAG today?", "How does dense retrieval work now?"]
-    assert search_inputs[1] == ["What are RAG benchmarks this year?"], search_inputs
+    assert search_inputs[0] == [("What is RAG today?", "encyclopedia"),
+                                ("How does dense retrieval work now?", "encyclopedia")]
+    assert search_inputs[1] == [("What are RAG benchmarks this year?", "encyclopedia")], search_inputs
     assert len(final["sub_questions"]) == 3
     assert len(final["search_results"]) == 3
     assert "# Final Answer" in final["final_report"]
@@ -107,10 +109,10 @@ async def test_variant_queries_searched_and_attributed(monkeypatch):
                  "source": r.get("url", ""), "confidence": 0.9}
                 for r in (search_results or [])]
 
-    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None):
+    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None, **kwargs):
         return {"is_sufficient": True, "reason": "ok", "improved_queries": [], "confidence": 0.9}
 
-    async def fake_synthesizer(llm, query, facts):
+    async def fake_synthesizer(llm, query, facts, context=None):
         return "synthesized answer"
 
     monkeypatch.setattr(wf, "planner_agent", fake_planner)
@@ -122,7 +124,8 @@ async def test_variant_queries_searched_and_attributed(monkeypatch):
     class StubSearch:
         async def run_search(self, questions):
             search_inputs.append(list(questions))
-            return [{"url": f"https://test.com/{i}", "sub_question": q,
+            return [{"url": f"https://test.com/{i}",
+                     "sub_question": q[0] if isinstance(q, (tuple, list)) else q,
                      "snippet": "snip", "content": "content here"}
                     for i, q in enumerate(questions)]
 
@@ -133,6 +136,7 @@ async def test_variant_queries_searched_and_attributed(monkeypatch):
     async for snap in workflow.astream(state, stream_mode="values"):
         final = snap
 
-    assert search_inputs[0] == ["What is RAG today?", "RAG definition overview 2026"], search_inputs
+    assert search_inputs[0] == [("What is RAG today?", "encyclopedia"),
+                                ("RAG definition overview 2026", "encyclopedia")], search_inputs
     assert len(final["facts"]) == 2, final["facts"]
     assert "# Final Answer" in final["final_report"]

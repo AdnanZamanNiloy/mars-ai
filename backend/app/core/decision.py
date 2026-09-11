@@ -7,8 +7,8 @@ rule, and attaches evidence-backed rationale + risk per option.
 Code-level recommendation rule (manual 3.5: don't leave it to unstructured
 LLM judgment): each option scores on (verified-support, contradiction
 penalty, confidence alignment); the highest score wins, ties broken by
-lower downside risk. For purely factual/definitional queries the layer
-collapses to a single "no material decision" option.
+lower downside risk. Factual/definitional queries produce no options —
+the report has no Decision Layer section at all.
 """
 from __future__ import annotations
 
@@ -64,32 +64,21 @@ def _contradiction_penalty(option_label: str, contradictions: List[Dict[str, Any
     return len(contradictions)
 
 
-def _build_factual_option(query: str) -> Dict[str, Any]:
-    return {
-        "option_label": "A",
-        "description": (
-            "No material decision identified: the query is informational, "
-            "not a choice between alternatives."
-        ),
-        "is_recommended": True,
-        "rationale": (
-            "The evidence answers a definitional/factual question. Decision "
-            "options apply to comparative or analytical queries."
-        ),
-        "risk_note": "Risk of misleading the reader by manufacturing a decision where none exists.",
-    }
-
-
 def build_decision_layer(
     state: Dict[str, Any],
     settings: Settings | None = None,
 ) -> List[Dict[str, Any]]:
-    """Return the DecisionOption list for the report + persistence."""
+    """Return the DecisionOption list for the report + persistence.
+
+    Factual/definitional queries produce NO options: the report simply has
+    no Decision Layer section. The old single "no material decision"
+    placeholder read as manufactured filler in the UI.
+    """
     orchestration = state.get("orchestration", {})
     query_type = str(orchestration.get("query_type", "factual"))
 
     if query_type not in ("comparative", "analytical"):
-        return [_build_factual_option(str(state.get("query", "")))]
+        return []
 
     contradictions = state.get("contradictions", [])
     axes: List[str] = []
@@ -100,7 +89,7 @@ def build_decision_layer(
                 axes.append(axis)
 
     if len(axes) < MIN_OPTIONS_COMPARATIVE:
-        return [_build_factual_option(str(state.get("query", "")))]
+        return []
 
     # Derive one option per leading axis (up to MAX_OPTIONS): the axis IS the
     # strategic framing — e.g. a cost axis yields "prioritize cost evidence".

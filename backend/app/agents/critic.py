@@ -1,4 +1,5 @@
 from typing import Any, Dict, List
+import re
 
 from app.core.logging import get_logger
 
@@ -78,6 +79,9 @@ Return ONLY valid JSON. No markdown fences. No text outside JSON.
  
 
 
+DEFINITIONAL_QUERY_RE = re.compile(r"^\s*(what\s+is|what\s+are|define|explain)\b", re.IGNORECASE)
+
+
 async def critic_agent(
     llm: LLMClient,
     query: str,
@@ -85,6 +89,7 @@ async def critic_agent(
     iteration: int,
     max_iterations: int,
     contradictions: List[Dict[str, Any]] | None = None,
+    query_type: str = "",
 ) -> Dict[str, Any]:
     quality_facts = dedupe_semantic_facts(filter_facts_by_domain(facts))
     if not quality_facts:
@@ -168,12 +173,34 @@ async def critic_agent(
         extract_domain(str(standing.get(normalize_claim_text(str(q.get("claim", ""))), {}).get("source", "")))
         for q in quality_facts
     } - {""}
+    # Definition-shaped evidence is only REQUIRED for definitional queries.
+    # Requiring an " is " claim unconditionally forced every comparative or
+    # analytical query ("Should X invest in A vs B?") to loop to the
+    # iteration ceiling — wasted search + LLM budget on queries whose
+    # evidence was already sufficient — and stamped every such report
+    # "incomplete" regardless of quality. Definitional shape is taken from
+    # the orchestrator's query_type when provided, else from the query text.
+    requires_definition = (
+        query_type == "factual"
+        or (not query_type and bool(DEFINITIONAL_QUERY_RE.match(query or "")))
+    )
     has_definition = any(" is " in str(f.get("claim", "")).lower() for f in quality_facts[:5])
     avg_fact_conf = sum(float(f.get("confidence", 0.0) or 0.0) for f in quality_facts) / max(1, len(quality_facts))
     min_facts_required = 4
 
-    if (len(quality_facts) < min_facts_required or not has_definition or avg_fact_conf < 0.74
-            or verified_count < 1 or len(distinct_sources) < 2):
+    gate_failures = []
+    if len(quality_facts) < min_facts_required:
+        gate_failures.append(f"facts={len(quality_facts)}<{min_facts_required}")
+    if requires_definition and not has_definition:
+        gate_failures.append("no definitional claim")
+    if avg_fact_conf < 0.74:
+        gate_failures.append(f"avg_conf={avg_fact_conf:.2f}<0.74")
+    if verified_count < 1:
+        gate_failures.append("verified=0")
+    if len(distinct_sources) < 2:
+        gate_failures.append(f"sources={len(distinct_sources)}<2")
+
+    if gate_failures:
         is_sufficient = False
         confidence = min(confidence, 0.58)
         if not cleaned_queries:
@@ -183,9 +210,9 @@ async def critic_agent(
             ]
         reason = (
             "Evidence is still incomplete for a high-quality synthesis; "
-            "the answer lacks enough reliable, non-redundant coverage, a clear definition, "
+            "the answer lacks enough reliable, non-redundant coverage, "
             "or a verified multi-source foundation "
-            f"(facts={len(quality_facts)}, verified={verified_count}, sources={len(distinct_sources)})."
+            f"({', '.join(gate_failures)})."
         )
     elif avg_fact_conf >= 0.80 and verified_count >= 1 and len(distinct_sources) >= 2:
         is_sufficient = True

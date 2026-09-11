@@ -67,10 +67,10 @@ async def test_synthesizer_node_records_support(monkeypatch):
     async def fake_summarizer(llm, query, search_results=None, specialist_role="general"):
         return FACTS
 
-    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None):
+    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None, **kwargs):
         return {"is_sufficient": True, "reason": "ok", "improved_queries": [], "confidence": 0.9}
 
-    async def fake_synthesizer(llm, query, facts):
+    async def fake_synthesizer(llm, query, facts, context=None):
         return ANSWER
 
     monkeypatch.setattr(wf, "planner_agent", fake_planner)
@@ -82,7 +82,9 @@ async def test_synthesizer_node_records_support(monkeypatch):
 
     class StubSearch:
         async def run_search(self, questions):
-            return [{"url": "https://en.wikipedia.org/wiki/RAG", "sub_question": questions[0],
+            first = questions[0]
+            text = first[0] if isinstance(first, (tuple, list)) else first
+            return [{"url": "https://en.wikipedia.org/wiki/RAG", "sub_question": text,
                      "snippet": "snip", "content": "content"}]
 
     state = wf.build_initial_state("What is RAG?", 3)

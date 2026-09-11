@@ -31,3 +31,6 @@ frontend/.vite/
 
 # bounded diskcache directory (Phase 1.4)
 .cache/
+
+# Third-party reference clones (read-only adaptation sources, never commit)
+gpt-researcher/

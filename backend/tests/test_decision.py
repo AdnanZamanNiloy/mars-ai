@@ -2,7 +2,7 @@
 
 DoD: a comparative query produces 2+ genuinely different options, exactly
 one recommended, rationale referencing verified claims, risk per option;
-a factual query collapses to "no material decision" without breaking.
+a factual query produces NO options — no Decision Layer section at all.
 """
 from app.core.decision import build_decision_layer
 
@@ -60,7 +60,10 @@ def test_every_option_has_risk_note():
     assert any("contradiction" in o["risk_note"] for o in options)
 
 
-def test_factual_query_collapses_to_no_material_decision():
+def test_factual_query_produces_no_options():
+    """Factual/definitional queries emit no decision options: the old
+    'no material decision' placeholder read as manufactured filler in the
+    UI and the report."""
     state = {
         "query": "what is RAG",
         "orchestration": {"query_type": "factual"},
@@ -68,10 +71,29 @@ def test_factual_query_collapses_to_no_material_decision():
         "facts": [],
         "contradictions": [],
     }
-    options = build_decision_layer(state)
-    assert len(options) == 1
-    assert options[0]["is_recommended"] is True
-    assert "No material decision" in options[0]["description"]
+    assert build_decision_layer(state) == []
+
+
+def test_comparative_with_single_axis_produces_no_options():
+    state = _comparative_state(sub_questions=[{"axis": "cost", "question": "costs"}])
+    assert build_decision_layer(state) == []
+
+
+def test_factual_report_has_no_decision_layer_section():
+    import app.graph.workflow as wf
+
+    state = {
+        "query": "what is RAG",
+        "orchestration": {"query_type": "factual"},
+        "sub_questions": [{"axis": "definition", "question": "q"}],
+        "facts": [],
+        "contradictions": [],
+        "synthesized_answer": "answer",
+        "critique": {"is_sufficient": True},
+    }
+    report = wf.build_markdown_report(state)
+    assert "# Decision Layer" not in report
+    assert "# Final Answer" in report
 
 
 def test_report_contains_decision_layer_section_separate_from_findings():

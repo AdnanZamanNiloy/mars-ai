@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     # Pipeline limits
     max_parallel_search: int = 2
     max_parallel_agents: int = 3  # hardware cap (8GB host) — raise only after load-testing
+    # Concurrent LLM calls across the whole pipeline (planner + N summarizer
+    # workers + critic + synthesizer). Low by default: concurrent large
+    # prompts are what exhausts free-tier TPM/TPD quotas (observed live:
+    # Groq TPD 200K burned by 3 parallel ~6K-token summarizer calls).
+    max_parallel_llm: int = 2
     max_iterations: int = 3
     # Retrieval depth: how many top-ranked results per sub-question get full
     # content fetched (was hardcoded 3). Each fetch is ~6KB cleaned text kept
@@ -56,8 +61,20 @@ class Settings(BaseSettings):
 
     # Timeouts (seconds)
     llm_timeout_sec: float = 25.0
+    # Slower OpenAI-compatible providers routinely take 20-30s on
+    # planner-sized prompts (measured live: glm-5.3-flash 20-30s where
+    # small calls take 2-4s) and stall past 60s under load. The shared
+    # 25s budget timed out real calls, tripping the breaker and silently
+    # degrading whole runs. Worst case per chain pass stays inside the
+    # research budget: 90s custom + 25s groq, one pass, no timeout
+    # retries. Applies to the custom provider only; Groq/HF keep
+    # llm_timeout_sec.
+    custom_llm_timeout_sec: float = 90.0
     search_timeout_sec: float = 20.0
-    research_timeout_sec: float = 90.0
+    # Full multi-agent runs take minutes (retrieval + 6 LLM stages), the
+    # same as upstream GPT Researcher. Per-provider fail-fasts (auth/402/
+    # timeouts) keep doomed calls from eating this budget.
+    research_timeout_sec: float = 300.0
 
     # Cache (Phase 1.4)
     cache_size_limit_bytes: int = 250_000_000  # 250MB, diskcache size cap

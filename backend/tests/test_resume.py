@@ -99,12 +99,12 @@ def test_resume_reruns_critic_not_planner_or_search(tmp_path, monkeypatch):
 
     visited = []
 
-    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None):
+    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None, **kwargs):
         visited.append("critic")
         # Not sufficient → forces route_after_critic through depth_controller.
         return {"is_sufficient": False, "reason": "need more", "improved_queries": [], "confidence": 0.4}
 
-    async def fake_synthesizer(llm, query, facts=None):
+    async def fake_synthesizer(llm, query, facts=None, context=None):
         visited.append("synthesizer")
         return "resumed answer"
 

@@ -45,10 +45,10 @@ async def test_memory_tables_populated_and_joinable(tmp_path, monkeypatch):
     async def fake_summarizer(llm, query, search_results=None, specialist_role="general"):
         return facts
 
-    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None):
+    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3, contradictions=None, **kwargs):
         return {"is_sufficient": True, "reason": "complete", "improved_queries": [], "confidence": 0.9}
 
-    async def fake_synthesizer(llm, query, facts=None):
+    async def fake_synthesizer(llm, query, facts=None, context=None):
         return "synthesized answer"
 
     monkeypatch.setattr(wf, "planner_agent", fake_planner)

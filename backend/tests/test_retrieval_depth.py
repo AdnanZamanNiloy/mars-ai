@@ -43,7 +43,7 @@ def _run_fetch_count(monkeypatch, tmp_path, top_n: int, pool: int = 8) -> int:
     async def fake_provider(self, query):
         return [_result(i, tag) for i in range(pool)]
 
-    async def fake_fetch(url: str):
+    async def fake_fetch(url: str, client=None):
         calls.append(url)
         return "full page content here", ""
 

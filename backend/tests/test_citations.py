@@ -42,7 +42,7 @@ def test_valid_markers_kept_invalid_stripped_legend_appended():
     answer = asyncio.run(synthesizer_agent(llm, "What is RAG?", facts))
     assert "[1]" in answer and "[2]" in answer
     assert "[99]" not in answer
-    assert "Sources:" in answer
+    assert "## Sources" in answer
     assert "[1] en.wikipedia.org" in answer
     assert "[2] arxiv.org" in answer
 
@@ -52,8 +52,8 @@ def test_prompt_numbers_sources_and_bans_invention():
     llm = FakeLLM("Short answer [1].")
     asyncio.run(synthesizer_agent(llm, "What is RAG?", facts))
     assert "[1] en.wikipedia.org" in llm.seen["user"]
-    assert "ONLY the source numbers" in llm.seen["system"]
-    assert "Do NOT include source links" not in llm.seen["system"]
+    assert "Never invent numbers, links, or sources" in llm.seen["system"]
+    assert "provided Sources list" in llm.seen["system"]
 
 
 def test_fallback_appends_legend():
@@ -63,7 +63,7 @@ def test_fallback_appends_legend():
 
     facts = [_fact(0, "en.wikipedia.org"), _fact(1, "arxiv.org")]
     answer = asyncio.run(synthesizer_agent(ExplodingLLM(), "What is RAG?", facts))
-    assert "Sources:" in answer
+    assert "## Sources" in answer
     assert "en.wikipedia.org" in answer
 
 
@@ -84,8 +84,8 @@ def test_sanitizer_preserves_paragraphs():
 
     raw = "First paragraph here.\n\n\nSecond paragraph  with   spaces.\n### Costs heading\nCost line [1]."
     out = _sanitize_answer_text(raw, "What is X?")
-    assert out == ("First paragraph here.\n\nSecond paragraph with spaces. "
-                   "Costs heading Cost line [1].")
+    assert out == ("First paragraph here.\n\nSecond paragraph with spaces.\n\n"
+                   "### Costs heading\n\nCost line [1].")
 
 
 def test_sanitizer_repairs_query_opener():
@@ -141,7 +141,7 @@ def test_fallback_answer_has_no_boilerplate():
     answer = asyncio.run(synthesizer_agent(ExplodingLLM(), "What is transfer learning?", facts))
     assert "supported by reliable evidence" not in answer
     assert "Transfer learning reuses" in answer
-    assert "Sources:" in answer
+    assert "## Sources" in answer
 
 
 def test_overlap_drops_off_topic_junk():
@@ -150,6 +150,10 @@ def test_overlap_drops_off_topic_junk():
     query = "What is transfer learning?"
     assert claim_query_overlap(query, "Crypto has real uses beyond investing today") < MIN_QUERY_OVERLAP
     assert claim_query_overlap(query, "Transfer learning reuses models trained before") >= MIN_QUERY_OVERLAP
+    assert claim_query_overlap("What is transformer?",
+                               "Electrical transformers step voltage up or down") >= MIN_QUERY_OVERLAP
+    # Short words still need exact matches: "in" must not match "instrument".
+    assert claim_query_overlap("Routes in Oslo", "Instrument transformers hum") == 0.0
 
 
 def test_select_diverse_skips_near_dupes():
@@ -255,3 +259,499 @@ def test_fallback_mmr_collapses_paraphrase_dupes():
     answer = asyncio.run(synthesizer_agent(ExplodingLLM(), "What is transformer?", dupes))
     assert "self-attention" in answer
     assert "passive component" not in answer
+
+
+def test_fallback_mines_content_across_many_sources(tmp_path):
+    """Degraded answers must not be thin: the heuristic fallback works from
+    full fetched content (not snippets) over up to 12 sources and tags each
+    fact with its sub-question for grouped synthesis."""
+    from app.agents.summarizer import summarizer_agent
+    from app.core.config import Settings
+
+    class ExplodingLLM:
+        settings = Settings(groq_api_key="k", database_url=str(tmp_path / "t.db"), _env_file=None)
+
+        async def generate_json(self, *a, **k):
+            raise RuntimeError("down")
+
+    bodies = [
+        "The transformer architecture relies on self-attention for sequence tasks.",
+        "Electrical transformers step voltage up or down between alternating-current circuits.",
+        "Transformer models train in parallel unlike recurrent networks of the past.",
+        "Distribution transformers hum because magnetostriction vibrates the iron core.",
+        "Positional encodings give transformer layers a sense of token order.",
+        "Instrument transformers scale high voltages down for safe measurement.",
+        "Large transformer checkpoints need gigabytes of accelerator memory.",
+        "Autotransformers share one winding between primary and secondary sides.",
+        "Cross-attention lets a transformer decoder read the encoder output.",
+        "Three-phase transformer banks power entire industrial districts.",
+    ]
+    results = [
+        {"url": f"https://en.wikipedia.org/wiki/Transformer_{i}", "snippet": "",
+         "content": body, "sub_question": f"angle {i % 3}"}
+        for i, body in enumerate(bodies)
+    ]
+    facts = asyncio.run(summarizer_agent(ExplodingLLM(), "What is transformer?", results))
+    assert len(facts) >= 8, f"fallback must cover many sources, got {len(facts)}"
+    assert all(f.get("sub_question", "").startswith("angle") for f in facts)
+    assert any("magnetostriction" in f["claim"] for f in facts)
+
+
+def test_fallback_answer_groups_by_sub_question():
+    """Grouped fallback synthesis keeps one paragraph per angle instead of
+    a single flat blob."""
+    from app.agents.synthesizer import synthesizer_agent
+
+    class ExplodingLLM:
+        async def generate_json(self, *a, **k):
+            raise RuntimeError("down")
+
+    facts = [
+        {"claim": "Electrical transformers step voltage between alternating-current circuits",
+         "source": "https://a.com/1", "confidence": 0.9, "sub_question": "electrical sense"},
+        {"claim": "Autotransformers share a single winding for step regulation",
+         "source": "https://b.com/2", "confidence": 0.85, "sub_question": "electrical sense"},
+        {"claim": "Transformer neural models use self-attention over token sequences",
+         "source": "https://c.com/3", "confidence": 0.9, "sub_question": "machine learning sense"},
+    ]
+    answer = asyncio.run(synthesizer_agent(ExplodingLLM(), "What is transformer?", facts))
+    assert "step voltage" in answer and "self-attention" in answer
+    assert "\n\n" in answer.split("Sources:")[0], "angles must be separate paragraphs"
+
+
+def test_clean_snippet_drops_excerpt_seams():
+    """Page-furniture fragments mined from full content must die in the
+    cleaner, not surface in degraded answers (live ragged claims)."""
+    from app.agents.evidence_utils import clean_snippet_text
+
+    assert clean_snippet_text(
+        "Main article: Attention (machine learning) History section here today") == ""
+    assert clean_snippet_text(
+        "The previous model.( [...] A 380M-parameter model followed suit here") == ""
+    assert clean_snippet_text(
+        'The mechanism uses dot-product attention "Attention (ML)") units today') == ""
+    out = clean_snippet_text(
+        "Basic Outline of a Transformer ### Key Components of the model #### Self-Attention wins")
+    assert "###" not in out and "Self-Attention wins" in out
+    keep = "Transformer models train in parallel unlike recurrent networks of the past."
+    assert clean_snippet_text(keep) == keep
+
+
+def test_clean_snippet_drops_bare_title_prefix():
+    """A page heading mined as a claim ('Title: subtitle', no sentence) is
+    not a finding — but headed real sentences survive."""
+    from app.agents.evidence_utils import clean_snippet_text
+
+    assert clean_snippet_text(
+        "Exploring Transformer Models: Key Uses, Examples, and Innovations") == ""
+    assert clean_snippet_text(
+        "Exploring Transformer Models: Key Uses, Examples, and Innovations.") == ""
+    headed = "Transformers are used for many purposes: power delivery and signal isolation today."
+    assert clean_snippet_text(headed) == headed
+    out = clean_snippet_text(
+        "Basic Outline of a Transformer ### Key Components of the model #### Self-Attention wins")
+    assert "###" not in out and "Self-Attention wins" in out
+
+
+def test_clean_snippet_drops_question_shaped_claims():
+    """A claim ending in '?' is a glued heading+question, never a finding."""
+    from app.agents.evidence_utils import clean_snippet_text
+
+    assert clean_snippet_text(
+        "Transmission of power How does a transformer work?") == ""
+    assert clean_snippet_text(
+        "Transformer models train in parallel unlike recurrent networks.") != ""
+
+
+def test_clean_snippet_strips_blockquote_markers():
+    """Flattened quote markers are page furniture; the quoted claim stays."""
+    from app.agents.evidence_utils import clean_snippet_text
+
+    out = clean_snippet_text(
+        "> > > However RNNs may struggle to capture long-range dependencies effectively.")
+    assert not out.startswith(">")
+    assert "However RNNs may struggle" in out
+    keep = "Attention scores show that a exceeds b in most transformer heads today."
+    assert clean_snippet_text(keep) == keep
+
+
+def test_clean_snippet_drops_dangling_endings_and_entities():
+    """Mid-sentence cuts ending on function words, and HTML entities, must
+    not reach answers (both seen live in fallback findings)."""
+    from app.agents.evidence_utils import clean_snippet_text
+
+    assert clean_snippet_text(
+        "Demonstrate the ability of transformers to perform a wide variety of "
+        "NLP-related subtasks including") == ""
+    assert clean_snippet_text(
+        "Demonstrate the ability of transformers to perform a wide variety of "
+        "NLP-related subtasks and their related applications, including.") == ""
+    out = clean_snippet_text(
+        "Power Transformer Core Losses and Core Design Concepts&quot "
+        "are explained with clear diagrams in this transformer guide.")
+    assert "&quot" not in out and "Core Design Concepts" in out
+    keep = "Transformer models train in parallel unlike recurrent networks."
+    assert clean_snippet_text(keep) == keep
+
+
+def test_clean_snippet_drops_unbalanced_paren_cuts():
+    """A mid-excerpt cut with a tail longer than 3 letters ('...number of
+    nega') slips past the stub check — but its unclosed paren gives it away."""
+    from app.agents.evidence_utils import clean_snippet_text
+
+    assert clean_snippet_text(
+        "Transformers cannot recognize parity (e.g., whether a phrase contains an even "
+        "number of nega") == ""
+    keep = "Transformers use attention (see Vaswani et al.) for sequence modeling tasks."
+    assert clean_snippet_text(keep) == keep
+
+
+def test_clean_snippet_drops_latex_soup_and_boilerplate():
+    """Unreadable math markup and instructional leads are not claims."""
+    from app.agents.evidence_utils import clean_snippet_text
+
+    assert clean_snippet_text(
+        r"One set of {\displaystyle \left(W^{Q},W^{K}\right)} matrices is called a head "
+        r"and each transformer layer has several heads today") == ""
+    assert clean_snippet_text(
+        "The attention output scales with \sqrt{N} heads in large transformer models today") == ""
+    assert clean_snippet_text(
+        "Use this page to revise transformer concepts within transmission of electricity") == ""
+    assert clean_snippet_text(
+        "This article will explore transformer models and their many practical applications today") == ""
+    keep = "Attention layers mix information across chunks in transformer pipelines."
+    assert clean_snippet_text(keep) == keep
+
+
+def test_clean_snippet_strips_read_time_and_heading_mark():
+    """Date + read-time furniture and leading heading markers must not open
+    a claim (live ragged lead: 'Dec 20, 2024 13 minutes read # What ...')."""
+    from app.agents.evidence_utils import clean_snippet_text
+
+    out = clean_snippet_text(
+        "Dec 20, 2024 13 minutes read # What are transformer models? "
+        "Transformer models are deep learning networks for sequences.")
+    assert not out.startswith("Dec 20")
+    assert "#" not in out.split("?")[0]
+    assert "Transformer models are deep learning networks" in out
+
+
+def test_split_into_sentences_basic():
+    from app.agents.evidence_utils import split_into_sentences
+
+    parts = split_into_sentences(
+        "Transformers use attention. They train in parallel! Do they scale? Yes, broadly.")
+    assert len(parts) == 4
+    assert parts[0] == "Transformers use attention."
+    assert split_into_sentences("") == []
+def test_fallback_extracts_multiple_claims_per_source(tmp_path):
+    """One content-rich page yields several facts, not one (sentence-scale
+    extraction is what makes degraded answers substantive)."""
+    from app.agents.summarizer import summarizer_agent
+    from app.core.config import Settings
+
+    class ExplodingLLM:
+        settings = Settings(groq_api_key="k", database_url=str(tmp_path / "t.db"), _env_file=None)
+
+        async def generate_json(self, *a, **k):
+            raise RuntimeError("down")
+
+    content = (
+        "Transformer neural models use self-attention over token sequences. "
+        "Electrical transformers step voltage between alternating-current circuits. "
+        "Transformer checkpoints need gigabytes of accelerator memory.")
+    facts = asyncio.run(summarizer_agent(
+        ExplodingLLM(), "What is transformer?",
+        search_results=[{"url": "https://en.wikipedia.org/wiki/Transformer_X",
+                         "snippet": "", "content": content,
+                         "sub_question": "mixed senses"}]))
+    assert len(facts) >= 2, f"expected multi-claim mining, got {facts}"
+    assert all(f.get("sub_question") == "mixed senses" for f in facts)
+
+
+def test_fallback_report_has_sections_and_figures():
+    """Degraded output must read like a report: angle sections, a Key
+    figures section for number-claims beyond the section budget, and a
+    legend covering the used sources."""
+    from app.agents.synthesizer import synthesizer_agent
+
+    class ExplodingLLM:
+        async def generate_json(self, *a, **k):
+            raise RuntimeError("down")
+
+    facts = [
+        {"claim": "Electrical transformers step voltage between alternating-current circuits",
+         "source": "https://a.com/1", "confidence": 0.95, "sub_question": "markets"},
+        {"claim": "Autotransformers share a single winding for compact step regulation",
+         "source": "https://b.com/2", "confidence": 0.93, "sub_question": "markets"},
+        {"claim": "Transformer neural models use self-attention over token sequences",
+         "source": "https://c.com/3", "confidence": 0.92, "sub_question": "markets"},
+        {"claim": "Instrument transformers scale line voltage for metering equipment",
+         "source": "https://d.com/4", "confidence": 0.91, "sub_question": "markets"},
+        {"claim": "Three-phase banks power industrial districts reliably",
+         "source": "https://e.com/5", "confidence": 0.90, "sub_question": "markets"},
+        {"claim": "Cross-attention links decoders to encoder output representations",
+         "source": "https://f.com/6", "confidence": 0.89, "sub_question": "markets"},
+        {"claim": "The power transformer market was valued at USD 23 billion in 2025",
+         "source": "https://g.com/7", "confidence": 0.70, "sub_question": "markets"},
+        {"claim": "Shipments grew 12 percent year over year across Asia",
+         "source": "https://h.com/8", "confidence": 0.65, "sub_question": "markets"},
+    ]
+    answer = asyncio.run(synthesizer_agent(ExplodingLLM(), "What is transformer?", facts))
+    assert not answer.startswith("# Final Answer"), "workflow adds the title; no double lead"
+    assert "## Markets" in answer
+    assert "## Key figures" in answer
+    figures = answer.split("## Key figures")[1].split("## Sources")[0]
+    assert "USD 23 billion" in figures and "12 percent" in figures
+    legend = answer.split("## Sources")[1]
+    for host in ("a.com", "g.com", "h.com"):
+        assert host in legend
+
+
+def test_llm_prompt_carries_angles_and_evidence():
+    """The LLM brief must name the angles and pass the widened fact pool."""
+    from app.agents.synthesizer import synthesizer_agent
+
+    seen = {}
+
+    class FakeLLM:
+        async def generate_json(self, system_prompt, user_prompt, response_model=None):
+            seen["system"] = system_prompt
+            seen["user"] = user_prompt
+            return {"answer": "Report text here with [1] marker."}
+
+    facts = [
+        {"claim": "Electrical transformers step voltage between alternating-current circuits",
+         "source": "https://a.com/1", "confidence": 0.9, "sub_question": "angle one"},
+        {"claim": "Autotransformers share a single winding for compact regulation",
+         "source": "https://b.com/2", "confidence": 0.88, "sub_question": "angle one"},
+        {"claim": "Instrument transformers scale line voltage for metering",
+         "source": "https://c.com/3", "confidence": 0.87, "sub_question": "angle one"},
+        {"claim": "Transformer neural models use self-attention over token sequences",
+         "source": "https://d.com/4", "confidence": 0.9, "sub_question": "angle two"},
+        {"claim": "Cross-attention links decoders to encoder output representations",
+         "source": "https://e.com/5", "confidence": 0.88, "sub_question": "angle two"},
+        {"claim": "Parallel training replaced slow recurrent loops entirely",
+         "source": "https://f.com/6", "confidence": 0.87, "sub_question": "angle two"},
+    ]
+    answer = asyncio.run(synthesizer_agent(FakeLLM(), "What is transformer?", facts))
+    assert "Angles to cover" in seen["user"]
+    assert "angle one" in seen["user"] and "angle two" in seen["user"]
+    assert "separate them explicitly" in seen["system"], "entity/sense separation rule must be present"
+    system_flat = " ".join(seen["system"].lower().split())
+    assert "according to the research" in system_flat, "banned-phrase rule must be present"
+    assert "Key Findings" in seen["system"]
+    assert "Report text here" in answer
+
+
+def test_stratified_top_facts_keeps_weak_angles():
+    """Pure confidence ranking buries whole low-scoring angles; round-robin
+    keeps every sub-question represented (live: market angle cut entirely)."""
+    from app.agents.synthesizer import _stratified_top_facts
+
+    facts = [
+        {"claim": f"Strong angle claim {i} with distinct wording here",
+         "source": f"https://s{i}.com/x", "confidence": 0.9, "sub_question": "strong"}
+        for i in range(8)
+    ] + [
+        {"claim": "Weak angle market size was USD 5 billion in 2024",
+         "source": "https://w.com/x", "confidence": 0.3, "sub_question": "weak"},
+    ]
+    top = _stratified_top_facts(facts, per_angle=6, cap=30)
+    assert any(f["sub_question"] == "weak" for f in top)
+    assert len([f for f in top if f["sub_question"] == "strong"]) == 6
+
+
+def test_fallback_full_decision_shape():
+    """Degraded output honors the decision-grade contract: summary with a
+    confidence line, findings, angle analysis, gaps naming degraded stages
+    and conflicts — and a legend covering only used sources."""
+    from app.agents.synthesizer import synthesizer_agent
+
+    class ExplodingLLM:
+        async def generate_json(self, *a, **k):
+            raise RuntimeError("down")
+
+    facts = [
+        {"claim": "Electrical transformers step voltage between alternating-current circuits",
+         "source": "https://a.com/1", "confidence": 0.9, "sub_question": "angle one",
+         "verified": True},
+        {"claim": "Autotransformers share a single winding for compact regulation",
+         "source": "https://b.com/2", "confidence": 0.85, "sub_question": "angle one",
+         "verified": True},
+        {"claim": "Transformer neural models use self-attention over token sequences",
+         "source": "https://c.com/3", "confidence": 0.9, "sub_question": "angle two",
+         "verified": True},
+        {"claim": "Cross-attention links decoders to encoder output representations",
+         "source": "https://d.com/4", "confidence": 0.85, "sub_question": "angle two",
+         "verified": True},
+    ]
+    context = {
+        "contradictions": [{"claim_a": "Market is USD 23 billion", "source_a": "https://a.com/1",
+                            "claim_b": "Market is USD 78 billion", "source_b": "https://c.com/3"}],
+        "confidence": 0.6,
+        "degraded": ["planner"],
+        "total_facts": 6,
+        "verified_count": 4,
+    }
+    answer = asyncio.run(synthesizer_agent(ExplodingLLM(), "What is transformer?", facts, context))
+    assert "## Executive Summary" in answer
+    assert "## Key Findings" in answer
+    assert "## Angle one" in answer and "## Angle two" in answer
+    assert "## Evidence & Confidence" in answer
+    assert "## Limitations" in answer
+    assert "Confidence: Medium (0.60)" in answer
+    assert "planner" in answer.split("## Evidence & Confidence")[1]
+    assert "1 source conflict" in answer
+    assert "Uncertain: 2 collected claims" in answer
+    assert "Evidence is thin" not in answer
+    legend = answer.split("## Sources")[1]
+    assert "a.com" in legend and "d.com" in legend
+
+
+def test_fallback_key_findings_are_bullets_with_score_and_ambiguity():
+    """Brief shape: findings as bullets, numeric score in the confidence
+    line, and a senses-separated note when angles multiply."""
+    from app.agents.synthesizer import synthesizer_agent
+
+    class ExplodingLLM:
+        async def generate_json(self, *a, **k):
+            raise RuntimeError("down")
+
+    facts = [
+        {"claim": "Electrical transformers step voltage between alternating-current circuits",
+         "source": "https://a.com/1", "confidence": 0.9, "sub_question": "angle one"},
+        {"claim": "Transformer neural models use self-attention over token sequences",
+         "source": "https://b.com/2", "confidence": 0.9, "sub_question": "angle two"},
+        {"claim": "Market size for transformers grows steadily year over year",
+         "source": "https://c.com/3", "confidence": 0.9, "sub_question": "angle three"},
+    ]
+    answer = asyncio.run(synthesizer_agent(
+        ExplodingLLM(), "What is transformer?", facts, {"confidence": 0.8}))
+    findings = answer.split("## Key Findings")[1].split("## ")[0]
+    assert "- Transformer neural models" in findings
+    assert "distinct angles" in answer
+    assert "Confidence: High (0.80)" in answer
+
+
+def test_thin_evidence_disclaimer():
+    """Fewer than 3 verified facts: say so up front, rate Low."""
+    from app.agents.synthesizer import synthesizer_agent
+
+    class ExplodingLLM:
+        async def generate_json(self, *a, **k):
+            raise RuntimeError("down")
+
+    facts = [{"claim": "Electrical transformers step voltage between alternating circuits",
+              "source": "https://a.com/1", "confidence": 0.9, "verified": True}]
+    answer = asyncio.run(synthesizer_agent(
+        ExplodingLLM(), "What is transformer?", facts,
+        {"total_facts": 1, "verified_count": 1}))
+    assert "Evidence is thin" in answer
+    assert "Confidence: Low" in answer
+
+
+def test_render_context_block_carries_conflicts():
+    """The LLM brief must surface conflicts and the honesty baseline."""
+    from app.agents.synthesizer import _render_context_block
+
+    block = _render_context_block({
+        "contradictions": [{"claim_a": "A", "source_a": "https://a.com",
+                            "claim_b": "B", "source_b": "https://b.com"}],
+        "confidence": 0.8,
+        "degraded": ["critic"],
+        "total_facts": 10,
+        "verified_count": 7,
+    })
+    assert "CONFLICTS WITH" in block
+    assert "0.80" in block
+    assert "critic" in block
+    assert "7/10" in block
+    assert _render_context_block({}) == ""
+    assert _render_context_block(None) == ""
+
+
+def test_sanitizer_preserves_markdown_headings():
+    """The premium-report contract: ## / ### headings are the visual
+    hierarchy and must survive sanitization as their own blocks — the old
+    sanitizer stripped the markers and glued headings into paragraphs."""
+    from app.agents.synthesizer import _sanitize_answer_text
+
+    raw = "## Executive Summary\nRAG combines retrieval with generation.\n\n## Key Findings\n- Finding one [1].\n- Finding two [2]."
+    out = _sanitize_answer_text(raw, "What is RAG?")
+    assert "## Executive Summary" in out
+    assert "## Key Findings" in out
+    assert out.index("## Executive Summary") < out.index("RAG combines")
+    blocks = out.split("\n\n")
+    assert "## Key Findings" in blocks, "heading must be its own block, not glued to prose"
+
+
+def test_legend_dedupes_repeated_sources():
+    """One page cited by five claims is ONE source, not five legend rows."""
+    from app.agents.synthesizer import _numbered_sources
+
+    facts = [
+        {"claim": "Claim one", "source": "https://a.org/page", "confidence": 0.9},
+        {"claim": "Claim two", "source": "https://a.org/page", "confidence": 0.85},
+        {"claim": "Claim three", "source": "https://b.org/other", "confidence": 0.8},
+    ]
+    numbered = _numbered_sources(facts)
+    assert [s["n"] for s in numbered] == [1, 2]
+    assert numbered[0]["domain"] == "a.org"
+
+
+def test_legend_caps_at_twelve_strongest_sources():
+    from app.agents.synthesizer import _numbered_sources
+
+    facts = [{"claim": f"Claim {i}", "source": f"https://host-{i}.org/x", "confidence": 0.9}
+             for i in range(20)]
+    assert len(_numbered_sources(facts)) == 12
+
+
+def test_answer_support_parses_hash_sources_heading():
+    """verify_answer_support must resolve the current `## Sources` legend
+    form, not only the legacy bare `Sources:` line."""
+    from app.agents.evidence_utils import verify_answer_support
+
+    facts = [{"claim": "RAG combines retrieval with generation",
+              "source": "https://en.wikipedia.org/wiki/RAG", "verified": True}]
+    answer = (
+        "RAG combines retrieval with generation [1].\n\n"
+        "## Sources\n\n[1] en.wikipedia.org — https://en.wikipedia.org/wiki/RAG"
+    )
+    support = verify_answer_support(answer, facts)
+    assert support["cited"] == 1
+    assert support["supported"] == 1
+    assert support["rate"] == 1.0
+
+
+def test_sanitizer_keeps_bullets_as_list_items():
+    """Consecutive '- ' lines must stay distinct list items (one bullet
+    block), and inline ' - ' separators from model output must be split
+    into real bullets — never flattened into one prose line."""
+    from app.agents.synthesizer import _sanitize_answer_text
+
+    raw = (
+        "## Key Findings\n"
+        "- Finding one [1].\n"
+        "- Finding two [2]. - Finding three [3].\n\n"
+        "Closing paragraph text."
+    )
+    out = _sanitize_answer_text(raw, "What is RAG?")
+    bullet_block = [b for b in out.split("\n\n") if b.startswith("- ")]
+    assert len(bullet_block) == 1, "consecutive bullets form one block"
+    items = bullet_block[0].split("\n")
+    assert items == ["- Finding one [1].", "- Finding two [2].", "- Finding three [3]."], items
+    # Prose after the list stays its own paragraph.
+    assert out.endswith("Closing paragraph text.")
+
+
+def test_sanitizer_inline_bullet_split_requires_sentence_boundary():
+    """' - ' mid-sentence (after commas, inside hyphenated phrases) is
+    prose and must NOT be split."""
+    from app.agents.synthesizer import _sanitize_answer_text
+
+    raw = "- Voltage is raised for transmission - typically - to minimize loss [1]."
+    out = _sanitize_answer_text(raw, "How do transformers work?")
+    assert "\n" not in out and out.startswith("- Voltage"), out
+    assert " - typically - " in out, "mid-sentence hyphens must remain prose"
