@@ -42,7 +42,11 @@ export default function IntelligencePanel({
           <h2>Mission Intelligence</h2>
           <p>
             {run ? (
-              <><strong>{working} agents working</strong> · Real-time research</>
+              run.replay ? (
+                <><strong>Session replay</strong> · Read-only record</>
+              ) : (
+                <><strong>{working} agents working</strong> · Real-time research</>
+              )
             ) : (
               "No active mission"
             )}

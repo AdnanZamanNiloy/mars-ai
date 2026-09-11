@@ -18,6 +18,40 @@ import { IconChevronLeft, IconMenu } from "./components/icons";
 let seq = 1;
 const nid = () => `m${Date.now()}-${seq++}`;
 
+/* Reconstruct a panel-shaped run from a persisted session trace, so the
+ * intelligence panel has real numbers on replay screens. Read-only — the
+ * trace already carries everything; nothing is re-fetched. */
+function replayPanelRun(trace, query, runId) {
+  const claims = Array.isArray(trace?.claims) ? trace.claims : [];
+  const reviews = Array.isArray(trace?.critic_reviews) ? trace.critic_reviews : [];
+  const findings = claims.map((c) => ({
+    claim: c.claim,
+    source: c.source_url,
+    verified: c.verified === 1 || c.verified === true,
+    confidence: c.confidence,
+    agent: c.agent || "",
+    challenged: c.challenged === 1 || c.challenged === true,
+  }));
+  const lastReview = reviews.length ? reviews[reviews.length - 1] : null;
+  const completed = trace?.status === "completed";
+  return {
+    runId,
+    query,
+    replay: true,
+    plan: (trace?.plan || []).map((t) => t.question).filter(Boolean),
+    snippets: (trace?.sources || []).length,
+    findings,
+    verifiedCount: findings.filter((f) => f.verified).length,
+    critiques: reviews.map((r) => ({ iteration: r.iteration, reason: r.reason || "" })),
+    breakdown: lastReview?.breakdown || null,
+    confidence: typeof trace?.confidence === "number" ? trace.confidence : null,
+    done: completed,
+    error: completed ? "" : `Run ${trace?.status || "unknown"}`,
+    resumable: false,
+    resuming: false,
+  };
+}
+
 function blankRun(query, mode) {
   return {
     tempId: nid(),
@@ -328,31 +362,44 @@ export default function App() {
   }, [launch, running]);
 
   const openReplay = useCallback(async (runId) => {
-    if (replaying) return;
+    if (replaying || running) return;
     setReplaying(true);
     try {
       const trace = await fetchTrace(runId);
       const mission = loadMissions().find((m) => m.runId === runId);
-      setMessages((prev) => [...prev, { id: nid(), kind: "replay", runId, trace,
-        query: mission?.query || trace.query || "Replay", at: new Date().toISOString() }]);
+      // Selecting a session REPLACES the thread: only that session's record
+      // is shown, never a mix of every session in this browser tab.
+      setMessages([{
+        id: nid(), kind: "replay", runId, trace,
+        query: mission?.query || trace.query || "Replay", at: new Date().toISOString(),
+      }]);
       const events = (trace.events || []).map((e) => ({
         at: e.ended_at || e.started_at || new Date().toISOString(),
         kind: e.event_type === "end" ? "done" : "active",
         text: `${e.node} · ${e.event_type}`,
       }));
       setTraceLog(events.length > 0 ? events : [{ at: new Date().toISOString(), kind: "done", text: "Trace loaded — no node events recorded" }]);
+      setSelectedFinding(null);
       setView("workspace");
     } catch (err) {
-      setMessages((prev) => [...prev, {
+      setMessages([{
         id: nid(), kind: "notice", text: `Could not load replay: ${err instanceof Error ? err.message : "unknown error"}`,
         at: new Date().toISOString(),
       }]);
     } finally {
       setReplaying(false);
     }
-  }, [replaying]);
+  }, [replaying, running]);
 
   const activeRun = [...messages].reverse().find((m) => m.kind === "run")?.run || null;
+
+  // When the thread shows a replayed session, the intelligence panel reads
+  // a run-shaped view reconstructed from that session's persisted trace —
+  // otherwise it renders blank ("No active mission") on replay screens.
+  const lastMessage = messages.length ? messages[messages.length - 1] : null;
+  const panelRun = lastMessage?.kind === "replay"
+    ? replayPanelRun(lastMessage.trace, lastMessage.query, lastMessage.runId)
+    : activeRun;
 
   return (
     <div className="shell">
@@ -361,7 +408,7 @@ export default function App() {
         view={view}
         onNavigate={setView}
         missions={missions}
-        activeRunId={activeRun?.runId}
+        activeRunId={panelRun?.runId}
         onOpenMission={openReplay}
         onNew={startNew}
         open={sidebarOpen}
@@ -451,7 +498,7 @@ export default function App() {
         {view === "workspace" ? (
           <ErrorBoundary>
             <IntelligencePanel
-              run={activeRun}
+              run={panelRun}
               collapsed={intelCollapsed}
               onCollapse={() => setIntelCollapsed(true)}
               onResume={() => activeRun && resumeRun(activeRun)}
