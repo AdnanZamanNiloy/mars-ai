@@ -111,6 +111,44 @@ export function removeMission(runId) {
   return list;
 }
 
+/* Patch fields (title, pinned, projectId) on one mission, preserving order. */
+export function updateMission(runId, patch) {
+  const list = loadMissions().map((m) =>
+    m.runId === runId ? { ...m, ...patch, updatedAt: new Date().toISOString() } : m);
+  try {
+    localStorage.setItem(MISSIONS_KEY, JSON.stringify(list.slice(0, MAX_MISSIONS)));
+  } catch {
+    /* ignore */
+  }
+  return list.slice(0, MAX_MISSIONS);
+}
+
+const PROJECTS_KEY = "mars.projects.v1";
+
+export function loadProjects() {
+  try {
+    const raw = localStorage.getItem(PROJECTS_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+export function createProject(name) {
+  const clean = String(name || "").trim().slice(0, 60);
+  if (!clean) return loadProjects();
+  const list = loadProjects();
+  const project = { id: `p${Date.now()}`, name: clean, createdAt: new Date().toISOString() };
+  const next = [...list, project];
+  try {
+    localStorage.setItem(PROJECTS_KEY, JSON.stringify(next));
+  } catch {
+    /* ignore */
+  }
+  return next;
+}
+
 const KNOWLEDGE_KEY = "mars.knowledge.v1";
 const MAX_SAVED = 100;
 

@@ -51,7 +51,7 @@ export default function MissionsView({ missions, onOpen, onRemove, onNew }) {
           onKeyDown={(e) => { if (e.key === "Enter") onOpen(m.runId); }}>
           <span className={`dot ${DOT[m.status] || "idle"}`} style={{ marginTop: 6 }} />
           <span className="body">
-            <p className="q">{m.query}</p>
+            <p className="q">{m.title || m.query}</p>
             {parent ? (
               <span className="meta">
                 <span>↳ challenge of “{(parent.query || "").slice(0, 70)}”</span>

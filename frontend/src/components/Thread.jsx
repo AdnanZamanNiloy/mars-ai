@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { formatTime } from "../lib";
-import { IconCheck, IconChevronDown, IconClock, IconCopy, IconRefresh, IconSpeaker, IconThumbDown, IconThumbUp } from "./icons";
+import { IconCheck, IconChevronDown, IconClock, IconCopy, IconRefresh } from "./icons";
 
 /* Chat-style thread: right-aligned user bubbles, plain MARS responses
  * with a working action row (copy, read aloud, feedback, regenerate). */
@@ -13,30 +13,8 @@ export function UserMessage({ text, time }) {
   );
 }
 
-const FEEDBACK_KEY = "mars.feedback.v1";
-
-function readFeedback(id) {
-  try {
-    return (JSON.parse(localStorage.getItem(FEEDBACK_KEY) || {}))[id] || null;
-  } catch {
-    return null;
-  }
-}
-
-function writeFeedback(id, value) {
-  try {
-    const all = JSON.parse(localStorage.getItem(FEEDBACK_KEY) || {});
-    if (value) all[id] = value; else delete all[id];
-    localStorage.setItem(FEEDBACK_KEY, JSON.stringify(all));
-  } catch {
-    /* ignore */
-  }
-}
-
 export function MessageActions({ messageId, text, onRegenerate, canRegenerate }) {
-  const [vote, setVote] = useState(() => readFeedback(messageId));
   const [copied, setCopied] = useState(false);
-  const [speaking, setSpeaking] = useState(false);
 
   const copy = async () => {
     try {
@@ -53,39 +31,10 @@ export function MessageActions({ messageId, text, onRegenerate, canRegenerate })
     setTimeout(() => setCopied(false), 1400);
   };
 
-  const toggleSpeak = () => {
-    if (!("speechSynthesis" in window)) return;
-    if (speaking) {
-      window.speechSynthesis.cancel();
-      setSpeaking(false);
-      return;
-    }
-    const utterance = new SpeechSynthesisUtterance(text.slice(0, 2000));
-    utterance.onend = () => setSpeaking(false);
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
-    setSpeaking(true);
-  };
-
-  const rate = (value) => {
-    const next = vote === value ? null : value;
-    setVote(next);
-    writeFeedback(messageId, next);
-  };
-
   return (
     <div className="msg-actions" role="toolbar" aria-label="Message actions">
       <button className="icon-btn" onClick={copy} title={copied ? "Copied" : "Copy"} aria-label="Copy">
         {copied ? <IconCheck size={15} /> : <IconCopy size={15} />}
-      </button>
-      <button className="icon-btn" onClick={toggleSpeak} title={speaking ? "Stop" : "Read aloud"} aria-label="Read aloud">
-        <IconSpeaker size={15} />
-      </button>
-      <button className={`icon-btn${vote === "up" ? " is-active" : ""}`} onClick={() => rate("up")} title="Good response" aria-label="Good response" aria-pressed={vote === "up"}>
-        <IconThumbUp size={15} />
-      </button>
-      <button className={`icon-btn${vote === "down" ? " is-active" : ""}`} onClick={() => rate("down")} title="Bad response" aria-label="Bad response" aria-pressed={vote === "down"}>
-        <IconThumbDown size={15} />
       </button>
       {canRegenerate ? (
         <button className="icon-btn" onClick={onRegenerate} title="Regenerate" aria-label="Regenerate">

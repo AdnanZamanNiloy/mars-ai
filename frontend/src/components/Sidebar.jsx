@@ -1,5 +1,5 @@
 import { timeAgo } from "../lib";
-import { IconAgents, IconCompass, IconDoc, IconFlask, IconMissions, IconLayers, IconPlus } from "./icons";
+import { IconAgents, IconMissions, IconPlus } from "./icons";
 
 export function Planet({ size = 40, ring = false }) {
   return (
@@ -10,11 +10,7 @@ export function Planet({ size = 40, ring = false }) {
 }
 
 const NAV = [
-  { id: "workspace", label: "Command Center", icon: IconCompass },
   { id: "missions", label: "Missions", icon: IconMissions },
-  { id: "evidence", label: "Evidence", icon: IconLayers },
-  { id: "knowledge", label: "Knowledge", icon: IconDoc },
-  { id: "evaluations", label: "Evaluations", icon: IconFlask },
   { id: "agents", label: "Agents", icon: IconAgents },
 ];
 
@@ -26,10 +22,19 @@ const DOT = {
   aborted: "idle",
 };
 
-export default function Sidebar({ view, onNavigate, missions, activeRunId, onOpenMission, onNew, open, onClose }) {
+export default function Sidebar({ view, onNavigate, missions, projects = [], activeRunId, onOpenMission, onNew, open, onClose }) {
+  const projectName = (id) => (projects.find((p) => p.id === id) || {}).name || "";
+  const ordered = [...missions].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned));
   return (
     <aside className={`sidebar${open ? " open" : ""}`}>
-      <div className="brand">
+      <div
+        className="brand brand-home"
+        onClick={() => { onNavigate("workspace"); onClose?.(); }}
+        onKeyDown={(e) => { if (e.key === "Enter") { onNavigate("workspace"); onClose?.(); } }}
+        role="button"
+        tabIndex={0}
+        title="Back to research console"
+      >
         <Planet size={44} />
         <div>
           <div className="brand-name">MARS</div>
@@ -63,23 +68,29 @@ export default function Sidebar({ view, onNavigate, missions, activeRunId, onOpe
         {missions.length === 0 ? (
           <p className="empty">No missions yet — your runs will appear here.</p>
         ) : (
-          missions.slice(0, 6).map((m) => (
-            <button
-              key={m.runId}
-              className={`mission-row${m.runId === activeRunId ? " active" : ""}`}
-              onClick={() => { onOpenMission(m.runId); onClose?.(); }}
-              title={m.query}
-            >
-              <span className={`dot ${DOT[m.status] || "idle"}`} />
-              <span className="body">
-                <span className="name">{m.query}</span>
-                <span className="sub">
-                  <span>{statusLabel(m.status)}</span>
-                  <span>{timeAgo(m.updatedAt)}</span>
+          ordered.slice(0, 6).map((m) => {
+            const label = m.title || m.query;
+            const project = m.projectId ? projectName(m.projectId) : "";
+            return (
+              <button
+                key={m.runId}
+                className={`mission-row${m.runId === activeRunId ? " active" : ""}${m.pinned ? " pinned" : ""}`}
+                onClick={() => { onOpenMission(m.runId); onClose?.(); }}
+                title={label}
+              >
+                <span className={`dot ${DOT[m.status] || "idle"}`} />
+                <span className="body">
+                  <span className="name">{label}</span>
+                  <span className="sub">
+                    <span>{statusLabel(m.status)}</span>
+                    {m.pinned ? <span>Pinned</span> : null}
+                    {project ? <span>{project}</span> : null}
+                    <span>{timeAgo(m.updatedAt)}</span>
+                  </span>
                 </span>
-              </span>
-            </button>
-          ))
+              </button>
+            );
+          })
         )}
       </div>
 

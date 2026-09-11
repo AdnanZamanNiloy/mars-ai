@@ -39,6 +39,10 @@ export const IconChevronLeft = (p) => base({ ...p, children: <path d="m15 18-6-6
 export const IconRefresh = (p) => base({ ...p, children: <><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></> });
 export const IconMenu = (p) => base({ ...p, children: <><path d="M4 6h16M4 12h16M4 18h16" /></> });
 export const IconX = (p) => base({ ...p, children: <><path d="M18 6 6 18M6 6l12 12" /></> });
+export const IconPencil = (p) => base({ ...p, children: <><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /><path d="m15 5 4 4" /></> });
+export const IconTrash = (p) => base({ ...p, children: <><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></> });
+export const IconPin = (p) => base({ ...p, children: <><path d="M12 17v5" /><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16h14v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1Z" /></> });
+export const IconFolder = (p) => base({ ...p, children: <><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" /></> });
 export const IconPlus = (p) => base({ ...p, children: <><path d="M12 5v14M5 12h14" /></> });
 export const IconSend = (p) => base({ ...p, children: <><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></> });
 export const IconStop = (p) => base({ ...p, children: <rect x="6" y="6" width="12" height="12" rx="2" /> });

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchTrace, resumeResearch, startResearch } from "./api";
-import { MODE_META, loadKnowledge, loadMissions, parseReport, removeKnowledgeItem, removeMission, saveKnowledgeItem, upsertMission } from "./lib";
+import { MODE_META, loadKnowledge, loadMissions, loadProjects, createProject, parseReport, removeKnowledgeItem, removeMission, saveKnowledgeItem, updateMission, upsertMission } from "./lib";
 import Sidebar, { Planet } from "./components/Sidebar";
 import Composer from "./components/Composer";
 import { ErrorCard, MarsMessageShell, ThinkingSteps, TypingRow, UserMessage } from "./components/Thread";
@@ -14,10 +14,79 @@ import KnowledgeView from "./components/KnowledgeView";
 import EvalView from "./components/EvalView";
 import AgentsView from "./components/AgentsView";
 import Landing from "./components/Landing";
-import { IconChevronLeft, IconMenu } from "./components/icons";
+import { IconCheck, IconChevronDown, IconChevronLeft, IconDoc, IconFlask, IconFolder, IconLayers, IconMenu, IconPencil, IconPin, IconTrash } from "./components/icons";
 
 let seq = 1;
 const nid = () => `m${Date.now()}-${seq++}`;
+
+const VALID_VIEWS = ["landing", "workspace", "missions", "evidence", "knowledge", "evaluations", "agents"];
+
+const LIBRARY = [
+  { id: "evidence", label: "Evidence", icon: IconLayers },
+  { id: "knowledge", label: "Knowledge", icon: IconDoc },
+  { id: "evaluations", label: "Evaluations", icon: IconFlask },
+];
+
+/* Library dropdown in the title bar: the research library pages live here
+ * instead of the sidebar. Opens on click, highlights the open page. */
+function LibraryMenu({ view, onNavigate }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open ]);
+
+  const active = LIBRARY.some((item) => item.id === view);
+  return (
+    <div className="title-menu-wrap library-menu-wrap" ref={wrapRef}>
+      <button
+        className={`library-btn${active ? " active" : ""}`}
+        onClick={() => setOpen((o) => !o)}
+        aria-label="Library"
+        aria-expanded={open}
+        aria-haspopup="menu"
+      >
+        <IconFolder size={15} /> Library
+        <IconChevronDown size={14} className={`nav-chev${open ? " open" : ""}`} />
+      </button>
+      {open ? (
+        <div className="title-menu library-menu" role="menu">
+          {LIBRARY.map((item) => (
+            <button
+              key={item.id}
+              className={`title-menu-item${view === item.id ? " active" : ""}`}
+              onClick={() => { onNavigate(item.id); setOpen(false); }}
+            >
+              <item.icon size={15} /> {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function viewFromHash() {
+  try {
+    const h = window.location.hash.replace(/^#\/?/, "");
+    return VALID_VIEWS.includes(h) ? h : "landing";
+  } catch {
+    return "landing";
+  }
+}
 
 /* Reconstruct a panel-shaped run from a persisted session trace, so the
  * intelligence panel has real numbers on replay screens. Read-only — the
@@ -83,8 +152,35 @@ function blankRun(query, mode) {
 }
 
 export default function App() {
-  const [view, setView] = useState("landing");
+  const [view, setViewState] = useState(viewFromHash);
+  const viewRef = useRef(viewFromHash());
+
+  /* Browser back/forward support: every view is a real history entry, so
+   * the arrows move between landing and the console views. */
+  const go = useCallback((v) => {
+    const next = VALID_VIEWS.includes(v) ? v : "workspace";
+    if (viewRef.current === next) return;
+    viewRef.current = next;
+    try {
+      window.history.pushState({ view: next }, "", next === "landing" ? "#/" : `#/${next}`);
+    } catch {
+      /* non-browser/test environment — state still updates */
+    }
+    setViewState(next);
+  }, []);
+
+  useEffect(() => {
+    const onPop = (e) => {
+      const v = (e.state && e.state.view) || viewFromHash();
+      const next = VALID_VIEWS.includes(v) ? v : "landing";
+      viewRef.current = next;
+      setViewState(next);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
   const [missions, setMissions] = useState(() => loadMissions());
+  const [projects, setProjects] = useState(() => loadProjects());
   const [knowledge, setKnowledge] = useState(() => loadKnowledge());
   const [messages, setMessages] = useState([]);
   const [composer, setComposer] = useState("");
@@ -275,7 +371,7 @@ export default function App() {
       ]);
       setTraceLog([]);
       setSelectedFinding(null);
-      setView("workspace");
+      go("workspace");
     }
 
     runRef.current = tempId;
@@ -341,7 +437,7 @@ export default function App() {
     setSelectedFinding(null);
     setComposer("");
     setRunning(false);
-    setView("workspace");
+    go("workspace");
   }, []);
 
   const resumeRun = useCallback((run) => {
@@ -381,7 +477,7 @@ export default function App() {
       }));
       setTraceLog(events.length > 0 ? events : [{ at: new Date().toISOString(), kind: "done", text: "Trace loaded — no node events recorded" }]);
       setSelectedFinding(null);
-      setView("workspace");
+      go("workspace");
     } catch (err) {
       setMessages([{
         id: nid(), kind: "notice", text: `Could not load replay: ${err instanceof Error ? err.message : "unknown error"}`,
@@ -397,21 +493,65 @@ export default function App() {
   // When the thread shows a replayed session, the intelligence panel reads
   // a run-shaped view reconstructed from that session's persisted trace —
   // otherwise it renders blank ("No active mission") on replay screens.
+  // Declared up here because the page title below also needs lastMessage.
   const lastMessage = messages.length ? messages[messages.length - 1] : null;
   const panelRun = lastMessage?.kind === "replay"
     ? replayPanelRun(lastMessage.trace, lastMessage.query, lastMessage.runId)
     : activeRun;
 
+  /* Fixed page title: the current research question on the workspace view,
+   * plain view names elsewhere. The menu acts on the displayed mission. */
+  const VIEW_TITLES = { missions: "Missions", evidence: "Evidence", knowledge: "Knowledge", evaluations: "Evaluations", agents: "Agents" };
+  const titleMessage = [...messages].reverse().find((m) =>
+    (m.kind === "run" && m.run?.query) ||
+    (m.kind === "replay" && m.query) ||
+    (m.kind === "user" && m.text));
+  const displayedRunId = activeRun?.runId
+    || (lastMessage?.kind === "replay" ? lastMessage.runId : null)
+    || null;
+  const activeMission = displayedRunId
+    ? (missions.find((m) => m.runId === displayedRunId) || null)
+    : null;
+  const pageTitle = view === "workspace"
+    ? (activeMission
+      ? (activeMission.title || activeMission.query || "New Research")
+      : (!titleMessage ? "New Research"
+        : titleMessage.kind === "user" ? titleMessage.text
+        : titleMessage.kind === "run" ? titleMessage.run.query
+        : titleMessage.query))
+    : (VIEW_TITLES[view] || "Command Center");
+
+  const renameMission = useCallback((runId, title) => {
+    saveMissions(updateMission(runId, { title }));
+  }, [saveMissions]);
+  const toggleMissionPin = useCallback((runId) => {
+    saveMissions(updateMission(runId, { pinned: !(missions.find((m) => m.runId === runId)?.pinned) }));
+  }, [missions, saveMissions]);
+  const deleteMission = useCallback((runId) => {
+    if (!window.confirm("Delete this research session? This cannot be undone.")) return;
+    saveMissions(removeMission(runId));
+    if (displayedRunId === runId) startNew();
+  }, [displayedRunId, saveMissions, startNew]);
+  const assignMissionProject = useCallback((runId, projectId) => {
+    saveMissions(updateMission(runId, { projectId }));
+  }, [saveMissions]);
+  const makeProject = useCallback((name) => {
+    const next = createProject(name);
+    setProjects(next);
+    return next[next.length - 1] || null;
+  }, []);
+
   return (
     view === "landing" ? (
-      <Landing onStart={() => setView("workspace")} />
+      <Landing onStart={() => go("workspace")} />
     ) : (
     <div className="shell">
       <ErrorBoundary>
       <Sidebar
         view={view}
-        onNavigate={setView}
+        onNavigate={go}
         missions={missions}
+        projects={projects}
         activeRunId={panelRun?.runId}
         onOpenMission={openReplay}
         onNew={startNew}
@@ -424,6 +564,18 @@ export default function App() {
       <div className="workspace-wrap">
         <ErrorBoundary>
         <main className="workspace">
+          <PageTitle
+            title={pageTitle}
+            mission={view === "workspace" ? activeMission : null}
+            view={view}
+            onNavigate={go}
+            projects={projects}
+            onRename={renameMission}
+            onTogglePin={toggleMissionPin}
+            onDelete={deleteMission}
+            onAssignProject={assignMissionProject}
+            onCreateProject={makeProject}
+          />
           <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
             <IconMenu size={17} />
           </button>
@@ -602,6 +754,131 @@ function ThreadMessage({ message, running, onResume, onChallenge, onRegenerate, 
     );
   }
   return null;
+}
+
+function PageTitle({ title, mission, view, onNavigate, projects, onRename, onTogglePin, onDelete, onAssignProject, onCreateProject }) {
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [showProjects, setShowProjects] = useState(false);
+  const [newProject, setNewProject] = useState("");
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+        setOpen(false); setShowProjects(false);
+      }
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") { setOpen(false); setShowProjects(false); }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open ]);
+
+  const close = () => { setOpen(false); setShowProjects(false); setEditing(false); };
+
+  const commitRename = () => {
+    const clean = draft.trim().slice(0, 80);
+    if (clean && mission) onRename(mission.runId, clean);
+    setEditing(false);
+  };
+
+  const create = () => {
+    const clean = newProject.trim();
+    if (!clean || !mission) return;
+    const project = onCreateProject(clean);
+    if (project) onAssignProject(mission.runId, project.id);
+    setNewProject("");
+    close();
+  };
+
+  if (editing && mission) {
+    return (
+      <div className="page-title-bar">
+        <input
+          className="title-rename-input"
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commitRename();
+            if (e.key === "Escape") setEditing(false);
+          }}
+          aria-label="Rename research session"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="page-title-bar">
+      <span className="page-title-text" title={title}>{title}</span>
+      {mission ? (
+        <div className="title-menu-wrap" ref={wrapRef}>
+          <button
+            className="icon-btn title-menu-btn"
+            onClick={() => setOpen((o) => !o)}
+            aria-label="Session actions"
+            aria-expanded={open}
+            aria-haspopup="menu"
+          >
+            <IconChevronDown size={15} />
+          </button>
+          {open ? (
+            <div className="title-menu" role="menu">
+              <button
+                className="title-menu-item"
+                onClick={() => { setDraft(mission.title || mission.query || ""); setEditing(true); setOpen(false); }}
+              >
+                <IconPencil size={14} /> Rename
+              </button>
+              <button className="title-menu-item" onClick={() => setShowProjects((s) => !s)} aria-expanded={showProjects}>
+                <IconFolder size={14} /> Add to project <span className="menu-arrow">›</span>
+              </button>
+              {showProjects ? (
+                <div className="title-submenu">
+                  {projects.map((p) => (
+                    <button
+                      key={p.id}
+                      className="title-menu-item sub"
+                      onClick={() => { onAssignProject(mission.runId, mission.projectId === p.id ? null : p.id); close(); }}
+                    >
+                      {mission.projectId === p.id ? <IconCheck size={13} /> : <span className="menu-check-space" />}
+                      <span className="menu-project-name">{p.name}</span>
+                    </button>
+                  ))}
+                  <div className="title-menu-new">
+                    <input
+                      value={newProject}
+                      onChange={(e) => setNewProject(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") create(); }}
+                      placeholder="New project…"
+                      aria-label="New project name"
+                    />
+                  </div>
+                </div>
+              ) : null}
+              <button className="title-menu-item" onClick={() => { onTogglePin(mission.runId); close(); }}>
+                <IconPin size={14} /> {mission.pinned ? "Unpin" : "Pin"}
+              </button>
+              <button className="title-menu-item danger" onClick={() => { onDelete(mission.runId); close(); }}>
+                <IconTrash size={14} /> Delete
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      <LibraryMenu view={view} onNavigate={onNavigate} />
+    </div>
+  );
 }
 
 function WelcomeHero({ composer }) {
