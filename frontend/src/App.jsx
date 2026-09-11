@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchTrace, resumeResearch, startResearch } from "./api";
-import { MODE_META, loadKnowledge, loadMissions, loadProjects, createProject, parseReport, removeKnowledgeItem, removeMission, saveKnowledgeItem, updateMission, upsertMission } from "./lib";
+import { MODE_META, loadKnowledge, loadMissions, parseReport, removeKnowledgeItem, removeMission, saveKnowledgeItem, updateMission, upsertMission } from "./lib";
 import Sidebar, { Planet } from "./components/Sidebar";
 import Composer from "./components/Composer";
 import { ErrorCard, MarsMessageShell, ThinkingSteps, TypingRow, UserMessage } from "./components/Thread";
@@ -11,20 +11,19 @@ import IntelligencePanel from "./components/IntelligencePanel";
 import MissionsView from "./components/MissionsView";
 import EvidenceView from "./components/EvidenceView";
 import KnowledgeView from "./components/KnowledgeView";
-import EvalView from "./components/EvalView";
 import AgentsView from "./components/AgentsView";
+import ProvidersView from "./components/ProvidersView";
 import Landing from "./components/Landing";
-import { IconCheck, IconChevronDown, IconChevronLeft, IconDoc, IconFlask, IconFolder, IconLayers, IconMenu, IconPencil, IconPin, IconTrash } from "./components/icons";
+import { IconChevronDown, IconChevronLeft, IconDoc, IconFolder, IconLayers, IconMenu, IconPencil, IconPin, IconTrash } from "./components/icons";
 
 let seq = 1;
 const nid = () => `m${Date.now()}-${seq++}`;
 
-const VALID_VIEWS = ["landing", "workspace", "missions", "evidence", "knowledge", "evaluations", "agents"];
+const VALID_VIEWS = ["landing", "workspace", "missions", "evidence", "knowledge", "agents", "providers"];
 
 const LIBRARY = [
   { id: "evidence", label: "Evidence", icon: IconLayers },
   { id: "knowledge", label: "Knowledge", icon: IconDoc },
-  { id: "evaluations", label: "Evaluations", icon: IconFlask },
 ];
 
 /* Library dropdown in the title bar: the research library pages live here
@@ -180,7 +179,6 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
   const [missions, setMissions] = useState(() => loadMissions());
-  const [projects, setProjects] = useState(() => loadProjects());
   const [knowledge, setKnowledge] = useState(() => loadKnowledge());
   const [messages, setMessages] = useState([]);
   const [composer, setComposer] = useState("");
@@ -445,19 +443,6 @@ export default function App() {
     launch("", { resumeRun: run });
   }, [launch, running]);
 
-  const challengeRun = useCallback((run) => {
-    if (running || !run.runId) return;
-    const sections = parseReport(run.report || "");
-    const ammo = sections.contradictions || sections.finalAnswer || "";
-    const challengeQuery =
-      `Challenge this research conclusion. Original question: "${run.query}". ` +
-      (ammo
-        ? `Attack these points with counter-evidence: ${ammo.slice(0, 400)}`
-        : "Find counter-evidence, limitations, and reasons the conclusion could be wrong.");
-    setMode("redteam");
-    launch(challengeQuery, { parentRunId: run.runId });
-  }, [launch, running]);
-
   const openReplay = useCallback(async (runId) => {
     if (replaying || running) return;
     setReplaying(true);
@@ -501,7 +486,7 @@ export default function App() {
 
   /* Fixed page title: the current research question on the workspace view,
    * plain view names elsewhere. The menu acts on the displayed mission. */
-  const VIEW_TITLES = { missions: "Missions", evidence: "Evidence", knowledge: "Knowledge", evaluations: "Evaluations", agents: "Agents" };
+  const VIEW_TITLES = { missions: "Missions", evidence: "Evidence", knowledge: "Knowledge", agents: "Agents", providers: "Providers" };
   const titleMessage = [...messages].reverse().find((m) =>
     (m.kind === "run" && m.run?.query) ||
     (m.kind === "replay" && m.query) ||
@@ -532,14 +517,6 @@ export default function App() {
     saveMissions(removeMission(runId));
     if (displayedRunId === runId) startNew();
   }, [displayedRunId, saveMissions, startNew]);
-  const assignMissionProject = useCallback((runId, projectId) => {
-    saveMissions(updateMission(runId, { projectId }));
-  }, [saveMissions]);
-  const makeProject = useCallback((name) => {
-    const next = createProject(name);
-    setProjects(next);
-    return next[next.length - 1] || null;
-  }, []);
 
   return (
     view === "landing" ? (
@@ -551,7 +528,6 @@ export default function App() {
         view={view}
         onNavigate={go}
         missions={missions}
-        projects={projects}
         activeRunId={panelRun?.runId}
         onOpenMission={openReplay}
         onNew={startNew}
@@ -569,12 +545,10 @@ export default function App() {
             mission={view === "workspace" ? activeMission : null}
             view={view}
             onNavigate={go}
-            projects={projects}
+            showLibrary={view === "workspace" && messages.some((m) => m.kind === "run" || m.query || m.run?.query)}
             onRename={renameMission}
             onTogglePin={toggleMissionPin}
             onDelete={deleteMission}
-            onAssignProject={assignMissionProject}
-            onCreateProject={makeProject}
           />
           <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
             <IconMenu size={17} />
@@ -599,10 +573,10 @@ export default function App() {
                   onRemove={(item) => setKnowledge(removeKnowledgeItem(item))}
                   onInspect={setSelectedFinding}
                 />
-              ) : view === "evaluations" ? (
-                <EvalView />
               ) : view === "agents" ? (
                 <AgentsView />
+              ) : view === "providers" ? (
+                <ProvidersView />
               ) : messages.length === 0 ? (
                 <WelcomeHero
                   composer={
@@ -624,7 +598,6 @@ export default function App() {
                   message={m}
                   running={running}
                   onResume={resumeRun}
-                  onChallenge={challengeRun}
                   onRegenerate={submitQuery}
                   steps={traceLog}
                 />)
@@ -643,7 +616,7 @@ export default function App() {
                   onAbort={abortRun}
                   mode={mode}
                   onModeChange={setMode}
-                  placeholder="Ask a follow-up or challenge the conclusion…"
+                  placeholder="Ask a follow-up question…"
                 />
               </div>
             </div>
@@ -681,7 +654,7 @@ export default function App() {
   );
 }
 
-function ThreadMessage({ message, running, onResume, onChallenge, onRegenerate, steps }) {
+function ThreadMessage({ message, running, onResume, onRegenerate, steps }) {
   if (message.kind === "user") {
     return <UserMessage text={message.text} />;
   }
@@ -704,16 +677,7 @@ function ThreadMessage({ message, running, onResume, onChallenge, onRegenerate, 
           <ErrorCard message={run.error} resumable={run.resumable} resuming={run.resuming} onResume={() => onResume(run)} />
         ) : null}
         {run.done && run.report ? (
-          <>
-            <AnswerCard run={run} />
-            {!running ? (
-              <div style={{ marginTop: 12 }}>
-                <button className="btn" onClick={() => onChallenge(run)}>
-                  Challenge conclusion
-                </button>
-              </div>
-            ) : null}
-          </>
+          <AnswerCard run={run} />
         ) : null}
         {run.done && !run.report && !run.error ? (
           <div className="error-box">The run finished without producing a report.</div>
@@ -756,23 +720,21 @@ function ThreadMessage({ message, running, onResume, onChallenge, onRegenerate, 
   return null;
 }
 
-function PageTitle({ title, mission, view, onNavigate, projects, onRename, onTogglePin, onDelete, onAssignProject, onCreateProject }) {
+function PageTitle({ title, mission, view, onNavigate, showLibrary, onRename, onTogglePin, onDelete }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
-  const [showProjects, setShowProjects] = useState(false);
-  const [newProject, setNewProject] = useState("");
   const wrapRef = useRef(null);
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e) => {
       if (wrapRef.current && !wrapRef.current.contains(e.target)) {
-        setOpen(false); setShowProjects(false);
+        setOpen(false);
       }
     };
     const onKey = (e) => {
-      if (e.key === "Escape") { setOpen(false); setShowProjects(false); }
+      if (e.key === "Escape") { setOpen(false); }
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -782,21 +744,12 @@ function PageTitle({ title, mission, view, onNavigate, projects, onRename, onTog
     };
   }, [open ]);
 
-  const close = () => { setOpen(false); setShowProjects(false); setEditing(false); };
+  const close = () => { setOpen(false); setEditing(false); };
 
   const commitRename = () => {
     const clean = draft.trim().slice(0, 80);
     if (clean && mission) onRename(mission.runId, clean);
     setEditing(false);
-  };
-
-  const create = () => {
-    const clean = newProject.trim();
-    if (!clean || !mission) return;
-    const project = onCreateProject(clean);
-    if (project) onAssignProject(mission.runId, project.id);
-    setNewProject("");
-    close();
   };
 
   if (editing && mission) {
@@ -840,32 +793,6 @@ function PageTitle({ title, mission, view, onNavigate, projects, onRename, onTog
               >
                 <IconPencil size={14} /> Rename
               </button>
-              <button className="title-menu-item" onClick={() => setShowProjects((s) => !s)} aria-expanded={showProjects}>
-                <IconFolder size={14} /> Add to project <span className="menu-arrow">›</span>
-              </button>
-              {showProjects ? (
-                <div className="title-submenu">
-                  {projects.map((p) => (
-                    <button
-                      key={p.id}
-                      className="title-menu-item sub"
-                      onClick={() => { onAssignProject(mission.runId, mission.projectId === p.id ? null : p.id); close(); }}
-                    >
-                      {mission.projectId === p.id ? <IconCheck size={13} /> : <span className="menu-check-space" />}
-                      <span className="menu-project-name">{p.name}</span>
-                    </button>
-                  ))}
-                  <div className="title-menu-new">
-                    <input
-                      value={newProject}
-                      onChange={(e) => setNewProject(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") create(); }}
-                      placeholder="New project…"
-                      aria-label="New project name"
-                    />
-                  </div>
-                </div>
-              ) : null}
               <button className="title-menu-item" onClick={() => { onTogglePin(mission.runId); close(); }}>
                 <IconPin size={14} /> {mission.pinned ? "Unpin" : "Pin"}
               </button>
@@ -876,7 +803,7 @@ function PageTitle({ title, mission, view, onNavigate, projects, onRename, onTog
           ) : null}
         </div>
       ) : null}
-      <LibraryMenu view={view} onNavigate={onNavigate} />
+      {showLibrary ? <LibraryMenu view={view} onNavigate={onNavigate} /> : null}
     </div>
   );
 }

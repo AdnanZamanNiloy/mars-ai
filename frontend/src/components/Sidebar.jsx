@@ -1,5 +1,5 @@
 import { timeAgo } from "../lib";
-import { IconAgents, IconMissions, IconPlus } from "./icons";
+import { IconAgents, IconCompass, IconMissions, IconPlus } from "./icons";
 
 export function Planet({ size = 40, ring = false }) {
   return (
@@ -11,6 +11,7 @@ export function Planet({ size = 40, ring = false }) {
 
 const NAV = [
   { id: "missions", label: "Missions", icon: IconMissions },
+  { id: "providers", label: "Providers", icon: IconCompass },
   { id: "agents", label: "Agents", icon: IconAgents },
 ];
 
@@ -22,8 +23,7 @@ const DOT = {
   aborted: "idle",
 };
 
-export default function Sidebar({ view, onNavigate, missions, projects = [], activeRunId, onOpenMission, onNew, open, onClose }) {
-  const projectName = (id) => (projects.find((p) => p.id === id) || {}).name || "";
+export default function Sidebar({ view, onNavigate, missions, activeRunId, onOpenMission, onNew, open, onClose }) {
   const ordered = [...missions].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned));
   return (
     <aside className={`sidebar${open ? " open" : ""}`}>
@@ -70,7 +70,6 @@ export default function Sidebar({ view, onNavigate, missions, projects = [], act
         ) : (
           ordered.slice(0, 6).map((m) => {
             const label = m.title || m.query;
-            const project = m.projectId ? projectName(m.projectId) : "";
             return (
               <button
                 key={m.runId}
@@ -84,7 +83,6 @@ export default function Sidebar({ view, onNavigate, missions, projects = [], act
                   <span className="sub">
                     <span>{statusLabel(m.status)}</span>
                     {m.pinned ? <span>Pinned</span> : null}
-                    {project ? <span>{project}</span> : null}
                     <span>{timeAgo(m.updatedAt)}</span>
                   </span>
                 </span>

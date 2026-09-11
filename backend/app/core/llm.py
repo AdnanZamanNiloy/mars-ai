@@ -198,10 +198,37 @@ class LLMClient:
                 await asyncio.sleep(0.7 * (attempt + 1))
         return {}
 
+    async def _resolve_custom(self) -> tuple[Dict[str, str] | None, bool]:
+        """(config, exclusive). A DB-selected active provider wins and is
+        EXCLUSIVE — the user's explicit choice, so no other key is spent.
+        Otherwise the env CUSTOM_LLM_* trio (non-exclusive, legacy chain)."""
+        try:
+            from app.core.providers import get_active_provider
+
+            active = await get_active_provider(self.settings.database_url)
+        except Exception as exc:
+            logger.warning(
+                "[LLM] provider store unreadable, using env config: %s", exc, exc_info=exc
+            )
+            active = None
+        if active:
+            base = str(active.get("base_url", "") or "").strip().rstrip("/")
+            endpoint = base if base.lower().endswith("/chat/completions") else base + "/chat/completions"
+            return {
+                "api_key": str(active.get("api_key", "") or ""),
+                "endpoint": endpoint,
+                "model": str(active.get("model", "") or ""),
+                "name": str(active.get("name", "") or "active provider"),
+            }, True
+        return self._custom_config(), False
+
     async def _generate_with_fallback(self, system_prompt: str, user_prompt: str) -> str:
         groq_key = _real_key(self.settings.groq_api_key)
         hf_key = _real_key(self.settings.huggingface_api_key)
-        custom = self._custom_config()
+        custom, exclusive = await self._resolve_custom()
+        if exclusive:
+            groq_key = ""
+            hf_key = ""
         attempted = 0
         async with self._llm_semaphore:
             if custom and not self.custom_breaker.is_open():
@@ -219,6 +246,12 @@ class LLMClient:
                         exc,
                         exc_info=exc,
                     )
+                    if exclusive:
+                        raise AllProvidersFailedError(
+                            f"Active provider '{custom.get('name', 'custom')}' failed: "
+                            f"{type(exc).__name__}. No fallback providers run while "
+                            "one is selected — the run continues on deterministic fallbacks."
+                        ) from exc
             if groq_key and not self.groq_breaker.is_open():
                 attempted += 1
                 try:
@@ -253,6 +286,8 @@ class LLMClient:
             configured = [name for name, ok in (
                 ("custom", bool(custom)), ("groq", bool(groq_key)), ("huggingface", bool(hf_key)),
             ) if ok]
+            if exclusive and custom:
+                configured = [f"active provider '{custom.get('name', 'custom')}' (exclusive, no fallbacks)"]
             raise AllProvidersFailedError(
                 "All LLM providers skipped this attempt — circuit breakers open "
                 f"for: {', '.join(configured)}. Wait for the breaker cooldown "

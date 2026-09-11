@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     custom_llm_api_key: str = ""
     custom_llm_base_url: str = ""
     custom_llm_model: str = ""
+    # At-rest encryption for user-added provider keys (Providers tab).
+    # Any string works (hashed into key shape); unset falls back to a
+    # backend/.mars_secret file created once with 0600 permissions.
+    mars_secret_key: str = ""
 
     # Persistence
     database_url: str = "./research.db"

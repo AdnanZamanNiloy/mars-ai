@@ -14,9 +14,12 @@ venv/
 .env
 .env.local
 .env.example
+.mars_secret
 
 # Local databases and artifacts
 *.db
+*.db-shm
+*.db-wal
 *.sqlite3
 
 # Node / Vite

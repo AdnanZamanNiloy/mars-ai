@@ -159,46 +159,6 @@ async def test_verified_facts_reemit_when_flags_change(tmp_path):
     assert findings[1]["items"][1]["verified"] is False
 
 
-async def test_eval_batches_endpoint_returns_summaries(tmp_path):
-    from app.db.sqlite import init_db, save_evaluation_run
-
-    db_path = str(tmp_path / "evalapi.db")
-    await init_db(db_path)
-    await save_evaluation_run(db_path, {
-        "eval_batch": "b1", "query_id": "q1", "query": "What is RAG?", "mode": "quick",
-        "run_id": "r1", "status": "completed", "confidence": 0.8, "claims": 6,
-        "verified": 4, "sources": 8, "contradictions": 0,
-        "recommended_option": None, "cost": 0.001, "passed": True, "degraded": [],
-    })
-    settings = Settings(groq_api_key="test-key", database_url=db_path, _env_file=None)
-    app = _build_app(StubFastWorkflow(), settings)
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/eval/batches?limit=5")
-    assert response.status_code == 200
-    data = response.json()
-    assert len(data["batches"]) == 1
-    batch = data["batches"][0]
-    assert batch["batch"] == "b1"
-    assert batch["summary"]["queries"] == 1
-    assert batch["summary"]["pass_rate"] == 1.0
-    assert batch["rows"][0]["query_id"] == "q1"
-    assert batch["rows"][0]["mode"] == "quick"
-
-
-async def test_eval_batches_rejects_bad_limit(tmp_path):
-    from app.db.sqlite import init_db
-
-    db_path = str(tmp_path / "evalapi2.db")
-    await init_db(db_path)
-    settings = Settings(groq_api_key="test-key", database_url=db_path, _env_file=None)
-    app = _build_app(StubFastWorkflow(), settings)
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/eval/batches?limit=abc")
-    assert response.status_code == 422
-
-
 class StubManyFactsWorkflow:
     """One snapshot carrying 6 facts — the old emitter sliced only 3 per
     snapshot while marking the whole batch consumed, so facts 4..N never

@@ -77,12 +77,6 @@ export function resumeResearch({ runId, signal, onEvent }) {
   });
 }
 
-export async function fetchEvalBatches(limit = 5, signal) {
-  const response = await fetch(`/api/eval/batches?limit=${encodeURIComponent(limit)}`, { signal });
-  if (!response.ok) throw new Error(`Eval request failed (${response.status})`);
-  return response.json();
-}
-
 export async function fetchTrace(runId, signal) {
   const response = await fetch(`/api/research/${encodeURIComponent(runId)}/trace`, { signal });
   if (!response.ok) {
@@ -96,4 +90,53 @@ export async function fetchTrace(runId, signal) {
     throw new Error(detail);
   }
   return response.json();
+}
+
+/* ---------- LLM providers ---------- */
+
+async function apiJSON(url, { method = "GET", body } = {}) {
+  const response = await fetch(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    /* non-JSON error body */
+  }
+  if (!response.ok) {
+    throw new Error((data && data.detail) || `Request failed (${response.status})`);
+  }
+  return data;
+}
+
+export function listProviders() {
+  return apiJSON("/api/providers");
+}
+
+export function createProvider(payload) {
+  return apiJSON("/api/providers", { method: "POST", body: payload });
+}
+
+export function updateProvider(id, payload) {
+  return apiJSON(`/api/providers/${encodeURIComponent(id)}`, { method: "PUT", body: payload });
+}
+
+export function deleteProvider(id) {
+  return apiJSON(`/api/providers/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function setActiveProvider(id) {
+  return apiJSON(`/api/providers/${encodeURIComponent(id)}/active`, { method: "POST" });
+}
+
+export function clearActiveProvider() {
+  return apiJSON("/api/providers/active/clear", { method: "POST" });
+}
+
+export function testProvider(id, timeoutSec = null) {
+  const body = timeoutSec === null || timeoutSec === undefined ? undefined : { timeout_sec: timeoutSec };
+  return apiJSON(`/api/providers/${encodeURIComponent(id)}/test`, { method: "POST", body });
 }

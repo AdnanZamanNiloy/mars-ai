@@ -133,25 +133,16 @@ CREATE TABLE IF NOT EXISTS citations (
     created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS evaluation_runs (
+CREATE TABLE IF NOT EXISTS llm_providers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    eval_batch TEXT NOT NULL,
-    query_id TEXT NOT NULL,
-    query TEXT NOT NULL,
-    mode TEXT NOT NULL,
-    run_id TEXT REFERENCES research_runs(id),
-    status TEXT NOT NULL,
-    confidence REAL,
-    claims INTEGER,
-    verified INTEGER,
-    sources INTEGER,
-    contradictions INTEGER,
-    recommended_option TEXT,
-    cost REAL,
-    checks_passed INTEGER NOT NULL,
-    degraded TEXT NOT NULL DEFAULT '',
-    judge_score REAL,
-    created_at TEXT NOT NULL
+    name TEXT NOT NULL UNIQUE,
+    base_url TEXT NOT NULL,
+    api_key_enc TEXT NOT NULL,
+    key_hint TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 """
 
@@ -166,14 +157,6 @@ async def init_db(database_path: str) -> None:
         await db.execute("PRAGMA busy_timeout=5000;")
         # executescript handles the multi-statement CREATE TABLE block.
         await db.executescript(CREATE_TABLE_SQL)
-        # Additive migration: existing evaluation_runs tables predate the
-        # degraded column — add it in place, never rebuild the table.
-        cols = await db.execute("PRAGMA table_info(evaluation_runs)")
-        col_names = {r[1] for r in await cols.fetchall()}
-        if "degraded" not in col_names:
-            await db.execute("ALTER TABLE evaluation_runs ADD COLUMN degraded TEXT NOT NULL DEFAULT ''")
-        if "judge_score" not in col_names:
-            await db.execute("ALTER TABLE evaluation_runs ADD COLUMN judge_score REAL")
         review_cols = await db.execute("PRAGMA table_info(critic_reviews)")
         if "breakdown" not in {r[1] for r in await review_cols.fetchall()}:
             await db.execute("ALTER TABLE critic_reviews ADD COLUMN breakdown TEXT NOT NULL DEFAULT '{}'")
@@ -531,77 +514,6 @@ async def save_final_report(database_path: str, run_id: str, report_markdown: st
             (run_id, report_markdown, float(confidence), _now()),
         )
         await db.commit()
-
-
-async def save_evaluation_run(database_path: str, row: dict) -> None:
-    """Evaluation Lab (4.1): one row per eval query per batch run."""
-    degraded = row.get("degraded") or []
-    degraded_str = ",".join(sorted({str(a) for a in degraded if str(a).strip()}))
-    async with aiosqlite.connect(database_path) as db:
-        await db.execute(
-            "INSERT INTO evaluation_runs (eval_batch, query_id, query, mode, run_id, status, "
-            "confidence, claims, verified, sources, contradictions, recommended_option, cost, "
-            "checks_passed, degraded, judge_score, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                str(row.get("eval_batch", "")),
-                str(row.get("query_id", "")),
-                str(row.get("query", "")),
-                str(row.get("mode", "")),
-                row.get("run_id"),
-                str(row.get("status", "")),
-                row.get("confidence"),
-                row.get("claims"),
-                row.get("verified"),
-                row.get("sources"),
-                row.get("contradictions"),
-                row.get("recommended_option"),
-                row.get("cost"),
-                1 if row.get("passed") else 0,
-                degraded_str,
-                row.get("judge_score"),
-                _now(),
-            ),
-        )
-        await db.commit()
-
-
-async def latest_eval_batches(database_path: str, limit: int = 2) -> list:
-    """Most recent eval batch ids, newest first — for trend comparison."""
-    async with aiosqlite.connect(database_path) as db:
-        cur = await db.execute(
-            "SELECT DISTINCT eval_batch FROM evaluation_runs ORDER BY id DESC LIMIT ?",
-            (int(limit),),
-        )
-        return [r[0] for r in await cur.fetchall()]
-
-
-async def eval_batch_rows(database_path: str, eval_batch: str) -> list:
-    """All rows of one eval batch as plain dicts (for summarize_batch)."""
-    async with aiosqlite.connect(database_path) as db:
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute(
-            "SELECT query_id, query, mode, status, confidence, claims, verified, sources, contradictions, cost, "
-            "checks_passed, degraded, judge_score FROM evaluation_runs WHERE eval_batch = ? ORDER BY id",
-            (eval_batch,),
-        )
-        return [
-            {
-                "query_id": r["query_id"],
-                "query": r["query"],
-                "mode": r["mode"],
-                "status": r["status"],
-                "confidence": r["confidence"],
-                "claims": r["claims"],
-                "verified": r["verified"],
-                "sources": r["sources"],
-                "contradictions": r["contradictions"],
-                "cost": r["cost"],
-                "passed": bool(r["checks_passed"]),
-                "degraded": [a for a in str(r["degraded"] or "").split(",") if a],
-                "judge_score": r["judge_score"],
-            }
-            for r in await cur.fetchall()
-        ]
 
 
 async def load_state_for_resume(database_path: str, run_id: str) -> dict | None:

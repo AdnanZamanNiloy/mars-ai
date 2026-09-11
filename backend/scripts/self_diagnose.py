@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Self-Diagnosis (4.2): read-only health report over the research memory.
 
-Inspects research_runs / claims / critic_reviews / final_reports /
-evaluation_runs for patterns: failing providers, verification yield,
-critic efficiency, cost drift. Prints a human-readable report (or JSON).
+Inspects research_runs / claims / critic_reviews / final_reports for
+patterns: failing providers, verification yield, critic efficiency.
+Prints a human-readable report (or JSON).
 
 The database is opened in SQLite read-only mode — this script cannot
 write, no matter the bug. It is a manual report, not an autonomous loop.
@@ -34,7 +34,6 @@ from app.core.diagnose import (  # noqa: E402
     run_health,
     verification_by_domain,
 )
-from app.core.eval import summarize_batch  # noqa: E402
 
 
 async def _all(db: aiosqlite.Connection, query: str, params: tuple = ()) -> list:
@@ -76,12 +75,7 @@ async def fetch(db_path: str, days: int) -> dict:
                 tuple(run_ids),
             )
             reports = [r["report_markdown"] for r in report_rows]
-        eval_rows = await _all(
-            db,
-            "SELECT eval_batch, confidence, claims, verified, contradictions, cost, checks_passed "
-            "FROM evaluation_runs ORDER BY id DESC LIMIT 200",
-        )
-    return {"runs": runs, "claims": claims, "reviews": reviews, "reports": reports, "eval_rows": eval_rows}
+    return {"runs": runs, "claims": claims, "reviews": reviews, "reports": reports}
 
 
 def render_text(data: dict, days: int) -> str:
@@ -126,22 +120,6 @@ def render_text(data: dict, days: int) -> str:
         f"reports ({contra['rate']:.0%})"
     )
     lines.append("")
-
-    batches: dict = {}
-    for row in data["eval_rows"]:
-        batches.setdefault(row["eval_batch"], []).append({
-            "confidence": row["confidence"], "claims": row["claims"],
-            "verified": row["verified"], "contradictions": row["contradictions"],
-            "cost": row["cost"], "passed": bool(row["checks_passed"]),
-        })
-    if batches:
-        newest = sorted(batches)[-1]
-        summary = summarize_batch(batches[newest])
-        lines.append(
-            f"Latest eval batch {newest}: {summary['queries']} queries, "
-            f"{summary['pass_rate']:.0%} pass, {summary['avg_confidence']:.2f} avg confidence"
-        )
-        lines.append("")
 
     lines.append("Attention:")
     if flags:

@@ -11,12 +11,9 @@ from slowapi.util import get_remote_address
 
 from app.core.config import get_settings
 from app.core.degradation import clear_fallbacks, reset_fallbacks, take_fallbacks
-from app.core.eval import summarize_batch
 from app.db.sqlite import (
     complete_research_run,
-    eval_batch_rows,
     get_run_trace,
-    latest_eval_batches,
     load_state_for_resume,
     mark_challenged_claims,
     mark_run_resumable_reset,
@@ -58,6 +55,154 @@ async def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
+class ProviderIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=60)
+    base_url: str = Field(..., min_length=8, max_length=500)
+    api_key: str = Field(..., min_length=1, max_length=2000)
+    model: str = Field(..., min_length=1, max_length=200)
+
+
+class ProviderUpdate(BaseModel):
+    name: str | None = Field(default=None, max_length=60)
+    base_url: str | None = Field(default=None, max_length=500)
+    api_key: str | None = Field(default=None, max_length=2000)
+    model: str | None = Field(default=None, max_length=200)
+
+
+class ProviderTestIn(BaseModel):
+    timeout_sec: float | None = None
+
+
+def _providers_db(request: Request) -> str:
+    settings = getattr(request.app.state, "settings", None)
+    if settings is None:
+        raise HTTPException(status_code=500, detail="Workflow is not initialized")
+    return settings.database_url
+
+
+@router.get("/providers")
+async def list_llm_providers(request: Request) -> Dict[str, Any]:
+    """Providers tab data: saved providers (keys masked) plus active id."""
+    from app.core import providers as provider_store
+
+    rows = await provider_store.list_providers(_providers_db(request))
+    active = next((r for r in rows if r.get("is_active")), None)
+    return {"providers": rows, "active_id": active["id"] if active else None}
+
+
+@router.post("/providers", status_code=201)
+async def create_llm_provider(body: ProviderIn, request: Request) -> Dict[str, Any]:
+    from app.core import providers as provider_store
+
+    try:
+        row = await provider_store.save_provider(
+            _providers_db(request), name=body.name, base_url=body.base_url,
+            model=body.model, api_key=body.api_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"provider": row}
+
+
+@router.put("/providers/{provider_id}")
+async def update_llm_provider(provider_id: int, body: ProviderUpdate, request: Request) -> Dict[str, Any]:
+    """Partial update; omit api_key to keep the stored key."""
+    from app.core import providers as provider_store
+
+    db_path = _providers_db(request)
+    existing = await provider_store.get_provider(db_path, provider_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail=f"Unknown provider id: {provider_id}")
+    try:
+        row = await provider_store.save_provider(
+            db_path,
+            provider_id=provider_id,
+            name=body.name if body.name is not None else existing["name"],
+            base_url=body.base_url if body.base_url is not None else existing["base_url"],
+            model=body.model if body.model is not None else existing["model"],
+            api_key=body.api_key,
+        )
+    except LookupError:
+        raise HTTPException(status_code=404, detail=f"Unknown provider id: {provider_id}")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"provider": row}
+
+
+@router.delete("/providers/{provider_id}")
+async def delete_llm_provider(provider_id: int, request: Request) -> Dict[str, Any]:
+    from app.core import providers as provider_store
+
+    if not await provider_store.delete_provider(_providers_db(request), provider_id):
+        raise HTTPException(status_code=404, detail=f"Unknown provider id: {provider_id}")
+    return {"deleted": True}
+
+
+@router.post("/providers/{provider_id}/active")
+async def set_active_llm_provider(provider_id: int, request: Request) -> Dict[str, Any]:
+    """Exactly one active provider: setting one clears the rest."""
+    from app.core import providers as provider_store
+
+    try:
+        row = await provider_store.set_active_provider(_providers_db(request), provider_id)
+    except LookupError:
+        raise HTTPException(status_code=404, detail=f"Unknown provider id: {provider_id}")
+    return {"active": row}
+
+
+@router.post("/providers/active/clear")
+async def clear_active_llm_provider(request: Request) -> Dict[str, Any]:
+    """Deselect: fall back to the legacy env/Groq/HF chain."""
+    from app.core import providers as provider_store
+
+    await provider_store.clear_active_provider(_providers_db(request))
+    return {"active": None}
+
+
+@router.post("/providers/{provider_id}/test")
+async def test_llm_provider(
+    provider_id: int, request: Request, body: ProviderTestIn | None = None
+) -> Dict[str, Any]:
+    """Single-shot connection probe (bypasses breakers, spends one call).
+    The key never appears in logs or responses. timeout_sec is clamped to
+    5..120s (default 15) — slow free-tier models need the headroom, but an
+    unbounded probe could outlive the caller's patience."""
+    import time as _time
+
+    import httpx as _httpx
+
+    from app.core import providers as provider_store
+
+    timeout = 15.0
+    if body is not None and body.timeout_sec is not None:
+        timeout = min(max(float(body.timeout_sec), 5.0), 120.0)
+    secret = await provider_store.get_provider_secret(_providers_db(request), provider_id)
+    if secret is None:
+        raise HTTPException(status_code=404, detail=f"Unknown provider id: {provider_id}")
+    base = str(secret["base_url"]).rstrip("/")
+    url = base if base.lower().endswith("/chat/completions") else base + "/chat/completions"
+    started = _time.monotonic()
+    try:
+        async with _httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {secret['api_key']}", "Content-Type": "application/json"},
+                json={
+                    "model": secret["model"],
+                    "max_tokens": 8,
+                    "messages": [{"role": "user", "content": "Reply with exactly: ok"}],
+                },
+            )
+            response.raise_for_status()
+    except Exception as exc:
+        # Key material never logged: only the exception type and host-level
+        # detail leave this handler.
+        logger.warning("[Providers] test probe failed for id=%s: %s", provider_id, type(exc).__name__)
+        return {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+    latency_ms = int((_time.monotonic() - started) * 1000)
+    return {"ok": True, "latency_ms": latency_ms}
+
+
 @router.get("/research/{run_id}/trace")
 async def research_trace(run_id: str, request: Request) -> Dict[str, Any]:
     """Research Replay (3.4): ordered, joinable reconstruction of one run."""
@@ -69,41 +214,6 @@ async def research_trace(run_id: str, request: Request) -> Dict[str, Any]:
     if trace is None:
         raise HTTPException(status_code=404, detail=f"Unknown run_id: {run_id}")
     return trace
-
-
-@router.get("/eval/batches")
-async def eval_batches(request: Request, limit: int = 5) -> Dict[str, Any]:
-    """Evaluation Lab dashboard data (read-only): recent batches with
-    headline summaries plus per-query rows. Trends exclude degraded rows
-    the same way scripts/run_eval.py reports them."""
-    settings = getattr(request.app.state, "settings", None)
-    if settings is None:
-        raise HTTPException(status_code=500, detail="Workflow is not initialized")
-
-    try:
-        count = max(1, min(int(limit), 20))
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=422, detail="limit must be an integer 1-20")
-
-    batches = []
-    for batch in await latest_eval_batches(settings.database_url, limit=count):
-        rows = await eval_batch_rows(settings.database_url, batch)
-        clean = [r for r in rows if not r.get("degraded")]
-        batches.append({
-            "batch": batch,
-            "summary": summarize_batch(clean),
-            "degraded_excluded": len(rows) - len(clean),
-            "rows": [
-                {"query_id": r.get("query_id"), "query": r.get("query"), "mode": r.get("mode"),
-                 "status": r.get("status"), "confidence": r.get("confidence"),
-                 "claims": r.get("claims"), "verified": r.get("verified"),
-                 "contradictions": r.get("contradictions"), "cost": r.get("cost"),
-                 "passed": r.get("passed"), "degraded": r.get("degraded", []),
-                 "judge_score": r.get("judge_score")}
-                for r in rows
-            ],
-        })
-    return {"batches": batches}
 
 
 @router.post("/research/stream")
