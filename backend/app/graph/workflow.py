@@ -10,6 +10,7 @@ from app.agents.evidence_utils import dedupe_semantic_facts, filter_facts_by_dom
 from app.agents.critic import critic_agent
 from app.agents.orchestrator import orchestrate
 from app.agents.planner import normalize_text, planner_agent
+from app.agents.redteam import redteam_agent
 from app.agents.search import SearchClient
 from app.agents.summarizer import summarizer_agent
 from app.agents.synthesizer import synthesizer_agent
@@ -47,6 +48,7 @@ class ResearchState(TypedDict, total=False):
     contradictions: List[Dict[str, Any]]
     mode: str
     decision_options: List[Dict[str, Any]]
+    redteam: Dict[str, Any]
 
 
 class PlannerUpdate(TypedDict):
@@ -73,6 +75,7 @@ class CriticUpdate(TypedDict):
     critique_feedback: str
     confidence_breakdown: Dict[str, Any]
     contradictions: List[Dict[str, Any]]
+    redteam: Dict[str, Any]
 
 
 class SynthesizerUpdate(TypedDict):
@@ -162,7 +165,9 @@ def build_initial_state(
         effective_max_iterations = int(max_iterations)
     else:
         effective_max_iterations = max(3, int(max_iterations))
-    plan = orchestrate(query, max_parallel_agents=max_parallel_agents, deep_research=deep_research)
+    plan = orchestrate(query, max_parallel_agents=max_parallel_agents,
+                       deep_research=deep_research, mode=mode)
+    targets = plan.targets.to_dict() if plan.targets is not None else {}
     return {
         "query": query,
         "sub_questions": [],
@@ -184,6 +189,10 @@ def build_initial_state(
             "clamped": plan.clamped,
             "deep_research": plan.deep_research,
             "notes": plan.notes,
+            # v3 plan targets: hard requirements the planner must honour.
+            "required_axes": list(targets.get("required_axes", []) or []),
+            "target_sub_questions": int(targets.get("sub_questions", 0) or 0),
+            "min_sources_per_axis": int(targets.get("min_sources_per_axis", 0) or 0),
         },
         "deep_research": plan.deep_research,
         "confidence_history": [],
@@ -355,15 +364,21 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             except Exception as exc:
                 logger.warning("planner_context_search_failed", error=str(exc), exc_info=exc)
 
+        # v3 plan targets live on the orchestration dict (build_initial_state).
+        orchestration = state.get("orchestration", {})
         sub_questions = await planner_agent(
             llm=llm,
             query=state["query"],
             critique_feedback=feedback,
             today=datetime.date.today().isoformat(),
             context_snippets=context_snippets or None,
+            # v3 plan targets from orchestration: the plan is sized and
+            # axis-shaped here; the hardware cap below stays as backstop.
+            target_count=int(orchestration.get("target_sub_questions", 0) or 0) or None,
+            required_axes=list(orchestration.get("required_axes", []) or []),
+            minimum_sources=int(orchestration.get("min_sources_per_axis", 0) or 0) or 2,
         )
         # Hardware guardrail: cap the plan at the orchestrated target agents.
-        orchestration = state.get("orchestration", {})
         target = int(orchestration.get("target_agents", 5) or 5)
         if expanding:
             # Per-axis expansion: keep researched history, cap only the NEW
@@ -488,6 +503,27 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         if contradictions:
             logger.info("contradictions_found", count=len(contradictions))
 
+        # Red-team review (v3, heuristics only: deterministic, zero LLM
+        # cost). Attacks the evidence base every pass; the survival score
+        # feeds the critic gate and the findings render in the report.
+        # Never fatal: heuristics must not break a run.
+        try:
+            redteam_state = (
+                await redteam_agent(
+                    None,
+                    state["query"],
+                    state.get("facts", []),
+                    contradictions=contradictions,
+                    use_llm=False,
+                )
+            ).to_dict()
+        except Exception as exc:
+            logger.warning("redteam_heuristics_failed", error=str(exc), exc_info=exc)
+            redteam_state = {
+                "findings": [], "survival_score": 0.6, "survives": True,
+                "blocking": [], "targeted_queries": [], "summary": "",
+            }
+
         critique = await critic_agent(
             llm=llm,
             query=state["query"],
@@ -496,6 +532,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             max_iterations=int(state.get("max_iterations", 3)),
             contradictions=contradictions,
             query_type=str(state.get("orchestration", {}).get("query_type", "")),
+            redteam_survival=float(redteam_state.get("survival_score", 0.6) or 0.6),
         )
 
         # Confidence Engine (Phase 2.4) replaces the inline weighted formula.
@@ -528,6 +565,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             "confidence_breakdown": breakdown,
             "confidence_history": [*state.get("confidence_history", []), overall_conf],
             "contradictions": contradictions,
+            "redteam": redteam_state,
         }
 
     async def synthesizer_node(state: ResearchState) -> SynthesizerUpdate:
@@ -548,6 +586,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
                 "total_facts": len(all_facts),
                 "verified_count": sum(1 for f in all_facts if f.get("verified")),
                 "mode": state.get("mode", "standard"),
+                "redteam_findings": (state.get("redteam", {}) or {}).get("findings", []),
             },
         )
         # Report-contract verification: check the emitted answer's citations

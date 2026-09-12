@@ -48,3 +48,45 @@ def test_query_type_classification():
 def test_score_complexity_levels():
     assert score_complexity("what is RAG").level == "low"
     assert score_complexity(VERY_HIGH).level == "very_high"
+
+
+def test_plan_targets_require_evidence_and_criticism():
+    """Non-quick plans must hunt evidence and counter-arguments, not just
+    background: required_axes reach the planner via build_initial_state."""
+    from app.graph.workflow import build_initial_state
+
+    plan = orchestrate(VERY_HIGH, max_parallel_agents=3, deep_research=False)
+    assert {"evidence", "criticism"} <= set(plan.targets.required_axes)
+    assert plan.targets.sub_questions == plan.target_agents
+    assert plan.targets.min_sources_per_axis >= 2
+
+    state = build_initial_state(VERY_HIGH, max_iterations=3, max_parallel_agents=3)
+    orch = state["orchestration"]
+    assert {"evidence", "criticism"} <= set(orch["required_axes"])
+    assert orch["target_sub_questions"] == orch["target_agents"]
+
+
+def test_explicit_quick_mode_stays_quick():
+    plan = orchestrate(VERY_HIGH, max_parallel_agents=3, mode="quick")
+    assert plan.mode == "quick"
+    assert plan.target_agents <= 2
+
+
+def test_redteam_heuristics_run_llm_free():
+    """Red-team review must work with no model client: heuristics always run."""
+    import asyncio
+
+    from app.agents.redteam import redteam_agent
+
+    facts = [
+        {"claim": "Solar capacity doubled in 2025", "source": "https://a.org/x",
+         "confidence": 0.8, "verified": True},
+        {"claim": "Solar capacity doubled in 2025", "source": "https://b.org/y",
+         "confidence": 0.75, "verified": True},
+    ]
+    report = asyncio.run(redteam_agent(
+        None, "How fast did solar grow?", facts, use_llm=False))
+    d = report.to_dict()
+    assert 0.0 <= d["survival_score"] <= 1.0
+    assert isinstance(d["findings"], list) and isinstance(d["targeted_queries"], list)
+    assert all(set(f) >= {"kind", "statement", "severity"} for f in d["findings"])

@@ -392,7 +392,8 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                             critique = snapshot.get("critique", {})
                             reason = critique.get("reason", "No reason provided")
                             yield event_line("critic", iteration=iteration, reason=reason,
-                                             breakdown=snapshot.get("confidence_breakdown") or {})
+                                             breakdown=snapshot.get("confidence_breakdown") or {},
+                                             redteam=snapshot.get("redteam") or {})
                             last_iteration = iteration
                             await _persist(record_event(
                                 settings.database_url, request_id, "critic", "end",
@@ -647,7 +648,8 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
                         if iteration != last_iteration and iteration > last_iteration:
                             critique = snapshot.get("critique", {})
                             yield event_line("critic", iteration=iteration, reason=critique.get("reason", ""),
-                                             breakdown=snapshot.get("confidence_breakdown") or {})
+                                             breakdown=snapshot.get("confidence_breakdown") or {},
+                                             redteam=snapshot.get("redteam") or {})
                             last_iteration = iteration
                             await _persist_record(settings.database_url, request_id, iteration, critique,
                                                   breakdown=snapshot.get("confidence_breakdown") or {})
