@@ -1,43 +1,25 @@
-"""Evidence-based confidence engine (vision Feature 10).
+"""Evidence-based confidence (vision Feature 10) — v3 API surface.
 
-The old pipeline's confidence came from the critic's own `confidence` field —
-a number the model chose about its own judgement, clamped and then reported to
-the user as "87%". A model's self-assessment is not a measurement: it does not
-know how many distinct domains were consulted, whether any claim was
-independently corroborated, how stale the evidence is, or that two sources
-disagreed by 60%.
+One engine, one name. The live confidence engine is
+`app.core.confidence.compute_confidence`: it is what the host workflow reports
+to the user, and its weights are what historical score comparability depends
+on. This module no longer carries a second engine. `compute_confidence` here
+is a thin adapter over the live engine that keeps the v3 call surface —
+`ConfidenceReport`, `SUFFICIENCY_THRESHOLD`, the keyword arguments mission.py
+and stopping.py are specified against — so the deferred mission/decision ports
+import a single name and cannot silently reintroduce divergent scoring.
 
-This module computes confidence from things that were actually observed. Eight
-signals, each in [0, 1], each independently inspectable, combined by fixed
-weights into an overall score. The model's own opinion is one input among
-eight, capped at its weight, and it can no longer override the evidence.
-
-The scoring must be conservative in a specific way: it should be *hard* to
-reach high confidence and *easy* to lose it. So there are explicit ceilings —
-a single-domain evidence pool cannot exceed 0.55 no matter how good it looks,
-and a severe unresolved contradiction caps the run below the sufficiency line.
+Inputs the live engine does not consume yet (contradictions, citation
+support, planned axes, target domains) are accepted and recorded as notes,
+never silently dropped, until the mission port wires them for real.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
-from app.agents.contradiction import summarize_contradictions
-from app.agents.evidence_utils import evidence_stats
-
-# Weights sum to 1.0. Ordering reflects what actually predicts a correct
-# report: verification and corroboration first, model opinion last.
-SIGNAL_WEIGHTS: Dict[str, float] = {
-    "claim_verification": 0.22,
-    "cross_source_agreement": 0.16,
-    "source_quality": 0.14,
-    "source_diversity": 0.12,
-    "evidence_coverage": 0.12,
-    "primary_source_share": 0.10,
-    "freshness": 0.07,
-    "critic_survival": 0.07,
-}
-
+# The sufficiency line the critic gate and stopping logic share. The live
+# engine's DEGRADED_CAP (app.core.confidence) keeps degraded runs below it.
 SUFFICIENCY_THRESHOLD = 0.75
 
 
@@ -59,7 +41,7 @@ class ConfidenceReport:
             "overall": round(self.overall, 4),
             "level": self.level,
             "signals": {k: round(v, 4) for k, v in self.signals.items()},
-            "weights": dict(SIGNAL_WEIGHTS),
+            "weights": dict(self.stats.get("weights", {})),
             "caps_applied": list(self.caps_applied),
             "notes": list(self.notes),
             "stats": self.stats,
@@ -68,10 +50,11 @@ class ConfidenceReport:
 
     def render(self) -> str:
         """The Feature-10 panel, as text the report can embed verbatim."""
+        weights = self.stats.get("weights", {})
         rows = [
             f"{name.replace('_', ' ').title():<24}{value * 100:>4.0f}%"
             for name, value in sorted(
-                self.signals.items(), key=lambda kv: -SIGNAL_WEIGHTS.get(kv[0], 0)
+                self.signals.items(), key=lambda kv: -weights.get(kv[0], 0)
             )
         ]
         body = "\n".join(rows)
@@ -95,14 +78,6 @@ def _level(score: float) -> str:
     return "very_low"
 
 
-def _saturating(count: float, target: float) -> float:
-    """Diminishing-returns ramp: `target` occurrences score ~0.86, more helps
-    less. Prevents "we found 40 sources" from reading as certainty."""
-    if target <= 0:
-        return 0.0
-    return round(1.0 - pow(2.718281828, -2.0 * (max(0.0, count) / target)), 4)
-
-
 def compute_confidence(
     facts: Sequence[Dict[str, Any]],
     *,
@@ -114,141 +89,66 @@ def compute_confidence(
     degraded_stages: Sequence[str] = (),
     target_domains: int = 5,
 ) -> ConfidenceReport:
-    """Score a finished (or in-progress) evidence pool.
+    """Score an evidence pool through the live engine (app.core.confidence).
 
-    Every argument is optional so this can be called mid-run for the stopping
-    decision and again at the end for the report, with the same weights.
+    v3 keyword mapping: `redteam_survival` (preferred) or `critic_confidence`
+    becomes the engine's critic-survival signal — sufficient at or above
+    SUFFICIENCY_THRESHOLD, else the engine's stopped-early value;
+    `degraded_stages` maps to the engine's `degraded` cap. `contradictions`,
+    `citation_support`, `planned_axes` and `target_domains` have no
+    live-engine input yet and are recorded as notes.
     """
-    stats = evidence_stats(facts)
-    total = int(stats["total"])
-    signals: Dict[str, float] = {}
-    notes: List[str] = []
-    caps: List[str] = []
-
-    if total == 0:
+    if not [f for f in (facts or []) if isinstance(f, dict)]:
         return ConfidenceReport(
-            overall=0.0, level="very_low",
-            signals={k: 0.0 for k in SIGNAL_WEIGHTS},
+            overall=0.0,
+            level="very_low",
+            signals={},
             caps_applied=["no evidence"],
             notes=["No usable evidence was extracted."],
-            stats=stats,
+            stats={"source": "app.core.confidence"},
         )
 
-    # 1. Verification: share of claims whose numbers and vocabulary were found
-    #    in the source they cite.
-    signals["claim_verification"] = round(stats["verified"] / total, 4)
+    from app.core.confidence import compute_confidence as _live_engine
 
-    # 2. Cross-source agreement: share of claims independently corroborated.
-    #    This is the signal the old dedup silently deleted.
-    signals["cross_source_agreement"] = round(stats["corroborated"] / total, 4)
+    survival = (
+        redteam_survival if redteam_survival is not None else critic_confidence
+    )
+    critique: Dict[str, Any] = {}
+    if survival is not None:
+        critique["is_sufficient"] = float(survival) >= SUFFICIENCY_THRESHOLD
 
-    # 3. Source quality: mean authority of the DOCUMENTS behind the evidence,
-    #    not of the claims — one page cited ten times is one source.
-    signals["source_quality"] = _authority_mean(facts)
+    live = _live_engine(
+        list(facts),
+        critique,
+        0,
+        1,
+        degraded=[str(d) for d in (degraded_stages or [])],
+    )
 
-    # 4. Diversity: distinct domains, saturating.
-    signals["source_diversity"] = _saturating(stats["distinct_domains"], max(2, target_domains))
-
-    # 5. Coverage: how many planned research angles produced evidence.
-    if planned_axes > 0:
-        signals["evidence_coverage"] = round(min(1.0, stats["axes_covered"] / planned_axes), 4)
-    else:
-        signals["evidence_coverage"] = _saturating(stats["axes_covered"], 4)
-
-    # 6. Primary sources: share of documents that published the fact rather
-    #    than reporting it.
-    signals["primary_source_share"] = float(stats["primary_share"])
-
-    # 7. Freshness: decay-weighted recency.
-    signals["freshness"] = float(stats["freshness"])
-
-    # 8. Critic / red-team survival. Prefer a measured survival rate; fall back
-    #    to the critic's own number, which is the only place model opinion
-    #    enters the score.
-    if redteam_survival is not None:
-        signals["critic_survival"] = round(max(0.0, min(1.0, float(redteam_survival))), 4)
-    elif critic_confidence is not None:
-        signals["critic_survival"] = round(max(0.0, min(1.0, float(critic_confidence))), 4)
-        notes.append("Critic survival falls back to the critic's self-reported confidence.")
-    else:
-        signals["critic_survival"] = 0.5
-
-    overall = sum(signals[name] * weight for name, weight in SIGNAL_WEIGHTS.items())
-
-    # ------------------------------------------------------------------
-    # Hard ceilings. A weighted average can be dragged up by six mediocre
-    # signals; these encode failures that must dominate the average.
-    # ------------------------------------------------------------------
-    if stats["distinct_domains"] < 2:
-        overall = min(overall, 0.55)
-        caps.append("single-domain evidence pool capped at 0.55")
-    if stats["verified"] == 0:
-        overall = min(overall, 0.45)
-        caps.append("zero verified claims capped at 0.45")
-    if total < 4:
-        overall = min(overall, 0.60)
-        caps.append(f"thin pool ({total} claims) capped at 0.60")
-
-    summary = summarize_contradictions(contradictions or [])
-    if summary["severe"]:
-        overall = min(overall, 0.70)
-        caps.append(f"{summary['severe']} severe unresolved contradiction(s) capped at 0.70")
-    elif summary["cross_source"] >= 3:
-        overall = min(overall, 0.80)
-        caps.append(f"{summary['cross_source']} cross-source conflicts capped at 0.80")
-
-    if citation_support:
-        rate = citation_support.get("rate")
-        if isinstance(rate, (int, float)) and citation_support.get("cited"):
-            # A report whose own sentences do not trace to its cited sources
-            # cannot be trusted above that trace rate.
-            overall = min(overall, 0.35 + 0.65 * float(rate))
-            caps.append(f"citation support rate {float(rate):.0%} bounds confidence")
-        numeric_rate = citation_support.get("numeric_rate")
-        if isinstance(numeric_rate, (int, float)) and numeric_rate < 0.8:
-            overall = min(overall, 0.65)
-            caps.append(f"numeric grounding {float(numeric_rate):.0%} capped at 0.65")
-
-    degraded = [str(d) for d in (degraded_stages or []) if d]
-    if degraded:
-        penalty = min(0.15, 0.05 * len(degraded))
-        overall -= penalty
-        notes.append(
-            f"Deterministic fallback covered {', '.join(degraded)}; "
-            f"confidence reduced by {penalty:.2f}."
-        )
-
-    overall = round(max(0.0, min(1.0, overall)), 4)
-
-    if signals["primary_source_share"] < 0.2:
-        notes.append("Few primary sources: the report rests mainly on secondary reporting.")
-    if signals["cross_source_agreement"] < 0.15 and total >= 6:
-        notes.append("Almost no claim was independently corroborated by a second domain.")
-    if signals["freshness"] < 0.35:
-        notes.append("Evidence skews old for a time-sensitive question.")
+    overall = float(live.get("overall", 0.0))
+    notes = list(live.get("notes", []))
+    caps = [n for n in notes if "capped" in n]
+    plain = [n for n in notes if "capped" not in n]
+    for name, value in (
+        ("contradictions", contradictions),
+        ("citation_support", citation_support),
+        ("planned_axes", planned_axes),
+        ("target_domains", target_domains),
+    ):
+        if value:
+            plain.append(f"v3 input {name!r} recorded but not wired into the live engine yet.")
 
     return ConfidenceReport(
         overall=overall,
         level=_level(overall),
-        signals=signals,
+        signals={k: float(v) for k, v in live.get("signals", {}).items()},
         caps_applied=caps,
-        notes=notes,
-        stats=stats,
+        notes=plain,
+        stats={
+            "weights": dict(live.get("weights", {})),
+            "source": "app.core.confidence",
+        },
     )
-
-
-def _authority_mean(facts: Sequence[Dict[str, Any]]) -> float:
-    from app.agents.sources import authority_score, canonical_url
-
-    seen: Dict[str, float] = {}
-    for fact in facts or []:
-        url = str(fact.get("source", "") or "")
-        key = canonical_url(url)
-        if key and key not in seen:
-            seen[key] = authority_score(url)
-    if not seen:
-        return 0.0
-    return round(sum(seen.values()) / len(seen), 4)
 
 
 def confidence_delta(before: Optional[ConfidenceReport], after: ConfidenceReport) -> float:

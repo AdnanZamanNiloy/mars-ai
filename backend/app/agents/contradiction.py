@@ -1,45 +1,33 @@
-"""Contradiction engine (vision Feature 09).
+"""Contradiction engine (vision Feature 09) — v3 API surface.
 
-Disagreement between sources is the most valuable signal a research system can
-surface, and the easiest to destroy. The previous pipeline destroyed it twice
-over: `dedupe_semantic_facts` merged near-identical claims and kept only the
-higher-confidence copy, and nothing anywhere compared the *numbers* inside
-claims. A run where three sources said 18%, 11% and 7% produced one claim, one
-number, and a confident report.
+One detector, one name. The live detector is
+`app.core.contradictions.find_contradictions` — the numeric-band scan the host
+workflow runs. This module no longer carries a second detector.
+`detect_contradictions` here is a thin adapter over the live engine that keeps
+the v3 result shape (kind/severity dicts, the `Contradiction` record, and the
+`summarize_contradictions` / `numeric_ranges` / `contradiction_followups`
+helpers the critic, synthesizer and red-team already consume) so the deferred
+mission port imports a single name.
 
-This module finds real conflicts without an LLM call, which matters because a
-contradiction check that costs a model call per claim pair is unaffordable at
-100+ claims (4,950 pairs). Detection is deterministic:
-
-  numeric     same subject and unit, values diverging beyond a threshold
-  polarity    same subject, opposite assertion ("X reduces Y" / "X does not")
-  temporal    same subject, incompatible dates for the same event
-
-Conflicts between two claims from the SAME domain are reported as
-`intra_source` and down-weighted: a publisher restating itself imprecisely is
-an editing artifact, not a genuine dispute between sources.
+The live detector currently reports numeric conflicts only; polarity and
+temporal detection return with the mission-port adapter commit, where the v3
+detection rules are re-decided against the mission's own tests.
 """
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
-
-from app.agents.evidence_utils import (
-    claim_polarity,
-    extract_domain,
-    extract_numbers,
-    numeric_conflict,
-    semantic_similarity,
-)
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 # Two claims must be about the same thing before their difference means
-# anything. 0.34 was chosen so paraphrases of one measurement stay together
-# while different measurements of the same market ("size" vs "growth rate")
-# fall apart — the failure mode that produces phantom contradictions.
+# anything. The live engine enforces its own similarity band
+# (SIMILARITY_LOW/HIGH in app.core.contradictions); this constant remains the
+# documented v3 default for the `subject_similarity` kwarg.
 SUBJECT_SIMILARITY = 0.34
 
 # Relative divergence at which two numbers stop being rounding variants.
+# Applied by this adapter as a post-filter on live-engine findings, whose own
+# threshold is lower.
 NUMERIC_DIVERGENCE = 0.20
 
 # Above this, a numeric gap is not a nuance but a range that must be reported
@@ -62,20 +50,6 @@ _STOP = {
 
 def _content_tokens(text: str) -> Set[str]:
     return {t for t in re.findall(r"[a-z][a-z0-9\-]{2,}", (text or "").lower()) if t not in _STOP}
-
-
-def _subject_key(text: str) -> Tuple[str, ...]:
-    """A coarse subject fingerprint: the measure words plus the rarest nouns.
-
-    Used only to bucket claims so the O(n^2) pair comparison runs inside small
-    buckets rather than across the whole pool. Recall matters more than
-    precision here: a wrong bucket loses a conflict, a loose bucket only costs
-    a few extra comparisons.
-    """
-    tokens = _content_tokens(text)
-    measures = sorted(tokens & _MEASURE_WORDS)
-    rest = sorted(tokens - _MEASURE_WORDS, key=lambda t: (-len(t), t))[:3]
-    return tuple(measures[:2] + rest)
 
 
 @dataclass
@@ -114,30 +88,6 @@ class Contradiction:
         }
 
 
-_YEAR_RE = re.compile(r"\b(1[5-9]\d{2}|20\d{2})\b")
-_EVENT_WORDS = {
-    "founded", "established", "launched", "published", "released", "signed",
-    "enacted", "introduced", "announced", "began", "started", "completed",
-    "discovered", "invented", "adopted", "approved", "banned",
-}
-
-
-def _temporal_conflict(a: str, b: str) -> Optional[Dict[str, Any]]:
-    """Same dated event asserted with different years."""
-    tokens_a, tokens_b = _content_tokens(a), _content_tokens(b)
-    if not (tokens_a & _EVENT_WORDS) or not (tokens_b & _EVENT_WORDS):
-        return None
-    years_a = {int(y) for y in _YEAR_RE.findall(a or "")}
-    years_b = {int(y) for y in _YEAR_RE.findall(b or "")}
-    if not years_a or not years_b or (years_a & years_b):
-        return None
-    return {
-        "years_a": sorted(years_a),
-        "years_b": sorted(years_b),
-        "gap": min(abs(x - y) for x in years_a for y in years_b),
-    }
-
-
 def detect_contradictions(
     facts: Sequence[Dict[str, Any]],
     *,
@@ -146,124 +96,71 @@ def detect_contradictions(
     max_pairs: int = 20_000,
     limit: int = 25,
 ) -> List[Dict[str, Any]]:
-    """Find conflicts across the evidence pool. Pure, deterministic, no LLM.
+    """Find conflicts across the evidence pool by delegating to the live
+    engine (`app.core.contradictions.find_contradictions`), reshaped into the
+    v3 dict form. Pure, deterministic, no LLM.
 
-    Returns dicts (not dataclasses) so the result drops straight into the
-    existing `contradictions` context the critic and synthesizer read.
-    Ordered by severity, cross-source conflicts first.
+    `divergence` post-filters the live engine's findings (its own threshold
+    is lower). `subject_similarity` and `max_pairs` are accepted for
+    call-site compatibility; the live engine's similarity band and finding
+    cap stand until the mission port revisits them.
     """
-    items = [
-        f for f in (facts or [])
-        if isinstance(f, dict) and str(f.get("claim", "")).strip()
-    ]
-    if len(items) < 2:
-        return []
+    from app.core.contradictions import find_contradictions
 
-    # Bucket by subject fingerprint; compare within buckets and, for numeric
-    # claims, within unit groups across buckets (a divergent number about the
-    # same unit is worth a look even if the wording drifted).
-    buckets: Dict[Tuple[str, ...], List[int]] = {}
-    for idx, fact in enumerate(items):
-        key = _subject_key(str(fact.get("claim", "")))
-        buckets.setdefault(key, []).append(idx)
-        # Also index by each individual token so partial-overlap subjects meet.
-        for token in key[:2]:
-            buckets.setdefault((token,), []).append(idx)
-
-    seen_pairs: Set[Tuple[int, int]] = set()
     found: List[Contradiction] = []
-    comparisons = 0
-
-    for indices in buckets.values():
-        if len(indices) < 2:
+    for raw in find_contradictions([f for f in (facts or []) if isinstance(f, dict)]):
+        pair = _report_pair(raw, divergence)
+        if pair is None:
             continue
-        for i_pos in range(len(indices)):
-            for j_pos in range(i_pos + 1, len(indices)):
-                i, j = indices[i_pos], indices[j_pos]
-                if i == j:
-                    continue
-                pair = (min(i, j), max(i, j))
-                if pair in seen_pairs:
-                    continue
-                seen_pairs.add(pair)
-                comparisons += 1
-                if comparisons > max_pairs:
-                    return _finalize(found, limit)
-
-                fa, fb = items[i], items[j]
-                claim_a = str(fa.get("claim", ""))
-                claim_b = str(fb.get("claim", ""))
-                source_a = str(fa.get("source", "") or "")
-                source_b = str(fb.get("source", "") or "")
-
-                similarity = semantic_similarity(claim_a, claim_b)
-                if similarity < subject_similarity:
-                    continue
-                # Identical restatements are duplicates, not disputes.
-                if similarity >= 0.95:
-                    continue
-
-                intra = bool(source_a and source_b) and extract_domain(source_a) == extract_domain(source_b)
-                contradiction: Optional[Contradiction] = None
-
-                numeric = numeric_conflict(claim_a, claim_b, divergence=divergence)
-                if numeric:
-                    rel = float(numeric["relative_divergence"])
-                    severity = min(1.0, 0.35 + rel)
-                    unit = numeric["unit"]
-                    contradiction = Contradiction(
-                        claim_a=claim_a, claim_b=claim_b,
-                        source_a=source_a, source_b=source_b,
-                        kind="numeric",
-                        severity=severity * (0.5 if intra else 1.0),
-                        detail=(
-                            f"Sources disagree on the same {unit} measure: "
-                            f"{numeric['raw_a']} vs {numeric['raw_b']} "
-                            f"({rel:.0%} apart)."
-                        ),
-                        values=numeric,
-                        intra_source=intra,
-                    )
-                elif claim_polarity(claim_a) and claim_polarity(claim_b) and \
-                        claim_polarity(claim_a) != claim_polarity(claim_b) and similarity >= 0.45:
-                    contradiction = Contradiction(
-                        claim_a=claim_a, claim_b=claim_b,
-                        source_a=source_a, source_b=source_b,
-                        kind="polarity",
-                        severity=(0.55 + 0.35 * similarity) * (0.5 if intra else 1.0),
-                        detail=(
-                            "Sources assert opposite directions for the same "
-                            "relationship."
-                        ),
-                        values={
-                            "polarity_a": claim_polarity(claim_a),
-                            "polarity_b": claim_polarity(claim_b),
-                            "similarity": round(similarity, 3),
-                        },
-                        intra_source=intra,
-                    )
-                else:
-                    temporal = _temporal_conflict(claim_a, claim_b)
-                    if temporal:
-                        contradiction = Contradiction(
-                            claim_a=claim_a, claim_b=claim_b,
-                            source_a=source_a, source_b=source_b,
-                            kind="temporal",
-                            severity=min(1.0, 0.4 + temporal["gap"] / 50.0) * (0.5 if intra else 1.0),
-                            detail=(
-                                f"Sources date the same event differently: "
-                                f"{temporal['years_a']} vs {temporal['years_b']}."
-                            ),
-                            values=temporal,
-                            intra_source=intra,
-                        )
-
-                if contradiction:
-                    contradiction.sub_question_a = str(fa.get("sub_question", "") or "")
-                    contradiction.sub_question_b = str(fb.get("sub_question", "") or "")
-                    found.append(contradiction)
+        rel = pair["relative_divergence"]
+        found.append(
+            Contradiction(
+                claim_a=str(raw.get("claim_a", "")),
+                claim_b=str(raw.get("claim_b", "")),
+                source_a=str(raw.get("source_a", "") or ""),
+                source_b=str(raw.get("source_b", "") or ""),
+                kind="numeric",
+                severity=min(1.0, 0.35 + rel),
+                detail=str(raw.get("note", "")),
+                values={
+                    # The live engine normalizes scales but does not extract
+                    # units yet; numeric_ranges groups these under the
+                    # dimensionless bucket until it does.
+                    "unit": "dimensionless",
+                    "value_a": pair["value_a"],
+                    "value_b": pair["value_b"],
+                    "relative_divergence": round(rel, 4),
+                    "topic_similarity": float(raw.get("topic_similarity", 0.0)),
+                },
+                # The live engine already skips same-source pairs.
+                intra_source=False,
+            )
+        )
 
     return _finalize(found, limit)
+
+
+def _report_pair(raw: Dict[str, Any], divergence: float) -> Optional[Dict[str, Any]]:
+    """The value pair to report for a live-engine finding.
+
+    Claims often carry incidental numbers (years, counts) alongside the
+    disputed measure, and the largest raw divergence is usually one of those,
+    not the real conflict. The tightest pair that still passes `divergence`
+    is the most conservative genuine conflict; incidental numbers are
+    reported only when nothing better qualifies.
+    """
+    best: Optional[Dict[str, Any]] = None
+    for va in raw.get("value_a") or []:
+        for vb in raw.get("value_b") or []:
+            bigger = max(abs(va), abs(vb))
+            if bigger == 0:
+                continue
+            rel = abs(va - vb) / bigger
+            if rel < divergence:
+                continue
+            if best is None or rel < best["relative_divergence"]:
+                best = {"value_a": va, "value_b": vb, "relative_divergence": rel}
+    return best
 
 
 def _finalize(found: List[Contradiction], limit: int) -> List[Dict[str, Any]]:
