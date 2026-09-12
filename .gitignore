@@ -37,3 +37,6 @@ frontend/.vite/
 
 # Third-party reference clones (read-only adaptation sources, never commit)
 gpt-researcher/
+
+# Vendor bundle for the v3 agent integration (kept local, not versioned)
+mars-deep-research-v3.zip

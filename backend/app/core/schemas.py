@@ -42,6 +42,10 @@ class FactModel(BaseModel):
     claim: str = Field(min_length=1)
     source: str = ""
     confidence: float = 0.0
+    # Optional verbatim fragment from the cited source grounding this claim.
+    # Retained (not validated) so downstream quote-verification can use it;
+    # "" means "no quote supplied", never "quote checked and missing".
+    direct_quote: str = ""
 
     @field_validator("confidence", mode="before")
     @classmethod

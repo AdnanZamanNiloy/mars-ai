@@ -63,6 +63,26 @@ class Settings(BaseSettings):
     # Query fan-out: max search queries issued per pass (questions + their
     # alternate phrasings). Bounds latency when plans carry variants.
     search_max_queries_per_pass: int = 8
+    # v3 retrieval knobs (defaults mirror the v3 modules' getattr fallbacks,
+    # so adding them changes nothing until the v3 search is ported):
+    # concurrent page fetches per search, bounded separately from query fan-out
+    max_parallel_fetch: int = 4
+    # transient-error retries per provider search (timeouts fail fast in the
+    # LLM chain and stay that way — this covers search providers only)
+    search_retry_attempts: int = 3
+    # query variants (incl. primary-source fan-out) per search contract
+    max_queries_per_contract: int = 3
+    # top results kept per provider search before dedup/rank
+    search_max_results: int = 10
+    # Tavily search depth ("basic" or "advanced")
+    tavily_search_depth: str = "basic"
+
+    # Research budget governor (v3 budget module; enforced only once ported)
+    max_budget_usd: float = 0.50
+    max_budget_tokens: int = 400_000
+    max_llm_calls: int = 60
+    max_research_seconds: float = 300.0
+    strict_budget: bool = False
 
     # Timeouts (seconds)
     llm_timeout_sec: float = 25.0
