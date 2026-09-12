@@ -73,10 +73,19 @@ async def test_planner_uses_llm_for_non_trivial_query():
             "minimum_sources": 2,
             "stop_condition": "sufficient evidence for this axis",
             "variants": [],
-            "agent": "",
+            "agent": "financial_researcher",
             "tools": ["web_search"],
             "scope": [],
             "output_format": "structured_findings",
+            # v3 contract enrichment: specialist overlay + primary-source
+            # steering from the source registry.
+            "specialist": "financial",
+            "preferred_domains": ["worldbank.org", "imf.org", "oecd.org"],
+            "primary_source_query": (
+                "Levelized cost per MWh of nuclear vs solar in Bangladesh 2024 "
+                "site:worldbank.org OR site:imf.org"
+            ),
+            "wave": 0,
         },
         {
             "id": 2,
@@ -90,10 +99,17 @@ async def test_planner_uses_llm_for_non_trivial_query():
             "minimum_sources": 2,
             "stop_condition": "sufficient evidence for this axis",
             "variants": [],
-            "agent": "",
+            "agent": "financial_researcher",
             "tools": ["web_search"],
             "scope": [],
             "output_format": "structured_findings",
+            "specialist": "financial",
+            "preferred_domains": ["reuters.com", "apnews.com", "ft.com"],
+            "primary_source_query": (
+                "Financing structure of the Rooppur nuclear plant in Bangladesh "
+                "site:reuters.com OR site:apnews.com"
+            ),
+            "wave": 0,
         },
     ]
     assert llm.calls, "planner never called the LLM"
@@ -106,7 +122,10 @@ async def test_planner_llm_failure_returns_fallback():
             raise RuntimeError("LLM down")
 
     result = await planner_agent(ExplodingLLM(), QUERY)
-    assert result == fallback_plan(QUERY)
+    # Failure fallback is sized to the planner's default target (5), not the
+    # bare fallback_plan() default (4): a degraded run is a smaller research
+    # plan, not a different kind of plan.
+    assert result == fallback_plan(QUERY, 5)
 
 
 def test_planner_system_prompt_is_defined():
@@ -118,7 +137,9 @@ def test_planner_system_prompt_is_defined():
 def test_fallback_plan_structure():
     plan = fallback_plan("what is retrieval augmented generation")
     assert len(plan) == 4
-    assert {q["axis"] for q in plan} == {"definition", "mechanism", "application", "criticism"}
+    # Axis-complete fallback: evidence + criticism guaranteed (the two angles
+    # that separate research from recall), not definition variants.
+    assert {q["axis"] for q in plan} == {"definition", "evidence", "criticism", "mechanism"}
 
 
 async def test_planner_uses_llm_for_what_is_query():
@@ -213,3 +234,60 @@ async def test_planner_omits_empty_context_block():
 
     await planner_agent(SpyLLM(LLM_PLAN), QUERY, context_snippets=["", "  "])
     assert "Web context" not in captured["user"]
+
+
+def _six_question_plan():
+    axes = ["definition", "mechanism", "application", "evidence", "criticism", "outlook"]
+    plan = dict(LLM_PLAN)
+    plan["sub_questions"] = [
+        {**LLM_PLAN["sub_questions"][0], "id": i + 1,
+         "question": f"Distinct research angle number {i + 1} on Bangladesh energy policy options",
+         "axis": axis}
+        for i, axis in enumerate(axes)
+    ]
+    return plan
+
+
+async def test_planner_honours_target_count():
+    """The orchestrator's budget must reach the actual work: target_count caps
+    the plan instead of the old hardcoded five."""
+    llm = FakeLLM(_six_question_plan())
+    result = await planner_agent(llm, QUERY, target_count=3)
+    assert len(result) <= 3
+
+
+async def test_planner_enforces_required_axes():
+    """A plan missing the required evidence/criticism angles gets them
+    injected deterministically instead of shipping background-only."""
+    llm = FakeLLM(LLM_PLAN)  # comparison + mechanism only
+    result = await planner_agent(llm, QUERY, required_axes=("evidence", "criticism"))
+    axes = {q["axis"] for q in result}
+    assert {"evidence", "criticism"} <= axes
+
+
+def test_execution_waves_orders_dependencies():
+    from app.agents.planner import execution_waves, sanitize_dependencies
+
+    plan = sanitize_dependencies([
+        {"id": 1, "question": "a", "depends_on": []},
+        {"id": 2, "question": "b", "depends_on": [1]},
+        {"id": 3, "question": "c", "depends_on": [1]},
+    ])
+    waves = execution_waves(plan)
+    assert [q["id"] for q in waves[0]] == [1]
+    assert sorted(q["id"] for q in waves[1]) == [2, 3]
+
+
+def test_sanitize_dependencies_breaks_cycles_to_roots():
+    from app.agents.planner import execution_waves, sanitize_dependencies
+
+    plan = sanitize_dependencies([
+        {"id": 1, "question": "a", "depends_on": [2]},
+        {"id": 2, "question": "b", "depends_on": [1]},
+    ])
+    # Cycle broken into an order: node 1 is the re-normalized root (wave 0),
+    # node 2 follows (wave 1) instead of both stranding in a later wave.
+    assert plan[0]["depends_on"] == [] and plan[0]["wave"] == 0
+    waves = execution_waves(plan)
+    assert [q["id"] for q in waves[0]] == [1]
+    assert [q["id"] for q in waves[1]] == [2]

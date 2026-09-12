@@ -39,7 +39,7 @@ def test_planner_fallback_records():
     reset_fallbacks()
     try:
         result = asyncio.run(planner_agent(ExplodingLLM(), "Some deep query here?"))
-        assert len(result) == 4  # fallback plan still returned
+        assert len(result) == 5  # failure fallback sized to planner target (v3)
         assert take_fallbacks() == ["planner"]
     finally:
         clear_fallbacks()
