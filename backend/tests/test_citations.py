@@ -4,8 +4,8 @@ import asyncio
 
 from app.agents.synthesizer import (
     _append_source_legend,
-    _numbered_sources,
-    _validate_citations,
+    _assign_numbers,
+    _drop_invalid_markers,
     synthesizer_agent,
 )
 
@@ -52,8 +52,10 @@ def test_prompt_numbers_sources_and_bans_invention():
     llm = FakeLLM("Short answer [1].")
     asyncio.run(synthesizer_agent(llm, "What is RAG?", facts))
     assert "[1] en.wikipedia.org" in llm.seen["user"]
-    assert "Never invent numbers, links, or sources" in llm.seen["system"]
-    assert "provided Sources list" in llm.seen["system"]
+    # v3 CITATION RULES block: no renumbering, no guessing, no uncited
+    # numbers — stronger than the old single sentence, different words.
+    assert "do not cite a number you were not given" in llm.seen["system"]
+    assert "does not\n    appear verbatim in the evidence" in llm.seen["system"]
 
 
 def test_fallback_appends_legend():
@@ -69,14 +71,14 @@ def test_fallback_appends_legend():
 
 def test_legend_capped_at_top_ten():
     facts = [_fact(i, f"host-{i}.org") for i in range(12)]
-    numbered = _numbered_sources(facts[:10])
+    numbered, _ = _assign_numbers(facts[:10])
     legend = _append_source_legend("Answer [1].", numbered)
     assert legend.count("\n[") == 10
 
 
 def test_validate_citations_edge_cases():
-    assert _validate_citations("a [1] b [0] c [3]", 2) == "a [1] b  c "
-    assert _validate_citations("", 2) == ""
+    assert _drop_invalid_markers("a [1] b [0] c [3]", 2) == "a [1] b  c "
+    assert _drop_invalid_markers("", 2) == ""
 
 
 def test_sanitizer_preserves_paragraphs():
@@ -688,24 +690,27 @@ def test_sanitizer_preserves_markdown_headings():
 
 def test_legend_dedupes_repeated_sources():
     """One page cited by five claims is ONE source, not five legend rows."""
-    from app.agents.synthesizer import _numbered_sources
+    from app.agents.synthesizer import _assign_numbers
 
     facts = [
         {"claim": "Claim one", "source": "https://a.org/page", "confidence": 0.9},
         {"claim": "Claim two", "source": "https://a.org/page", "confidence": 0.85},
         {"claim": "Claim three", "source": "https://b.org/other", "confidence": 0.8},
     ]
-    numbered = _numbered_sources(facts)
+    numbered, _ = _assign_numbers(facts)
     assert [s["n"] for s in numbered] == [1, 2]
     assert numbered[0]["domain"] == "a.org"
 
 
-def test_legend_caps_at_twelve_strongest_sources():
-    from app.agents.synthesizer import _numbered_sources
+def test_legend_caps_at_fourteen_strongest_sources():
+    """v3 legend cap is 14 (was 12), grouped by canonical URL with
+    tier/primary annotations."""
+    from app.agents.synthesizer import _assign_numbers
 
     facts = [{"claim": f"Claim {i}", "source": f"https://host-{i}.org/x", "confidence": 0.9}
              for i in range(20)]
-    assert len(_numbered_sources(facts)) == 12
+    numbered, _ = _assign_numbers(facts)
+    assert len(numbered) == 14
 
 
 def test_answer_support_parses_hash_sources_heading():
@@ -755,3 +760,39 @@ def test_sanitizer_inline_bullet_split_requires_sentence_boundary():
     out = _sanitize_answer_text(raw, "How do transformers work?")
     assert "\n" not in out and out.startswith("- Voltage"), out
     assert " - typically - " in out, "mid-sentence hyphens must remain prose"
+
+
+def test_extractive_fallback_cites_every_claim():
+    """The degraded-path writer must produce traceable output: every claim
+    carries its marker inside the sentence, with a used-only legend."""
+    from app.agents.synthesizer import synthesize
+
+    class ExplodingLLM:
+        async def generate_json(self, *a, **k):
+            raise RuntimeError("down")
+
+    facts = [
+        {"claim": "RAG retrieves external documents before generating answers",
+         "source": "https://arxiv.org/abs/2005.11401", "confidence": 0.9, "verified": True},
+        {"claim": "RAG grounds model outputs in cited sources",
+         "source": "https://en.wikipedia.org/wiki/RAG", "confidence": 0.8, "verified": True},
+    ]
+    result = asyncio.run(synthesize(ExplodingLLM(), "What is RAG?", facts))
+    assert result.used_fallback is True
+    assert "[1]" in result.answer and "[2]" in result.answer
+    assert "## Sources" in result.answer
+    assert result.audit.cited_sentences > 0
+
+
+def test_audit_flags_untraceable_sentences():
+    from app.agents.synthesizer import audit_citations
+
+    facts = [{"claim": "RAG retrieves documents", "source": "https://a.org/x",
+              "confidence": 0.9, "verified": True}]
+    numbered = [{"n": 1, "domain": "a.org", "url": "https://a.org/x"}]
+    audit = audit_citations(
+        "RAG retrieves documents [1]. Models have exactly 4 layers and cost $9.",
+        numbered, facts)
+    assert len(audit.uncited_factual) >= 1
+    assert len(audit.ungrounded_numbers) >= 1
+    assert audit.is_clean is False

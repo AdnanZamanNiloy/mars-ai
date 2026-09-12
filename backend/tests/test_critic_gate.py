@@ -123,4 +123,20 @@ def test_gate_failure_reason_names_the_failing_signal():
     facts = [_fact(0, "en.wikipedia.org", True, 0.9), _fact(1, "en.wikipedia.org", True, 0.9)]
     result = _run(facts)
     assert result["is_sufficient"] is False
-    assert "facts=" in result["reason"] and "sources=" in result["reason"]
+    # v3 names the failing gate with measured counts (domains=, not sources=).
+    assert "facts=" in result["reason"] and "domains=" in result["reason"]
+
+
+def test_critic_llm_failure_still_yields_followups():
+    """v3 fix: a dead model with no deterministic gate firing must not leave
+    the next pass with nothing to search."""
+
+    class DeadLLM:
+        async def generate_json(self, *a, **k):
+            raise RuntimeError("providers down")
+
+    facts = [_fact(0, "a.org", True, 0.9), _fact(1, "b.org", True, 0.85)]
+    result = asyncio.run(critic_agent(
+        DeadLLM(), "What is RAG?", facts, iteration=1, max_iterations=3))
+    assert result["is_sufficient"] is False
+    assert len(result["improved_queries"]) >= 1
