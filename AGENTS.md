@@ -1,10 +1,9 @@
 # AGENTS.md — Operating Rules for AI Coding Agents
 
-This file is the persistent rulebook for any AI coding agent (opencode or otherwise) working in this repository. It applies to **every** task, not just the phased roadmap in `manual.md`. Read it once at the start of a session and hold yourself to it for every change you make.
+This file is the persistent rulebook for any AI coding agent (opencode or otherwise) working in this repository. It applies to **every** task. Read it once at the start of a session and hold yourself to it for every change you make.
 
-Two companion documents give context this file doesn't repeat:
+One companion document gives context this file doesn't repeat:
 - `MARS-vision-v2.md` — what the system should eventually do and why (feature rationale, UI mockups, data model).
-- `manual.md` — what to build, in what order, with file-level tasks and acceptance criteria.
 
 This file exists because the codebase already shipped real, silent bugs that a bit more discipline would have caught — see Section 2. Its job is to stop that from happening again, not to describe features.
 
@@ -26,8 +25,8 @@ Agents:          app/agents/*.py (planner, search, summarizer, critic,
                  stage or shared utility)
 Orchestration:   app/graph/workflow.py (LangGraph StateGraph)
 API:             app/api/routes.py (the /api/research/stream route)
-Core utilities:  app/core/*.py (config, llm client, and whatever you add
-                 for caching/confidence/isolation per manual.md)
+Core utilities:  app/core/*.py (config, llm client, caching, confidence,
+                 isolation, degradation, providers)
 Persistence:     app/db/sqlite.py
 Frontend:        frontend/src/App.jsx consumes the NDJSON stream; components
                  in frontend/src/components/
@@ -213,8 +212,8 @@ If you find a new instance of any of these patterns anywhere in the codebase whi
 ## 3. Non-negotiable workflow rules
 
 ```text
-1. One task = one commit, small and reviewable. Reference the manual.md
-   task ID in the message when applicable: "[2.3] add Verification Agent".
+1. One task = one commit, small and reviewable. Use a short scope tag
+   in the message, e.g. "[v3-B2] port v3 search".
 
 2. Branch per phase/feature, off the default branch. Never force-push.
    Never rewrite already-pushed history.
@@ -233,7 +232,7 @@ If you find a new instance of any of these patterns anywhere in the codebase whi
    documented.
 
 6. If a task requires an architecture-level decision not covered by
-   manual.md or MARS-vision-v2.md (e.g. changing the DB engine,
+   MARS-vision-v2.md (e.g. changing the DB engine,
    removing an existing working code path, changing the public API
    contract in a breaking way), stop and surface the question instead
    of deciding unilaterally. Small implementation choices within a
@@ -332,7 +331,7 @@ async def name_agent(llm: LLMClient, ...) -> ...:
     return result
 ```
 
-New agents added per `manual.md` (verifier, orchestrator, depth controller, etc.) must follow this shape. A new agent with no non-LLM fallback is a regression relative to the rest of the codebase, even if it "works" when the API is up.
+Every new agent must follow this shape. A new agent with no non-LLM fallback is a regression relative to the rest of the codebase, even if it "works" when the API is up.
 
 ### 4.8 — DB schema changes are additive and idempotent
 
@@ -340,7 +339,7 @@ New agents added per `manual.md` (verifier, orchestrator, depth controller, etc.
 
 ### 4.9 — New NDJSON event types need a frontend case in the same commit
 
-`app/api/routes.py`'s `event_line()` and `frontend/src/App.jsx`'s `applyEvent()` switch are an implicit contract. `applyEvent` has a `default: break` — a backend event type with no matching `case` is silently dropped, not an error. If you add an event type (e.g. `decisions`, per `manual.md` 3.5), add the frontend case in the same commit, or it will look like the feature does nothing.
+`app/api/routes.py`'s `event_line()` and `frontend/src/App.jsx`'s `applyEvent()` switch are an implicit contract. `applyEvent` has a `default: break` — a backend event type with no matching `case` is silently dropped, not an error. If you add an event type (e.g. `decisions`), add the frontend case in the same commit, or it will look like the feature does nothing.
 
 ---
 
@@ -368,7 +367,7 @@ The target host has 8GB RAM and no local model inference — every constraint he
 
 ## 6. Definition of Done
 
-Apply this checklist to every task, whether it's from `manual.md` or ad hoc:
+Apply this checklist to every task:
 
 ```text
 [ ] python -c "import <every module you touched>" succeeds
@@ -383,13 +382,12 @@ Apply this checklist to every task, whether it's from `manual.md` or ad hoc:
 [ ] Any new NDJSON event type has a matching case in frontend/src/App.jsx
 [ ] Independent I/O calls use asyncio.gather, not a sequential loop,
     unless there's a stated reason otherwise
-[ ] Tests added/updated and passing (pytest tests/ -v, once tests/
-    exists per manual.md 1.8 — add coverage for what you built)
+[ ] Tests added/updated and passing (pytest tests/ -v) — add coverage
+    for what you built
 [ ] Manual smoke test run against the real running server, not just
     unit tests in isolation
 [ ] git status shows nothing unexpected (no .env, no *.db, no
     accidentally-included data) before committing
-[ ] Commit message references the manual.md task ID if one applies
 ```
 
 If any box can't be checked, the task isn't done — say so explicitly rather than reporting completion.
@@ -400,12 +398,10 @@ If any box can't be checked, the task isn't done — say so explicitly rather th
 
 ```text
 - Feature intent/rationale unclear -> check MARS-vision-v2.md first.
-- Build order/what's next unclear -> check manual.md first.
 - Whether something counts as "done" for a specific feature -> check
-  manual.md's "Definition of done" for that task and Appendix C's
-  guardrails — several features (Feature 02/03, Feature 06, Feature 14)
-  have explicit rules about not being marked complete on a partial
-  implementation.
+  MARS-vision-v2.md's acceptance criteria — several features (Feature
+  02/03, Feature 06, Feature 14) have explicit rules about not being
+  marked complete on a partial implementation.
 - Still unclear, or the question is architectural rather than
   implementation-level -> stop and ask (Section 3, rule 6). Don't
   guess on anything that would be expensive to undo.
