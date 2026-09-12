@@ -386,7 +386,10 @@ def test_split_query_shapes():
 
 async def test_news_contract_uses_news_topic(monkeypatch, tmp_path):
     """Delegation search_type must steer retrieval: news contracts hit
-    Tavily's news topic with the clean question text (never str(dict))."""
+    Tavily's news topic with the clean question text (never str(dict)).
+    v3 type-driven providers: a news contract with a Tavily key goes to
+    Tavily news only (no free-Wikipedia background leg — encyclopedia and
+    statistical contracts keep theirs)."""
     settings = _settings(tavily_api_key="tvly-real-key",
                          database_url=str(tmp_path / "t.db"))
     client = SearchClient(settings)
@@ -405,8 +408,28 @@ async def test_news_contract_uses_news_topic(monkeypatch, tmp_path):
     monkeypatch.setattr(SearchClient, "_wiki", empty_wiki)
     await client._search({"question": "central bank rates today", "search_type": "news"})
     assert seen["query"] == "central bank rates today"
-    assert "central bank" in seen["wiki_query"]
+    assert "wiki_query" not in seen
     assert seen["topic"] == "news"
+
+
+async def test_encyclopedia_contract_keeps_wiki_leg(monkeypatch, tmp_path):
+    """The Wikipedia background leg survives on encyclopedia contracts."""
+    settings = _settings(tavily_api_key="tvly-real-key",
+                         database_url=str(tmp_path / "t.db"))
+    client = SearchClient(settings)
+    seen = {}
+
+    async def fake_tavily(self, query, query_domains=None, topic="general"):
+        return []
+
+    async def empty_wiki(self, query):
+        seen["wiki_query"] = query
+        return []
+
+    monkeypatch.setattr(SearchClient, "_tavily_search", fake_tavily)
+    monkeypatch.setattr(SearchClient, "_wiki", empty_wiki)
+    await client._search({"question": "what is photosynthesis", "search_type": "encyclopedia"})
+    assert "photosynthesis" in seen["wiki_query"]
 
 
 async def test_general_pair_keeps_general_topic(monkeypatch, tmp_path):
