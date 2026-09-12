@@ -69,3 +69,48 @@ def test_verifier_drops_truncated_fragments():
     out = verify_facts(facts, results)
     assert len(out) == 1
     assert "large dat" not in out[0]["claim"]
+
+
+def test_numeric_mismatch_fails_despite_high_overlap():
+    """'fell 40%' verified against a 'fell 4%' source scored ~0.95 on pure
+    overlap before: the numeric hard-fail must catch it."""
+    facts = [
+        {"claim": "Solar costs fell 40 percent in 2024", "source": "https://example.com/solar",
+         "confidence": 0.9},
+    ]
+    results = [
+        {"url": "https://example.com/solar",
+         "content": "Solar costs fell 4 percent in 2024 according to the annual review."},
+    ]
+    (out,) = verify_facts(facts, results)
+    assert out["verified"] is False
+    assert "figure in the claim does not appear" in out["verification_reason"]
+    assert out["verification_checks"]["numbers_grounded"] is False
+
+
+def test_polarity_inversion_fails_despite_shared_vocabulary():
+    facts = [
+        {"claim": "Solar costs increased sharply in 2024", "source": "https://example.com/solar",
+         "confidence": 0.9},
+    ]
+    results = [
+        {"url": "https://example.com/solar",
+         "content": "Solar costs fell sharply in 2024 as demand dropped."},
+    ]
+    (out,) = verify_facts(facts, results)
+    assert out["verified"] is False
+    assert "contradicts the source" in out["verification_reason"]
+
+
+def test_stale_evidence_flagged_not_dropped():
+    facts = [
+        {"claim": "Solar costs decreased in recent years", "source": "https://example.com/solar",
+         "confidence": 0.8, "published_at": "2020-01-01", "search_type": "news"},
+    ]
+    results = [
+        {"url": "https://example.com/solar",
+         "content": "Solar costs decreased in recent years across major markets."},
+    ]
+    (out,) = verify_facts(facts, results)
+    assert out["verified"] is True
+    assert out["is_stale"] is True  # discounted downstream, never dropped

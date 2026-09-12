@@ -93,3 +93,58 @@ def test_summarizer_attaches_specialist_role(tmp_path):
         FakeLLM(), "Nuclear economics?", [{"url": "https://imf.org/report", "snippet": "s", "content": "c"}],
         specialist_role="financial"))
     assert facts and facts[0]["agent"] == "financial"
+
+
+def test_summarizer_quote_grounding_end_to_end(tmp_path):
+    """direct_quote must survive generate_json validation (FactModel field)
+    and verify against the source text: located quotes boost, invented
+    quotes penalize."""
+    import asyncio
+
+    from app.agents.summarizer import summarizer_agent
+    from app.core.config import Settings
+    from app.core.degradation import clear_fallbacks, reset_fallbacks
+    from app.core.schemas import SummarizerFactsModel
+
+    content = (
+        "Solar capacity in Bangladesh doubled in 2025 as imports surged. "
+        "Grid upgrades lagged behind the new installations."
+    )
+
+    class QuoteLLM:
+        def __init__(self):
+            self.settings = Settings(
+                groq_api_key="k", database_url=str(tmp_path / "q.db"), _env_file=None
+            )
+
+        async def generate_json(self, system_prompt, user_prompt, response_model=None):
+            payload = {"facts": [
+                {"claim": "Solar capacity in Bangladesh doubled in 2025",
+                 "source": "https://example.com/solar",
+                 "confidence": 0.8,
+                 "direct_quote": "Solar capacity in Bangladesh doubled in 2025"},
+                {"claim": "Grid upgrades lagged behind the new installations",
+                 "source": "https://example.com/solar",
+                 "confidence": 0.8,
+                 "direct_quote": "Ministers promised a tenfold budget increase soon"},
+            ]}
+            if response_model is not None:
+                return response_model.model_validate(payload).model_dump()
+            return payload
+
+    results = [{"url": "https://example.com/solar", "snippet": "", "content": content,
+                "sub_question": "How fast did solar grow in Bangladesh?"}]
+    reset_fallbacks()
+    try:
+        facts = asyncio.run(summarizer_agent(
+            QuoteLLM(), "Solar growth and grid upgrades in Bangladesh", results))
+    finally:
+        clear_fallbacks()
+
+    by_claim = {f["claim"]: f for f in facts}
+    located = by_claim["Solar capacity in Bangladesh doubled in 2025"]
+    assert located["direct_quote"] != ""  # survived validation
+    assert located["quote_verified"] is True
+    invented = by_claim["Grid upgrades lagged behind the new installations"]
+    assert invented["quote_verified"] is False
+    assert invented["confidence"] < located["confidence"]
