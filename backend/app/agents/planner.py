@@ -35,7 +35,7 @@ Fixes and upgrades in this version
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, TypedDict
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, TypedDict
 
 from app.core.degradation import record_fallback
 from app.core.llm import LLMClient

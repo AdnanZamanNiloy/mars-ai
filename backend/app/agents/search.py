@@ -47,7 +47,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from urllib.parse import quote, urlparse
 from xml.etree import ElementTree
 
@@ -58,7 +58,6 @@ from app.core.config import Settings
 from app.core.llm import _real_key
 from app.core.logging import get_logger
 
-from app.agents.evidence_utils import source_reliability_score
 from app.agents.planner import SubQuestion
 from app.agents.reliability import (
     RetryPolicy,
