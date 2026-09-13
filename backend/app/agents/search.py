@@ -47,8 +47,8 @@ import re
 import time
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
-from urllib.parse import quote, urlparse
+from typing import Any, Dict, List, Union
+from urllib.parse import quote
 from xml.etree import ElementTree
 
 import httpx
@@ -803,9 +803,26 @@ class SearchClient:
         )
 
         async with self.semaphore:
+            # Query variants are independent — fan them out concurrently
+            # instead of awaiting one at a time (AGENTS.md 4.6). The
+            # semaphore still wraps the WHOLE contract, so this shortens
+            # latency without changing how many contracts share the search
+            # bulkhead. `_providers_for` already absorbs per-provider
+            # failures into [], so gather only needs the exception guard for
+            # an unexpected hard failure.
+            per_query = await asyncio.gather(
+                *(self._providers_for(q, search_type) for q in queries),
+                return_exceptions=True,
+            )
             collected: List[SearchResult] = []
-            for q in queries:
-                collected.extend(await self._providers_for(q, search_type))
+            for batch in per_query:
+                if isinstance(batch, BaseException):
+                    logger.warning(
+                        "[Search] query failed: %s", type(batch).__name__,
+                        exc_info=batch,
+                    )
+                    continue
+                collected.extend(batch or [])
 
         if not collected:
             return []
