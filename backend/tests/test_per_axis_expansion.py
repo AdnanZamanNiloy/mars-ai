@@ -49,8 +49,11 @@ async def test_expansion_searches_only_new_questions(monkeypatch):
         return plans.pop(0)
 
     async def fake_summarizer(llm, query, search_results=None, specialist_role="general"):
+        # Corroborated across two publishers so the evidence gate is clean and
+        # this test exercises per-axis expansion mechanics, not the gate.
         return [{"claim": f"Fact about {r.get('sub_question', '')[:20]} is established",
-                 "source": r.get("url", ""), "confidence": 0.9}
+                 "source": r.get("url", ""), "confidence": 0.9,
+                 "corroborating_sources": [r.get("url", ""), "https://other.org/ref"]}
                 for r in (search_results or [])]
 
     calls = {"n": 0}

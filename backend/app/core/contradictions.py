@@ -52,6 +52,32 @@ SEVERE_SEVERITY = 0.60
 
 _YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
 
+# Scope markers: a numeric difference between a "global" figure and a "US"
+# figure (or any two disjoint geographies/segments) is a scope mismatch, not a
+# contradiction. Deliberately a curated token set with word boundaries — the
+# ambiguous bare pronoun "us" is excluded so ordinary prose never triggers a
+# false scope separation.
+_SCOPE_MARKERS: Dict[str, str] = {
+    "global": "global", "globally": "global", "worldwide": "global",
+    "world": "global", "international": "global",
+    "u.s.": "us", "u.s": "us", "usa": "us", "united states": "us",
+    "uk": "uk", "britain": "uk", "british": "uk", "united kingdom": "uk",
+    "eu": "eu", "europe": "eu", "european": "eu",
+    "china": "china", "chinese": "china",
+    "india": "india", "indian": "india",
+    "japan": "japan", "japanese": "japan",
+    "germany": "germany", "german": "germany",
+    "africa": "africa", "african": "africa",
+    "asia": "asia", "asian": "asia",
+    "canada": "canada", "canadian": "canada",
+    "australia": "australia", "australian": "australia",
+}
+
+_SCOPE_PHRASE_RE = re.compile(
+    r"\b(" + "|".join(re.escape(k) for k in sorted(_SCOPE_MARKERS, key=len, reverse=True)) + r")\b",
+    re.IGNORECASE,
+)
+
 
 _NUMBER_RE = re.compile(
     r"(?P<value>\d+(?:[.,]\d+)?)\s*(?P<suffix>%|percent|thousand|million|billion|bn|k\b|m\b|b\b)?",
@@ -89,11 +115,39 @@ def _years_in(text: str) -> List[int]:
     return [int(m.group(0)) for m in _YEAR_RE.finditer(text or "")]
 
 
+def _scopes_in(text: str) -> set:
+    """Scope labels a claim asserts (global / us / eu / ...)."""
+    scopes = set()
+    for match in _SCOPE_PHRASE_RE.finditer(text or ""):
+        key = match.group(0).lower().rstrip(".")
+        if key in _SCOPE_MARKERS:
+            scopes.add(_SCOPE_MARKERS[key])
+    return scopes
+
+
+def _scopes_conflict(a: set, b: set) -> bool:
+    """True when the two claims describe different scopes.
+
+    Disjoint explicit scopes ("global" vs "us") conflict; a scoped claim
+    against an unscoped one ("US market" vs "the market") also conflicts, since
+    the unscoped figure may be a different population entirely. Conservative by
+    design: a false separation only downgrades a numeric conflict to a
+    scope note, never invents one.
+    """
+    if not a and not b:
+        return False
+    if not a or not b:
+        return True
+    return not (a & b)
+
+
 def _severity(kind: str, divergence: float) -> float:
     if kind == "numeric":
         return min(1.0, 0.35 + divergence)
     if kind == "polarity":
         return 0.55
+    if kind == "scope":
+        return min(0.45, 0.20 + divergence / 4.0)
     return min(0.5, 0.25 + divergence / 2.0)
 
 
@@ -190,25 +244,52 @@ def find_contradictions(
                         }
 
             # ---- numeric (unit-aware, inside the topical band) ------------
+            # Normalization guard: a numeric conflict is only real when the two
+            # figures are unit-, scope- AND period-compatible. Units are already
+            # enforced by `numeric_conflict`; periods by the temporal detector
+            # above; here a scope mismatch downgrades the finding to a scope
+            # note instead of a numeric contradiction (a "global" figure and a
+            # "US" figure diverging is not the sources disagreeing).
             if found is None:
                 if SIMILARITY_LOW <= similarity < SIMILARITY_HIGH:
                     conflict = numeric_conflict(claim_a, claim_b, divergence=SIGNIFICANT_DIFF)
                     if conflict is not None:
-                        found = {
-                            "kind": "numeric",
-                            "severity": _severity("numeric", conflict["relative_divergence"]),
-                            "values": {
-                                "unit": conflict["unit"],
-                                "value_a": conflict["value_a"],
-                                "value_b": conflict["value_b"],
-                                "relative_divergence": conflict["relative_divergence"],
-                            },
-                            "note": (
-                                f"topically similar claims cite significantly different "
-                                f"{conflict['unit'] or 'dimensionless'} figures "
-                                f"({conflict['raw_a']} vs {conflict['raw_b']})"
-                            ),
-                        }
+                        scopes_a, scopes_b = _scopes_in(claim_a), _scopes_in(claim_b)
+                        if _scopes_conflict(scopes_a, scopes_b):
+                            found = {
+                                "kind": "scope",
+                                "severity": _severity("scope", conflict["relative_divergence"]),
+                                "values": {
+                                    "unit": conflict["unit"],
+                                    "value_a": conflict["value_a"],
+                                    "value_b": conflict["value_b"],
+                                    "relative_divergence": conflict["relative_divergence"],
+                                    "scopes_a": sorted(scopes_a),
+                                    "scopes_b": sorted(scopes_b),
+                                },
+                                "note": (
+                                    "figures describe different scopes "
+                                    f"({sorted(scopes_a) or ['unspecified']} vs "
+                                    f"{sorted(scopes_b) or ['unspecified']}) — not a "
+                                    "contradiction; compare like-for-like before citing"
+                                ),
+                            }
+                        else:
+                            found = {
+                                "kind": "numeric",
+                                "severity": _severity("numeric", conflict["relative_divergence"]),
+                                "values": {
+                                    "unit": conflict["unit"],
+                                    "value_a": conflict["value_a"],
+                                    "value_b": conflict["value_b"],
+                                    "relative_divergence": conflict["relative_divergence"],
+                                },
+                                "note": (
+                                    f"topically similar claims cite significantly different "
+                                    f"{conflict['unit'] or 'dimensionless'} figures "
+                                    f"({conflict['raw_a']} vs {conflict['raw_b']})"
+                                ),
+                            }
 
             if found is None or _already_flagged(claim_a, claim_b):
                 continue

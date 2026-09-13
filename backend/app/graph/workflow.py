@@ -65,6 +65,8 @@ class ResearchState(TypedDict, total=False):
     quality: Dict[str, Any]
     # Evidence grades (Step 5): A/B/C/D counts over the verified fact pool.
     evidence_distribution: Dict[str, int]
+    # Research-loop: whether a counter-evidence query has actually been issued.
+    counter_evidence_attempted: bool
 
 
 class PlannerUpdate(TypedDict):
@@ -79,6 +81,7 @@ class IntentUpdate(TypedDict):
 
 class SearchUpdate(TypedDict):
     search_results: List[Dict[str, str]]
+    counter_evidence_attempted: bool
 
 
 class SummarizerUpdate(TypedDict):
@@ -99,6 +102,8 @@ class CriticUpdate(TypedDict):
     confidence_breakdown: Dict[str, Any]
     contradictions: List[Dict[str, Any]]
     redteam: Dict[str, Any]
+    facts: List[Dict[str, Any]]
+    counter_evidence_attempted: bool
 
 
 class SynthesizerUpdate(TypedDict):
@@ -318,10 +323,56 @@ def _counter_evidence_queries(state: ResearchState, limit: int = 2) -> List[str]
         if int(ev.get("contradiction_count", 0) or 0) > 0:
             queries.append(f"{claim[:140]} conflicting evidence OR disagreement")
         elif ev.get("needs_corroboration"):
-            queries.append(f"{claim[:140]} independent corroboration OR verification")
+            # Independent corroboration, aimed at PRIMARY publishers rather
+            # than more commentary: the whole deficiency is that only one
+            # publisher stands behind an important claim.
+            queries.append(
+                f"{claim[:120]} independent corroboration official data "
+                "OR government report OR peer-reviewed study"
+            )
         if len(queries) >= max(1, limit):
             break
     return queries
+
+
+def _attach_evidence(
+    facts: List[Dict[str, Any]],
+    contradictions: List[Dict[str, Any]] | None = None,
+) -> List[Dict[str, Any]]:
+    """Annotate state facts in place with the claim-level EvidenceRecord.
+
+    Requirement 6: a graded fact reaching synthesis must carry
+    claim→source→verification→independence→corroboration→contradiction→
+    confidence. `grade_facts` produces those records; without this the records
+    lived only inside the confidence/synthesizer computations and the final
+    report could not rely on them. Additive: existing fact keys are preserved
+    and the record rides under `evidence` / `evidence_grade`.
+    """
+    try:
+        from app.core.evidence_grade import grade_facts
+
+        graded = grade_facts(facts, contradictions=contradictions or [])
+    except Exception as exc:  # a grading bug must never break a run
+        logger.warning("attach_evidence_failed", error=str(exc), exc_info=exc)
+        return list(facts or [])
+    by_claim = {
+        str(g.get("claim", "")): g.get("evidence")
+        for g in graded
+        if isinstance(g, dict)
+    }
+    out: List[Dict[str, Any]] = []
+    for fact in facts or []:
+        if not isinstance(fact, dict):
+            continue
+        ev = by_claim.get(str(fact.get("claim", "")))
+        if ev and "evidence" not in fact:
+            enriched = dict(fact)
+            enriched["evidence"] = ev
+            enriched["evidence_grade"] = str(ev.get("grade", ""))
+            out.append(enriched)
+        else:
+            out.append(dict(fact))
+    return out
 
 
 
@@ -614,6 +665,17 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
                 return {"search_results": previous}
             fresh = [(fallback, "")]
         results = await search_client.run_search(fresh)
+        # Track whether a disagreement-seeking/corroboration query was actually
+        # issued — the stopping redesign requires counter-evidence to have been
+        # attempted, and this is the only point that knows what really ran.
+        counter_markers = (
+            "conflicting evidence", "disagreement", "independent corroboration",
+            "counter-evidence", "counter evidence", "verification",
+        )
+        issued_counter = any(
+            any(marker in str(text).lower() for marker in counter_markers)
+            for text, _ in fresh
+        )
         seen_urls = {r.get("url") for r in previous if r.get("url")}
         merged = [*previous, *(r for r in results if r.get("url") not in seen_urls)]
         # Hard memory bound: expansion passes append results forever, so a
@@ -631,7 +693,12 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             merged = merged[dropped:]
             logger.info("search_results_capped", dropped=dropped, retained=len(merged))
         logger.info("search_done", results=len(merged), fresh=len(fresh))
-        return {"search_results": merged}
+        return {
+            "search_results": merged,
+            "counter_evidence_attempted": bool(
+                state.get("counter_evidence_attempted") or issued_counter
+            ),
+        }
 
     async def summarizer_node(state: ResearchState) -> SummarizerUpdate:
         # Agent Context Isolation (2.9): each sub-question worker sees only
@@ -839,9 +906,19 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         for q in _counter_evidence_queries(state):
             if q not in improved:
                 improved.append(q)
+        # Freeze the augmented follow-ups on the critique so the depth
+        # controller's novel-query check sees the counter-evidence queries too;
+        # previously they existed only in critique_feedback and were invisible
+        # to the stopping policy.
+        critique["improved_queries"] = improved
         critique_feedback = critique.get("reason", "")
         if improved:
             critique_feedback = f"{critique_feedback} Improved search focus: {'; '.join(improved)}"
+
+        # Claim-level evidence spine (requirement 6): attach the graded record
+        # to the state facts so synthesis and the report can rely on
+        # claim→source→verification→independence→corroboration→contradiction.
+        enriched_facts = _attach_evidence(state.get("facts", []), contradictions)
 
         return {
             "critique": critique,
@@ -852,6 +929,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             "confidence_history": [*state.get("confidence_history", []), overall_conf],
             "contradictions": contradictions,
             "redteam": redteam_state,
+            "facts": enriched_facts,
         }
 
     async def synthesizer_node(state: ResearchState) -> SynthesizerUpdate:
@@ -986,22 +1064,28 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         critique = state.get("critique", {})
         is_sufficient = bool(critique.get("is_sufficient", False))
 
+        # Hard walls (budget/time, iteration ceiling) are absolute — an
+        # evidence gap cannot be acted on if no pass can run.
+        hard_wall = depth_controller.hard_wall_reached(state)
+
         # Evidence-first sufficiency (Step 3): a critic saying "enough" is an
         # OPINION, not proof. Before trusting it, check the measured evidence
         # base — uncovered axis gaps, uncorroborated quantitative claims, and
         # unresolved contradictions are grounds to keep researching even when
         # the model is satisfied. When the evidence gate is clean, the critic
         # wins exactly as before (no extra iteration, no score change).
-        if is_sufficient and _evidence_gaps_remain(state):
+        if is_sufficient and not hard_wall and _evidence_gaps_remain(state):
             logger.info("evidence_gate_overrides_critic", iteration=int(state.get("iteration", 0)))
             is_sufficient = False
 
         if is_sufficient:
             return "synthesizer"
 
-        # Dynamic Research Depth (2.8) replaces the old two-condition check:
-        # decides expand vs finalize from axis coverage, marginal confidence
-        # gain, and the iteration/depth ceiling.
+        # Dynamic Research Depth (2.8) decides expand vs finalize from axis
+        # coverage, corroboration, contradictions, marginal gain and the
+        # hard walls. The evidence gate is now baked into `decide`'s priority
+        # order, so a soft stop (marginal gain / no-novel-queries) can no
+        # longer defeat an outstanding coverage or corroboration gap.
         decision = depth_controller.decide(state)
         logger.info("depth_decision", decision=decision, iteration=int(state.get("iteration", 0)))
         if decision == "expand":

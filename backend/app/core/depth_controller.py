@@ -33,6 +33,9 @@ from __future__ import annotations
 from typing import Any, Dict, List, Literal
 
 from app.core.config import Settings, get_settings
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 DECISION = Literal["expand", "finalize"]
 
@@ -44,6 +47,11 @@ AXIS_DOMINANCE_THRESHOLD = 0.60
 MIN_AXES_COVERED = 2
 # Modes that must complete at least this many passes before early stops.
 MODE_MIN_ITERATIONS = {"quick": 1, "audit": 2, "redteam": 1}
+
+# Contradiction severity at or above which a conflict blocks a confident stop
+# (mirrors app.core.contradictions.SEVERE_SEVERITY; kept local to avoid a
+# contradiction-engine import in the hot stopping path).
+SEVERE_SEVERITY = 0.60
 
 
 def _planned_axes(state: Dict[str, Any]) -> List[str]:
@@ -103,6 +111,54 @@ def _axes_covered(state: Dict[str, Any], minimum_sources: int) -> List[str]:
     """Planned axes that have at least `minimum_sources` verified facts."""
     counts = _axis_coverage(state, minimum_sources)
     return [axis for axis, n in counts.items() if n >= minimum_sources]
+
+
+def _uncovered_axes(state: Dict[str, Any]) -> List[str]:
+    """Planned axes with ZERO verified facts attributed — hard coverage holes.
+
+    Distinct from `_axes_below_threshold` (which uses the per-contract source
+    floor): an axis nobody has any evidence for is a hole in the research, and
+    must block a soft stop regardless of how confident the pool looks overall.
+    """
+    counts = _axis_coverage(state, DEFAULT_MINIMUM_SOURCES)
+    return [axis for axis, n in counts.items() if n <= 0]
+
+
+def _severe_contradictions(state: Dict[str, Any]) -> int:
+    """Unresolved contradictions strong enough to block a confident finish."""
+    total = 0
+    for c in state.get("contradictions", []) or []:
+        if not isinstance(c, dict):
+            continue
+        kind = str(c.get("kind", "") or "")
+        try:
+            severity = float(c.get("severity", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            severity = 0.0
+        if severity >= SEVERE_SEVERITY or kind in ("numeric", "polarity"):
+            total += 1
+    return total
+
+
+def _needs_corroboration_count(state: Dict[str, Any]) -> int:
+    """Important (quantitative/definitional) claims still resting on one
+    publisher. Pure helper over the evidence spine; grading failure is neutral."""
+    facts = [f for f in state.get("facts", []) or [] if isinstance(f, dict)]
+    if not facts:
+        return 0
+    try:
+        from app.core.evidence_grade import grade_facts
+
+        graded = grade_facts(facts, contradictions=state.get("contradictions") or [])
+    except Exception as exc:  # grading must never change routing
+        logger.warning("depth_corroboration_grading_failed", error=str(exc), exc_info=exc)
+        return 0
+    count = 0
+    for g in graded:
+        ev = g.get("evidence") if isinstance(g, dict) else None
+        if isinstance(ev, dict) and ev.get("needs_corroboration"):
+            count += 1
+    return count
 
 
 def _axis_imbalance(state: Dict[str, Any]) -> bool:
@@ -251,10 +307,13 @@ def evaluate(state: Dict[str, Any], settings: Settings | None = None) -> Dict[st
 
     axes_below = _axes_below_threshold(state, minimum_sources)
     axes_covered = _axes_covered(state, minimum_sources)
+    uncovered = _uncovered_axes(state)
     target = _confidence_target(state, settings)
     budget = _budget_checks(state)
     novel = _novel_followups(state)
     min_iters = _min_iterations(state)
+    needs_corroboration = _needs_corroboration_count(state)
+    severe_contradictions = _severe_contradictions(state)
 
     sufficiency_met = (
         confidence >= target
@@ -264,6 +323,7 @@ def evaluate(state: Dict[str, Any], settings: Settings | None = None) -> Dict[st
     checks = {
         "sufficiency_met": sufficiency_met,
         "sufficiency_stop": bool(critique.get("is_sufficient", False)) or sufficiency_met,
+        "critic_sufficient": bool(critique.get("is_sufficient", False)),
         "marginal_gain_stop": _two_consecutive_stalls(history, settings.min_marginal_gain),
         "ceiling_reached": iteration >= ceiling,
         "min_iterations_not_reached": iteration < min_iters,
@@ -276,6 +336,11 @@ def evaluate(state: Dict[str, Any], settings: Settings | None = None) -> Dict[st
         ),
         "axes_below_threshold": axes_below,
         "axes_covered": axes_covered,
+        # Evidence-first stopping signals (research-loop fix):
+        "uncovered_axes": uncovered,
+        "needs_corroboration_count": needs_corroboration,
+        "severe_contradictions": severe_contradictions,
+        "counter_evidence_attempted": bool(state.get("counter_evidence_attempted", False)),
         # Feature-11 signals now live:
         "confidence_target": target,
         "novel_followups": novel,
@@ -306,25 +371,56 @@ def decide_with_checks(
     """
     checks = evaluate(state, settings)
 
-    # Stop conditions, in priority order.
-    if checks["sufficiency_stop"] and not checks["min_iterations_not_reached"]:
-        return "finalize", checks
+    # ------------------------------------------------------------------
+    # Hard walls are ABSOLUTE — nothing below can preempt them. Budget and the
+    # iteration/depth ceiling are the anti-infinite-loop guarantee.
+    # ------------------------------------------------------------------
     if checks["budget_stop"]:
         # Budget is a hard wall: never expand into a pass we cannot pay for.
         return "finalize", checks
-    if checks["marginal_gain_stop"] and not checks["min_iterations_not_reached"]:
-        return "finalize", checks
     if checks["ceiling_reached"]:
+        return "finalize", checks
+
+    # Mode demands a minimum depth (audit re-scopes even a sufficient-looking
+    # pass 1): only the hard walls above may preempt this.
+    if checks["min_iterations_not_reached"]:
+        return "expand", checks
+
+    # ------------------------------------------------------------------
+    # Evidence-completeness hard-blocks. These preempt every SOFT stop
+    # (sufficiency, marginal gain, no-novel-queries): a run that still has an
+    # unsourced planned angle, an uncorroborated important claim, or a severe
+    # open contradiction must not finalize while a useful pass can still run.
+    # ------------------------------------------------------------------
+    if checks["uncovered_axes"]:
+        # A planned angle with zero verified facts is a hole, not a rounding
+        # error. Expanding is the only way to fill it.
+        return "expand", checks
+
+    if checks["needs_corroboration_count"] > 0 or checks["severe_contradictions"] > 0:
+        if checks["novel_followups"]:
+            return "expand", checks
+        # Nothing new left to search: record as limitations rather than burn a
+        # pass re-finding the same pages (prevents an unbounded loop).
+        return "finalize", checks
+
+    # A critic that explicitly said "insufficient" and proposed actionable new
+    # queries forces a pass — the model verdict is not waivable by a measured
+    # sufficiency that ignores what the critic saw.
+    if not checks["critic_sufficient"] and checks["novel_followups"]:
+        return "expand", checks
+
+    # ------------------------------------------------------------------
+    # Soft stops. Reached only when the evidence base is complete.
+    # ------------------------------------------------------------------
+    if checks["sufficiency_stop"]:
+        return "finalize", checks
+    if checks["marginal_gain_stop"]:
         return "finalize", checks
     if checks["no_novel_queries"]:
         # Every proposed follow-up duplicates a search we already ran —
         # expanding would burn a pass to re-find the same pages.
         return "finalize", checks
-
-    # Mode demands a minimum depth (audit re-scopes even a sufficient-looking
-    # pass 1): the only stops that may preempt this are the hard walls above.
-    if checks["min_iterations_not_reached"]:
-        return "expand", checks
 
     # Expansion trigger: critic sees a specific gap AND axis coverage is poor.
     if checks["coverage_gap"]:
@@ -336,6 +432,17 @@ def decide_with_checks(
         return "expand", checks
 
     return "finalize", checks
+
+
+def hard_wall_reached(state: Dict[str, Any], settings: Settings | None = None) -> bool:
+    """True when only a hard wall (budget/time or iteration ceiling) can stop.
+
+    Public so `route_after_critic` can tell an evidence gate it cannot act on
+    (hard wall) from one it should honour — the ordering bug that let a soft
+    depth-controller stop defeat the evidence gate.
+    """
+    checks = evaluate(state, settings)
+    return bool(checks["budget_stop"] or checks["ceiling_reached"])
 
 
 def last_decision(state: Dict[str, Any], settings: Settings | None = None) -> Dict[str, Any]:
