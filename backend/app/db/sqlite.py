@@ -232,8 +232,11 @@ async def init_db(database_path: str) -> None:
         # executescript handles the multi-statement CREATE TABLE block.
         await db.executescript(CREATE_TABLE_SQL)
         review_cols = await db.execute("PRAGMA table_info(critic_reviews)")
-        if "breakdown" not in {r[1] for r in await review_cols.fetchall()}:
+        review_names = {r[1] for r in await review_cols.fetchall()}
+        if "breakdown" not in review_names:
             await db.execute("ALTER TABLE critic_reviews ADD COLUMN breakdown TEXT NOT NULL DEFAULT '{}'")
+        if "improved_queries" not in review_names:
+            await db.execute("ALTER TABLE critic_reviews ADD COLUMN improved_queries TEXT NOT NULL DEFAULT '[]'")
         run_cols = await db.execute("PRAGMA table_info(research_runs)")
         if "max_iterations" not in {r[1] for r in await run_cols.fetchall()}:
             await db.execute("ALTER TABLE research_runs ADD COLUMN max_iterations INTEGER NOT NULL DEFAULT 3")
@@ -445,17 +448,24 @@ async def save_evidence(database_path: str, run_id: str, search_results: list) -
 async def save_critic_review(database_path: str, run_id: str, iteration: int, critique: dict,
                            breakdown: dict | None = None) -> None:
     """Persist EVERY critic iteration (not just the final verdict) — Replay
-    needs the actual back-and-forth, not only the outcome."""
+    needs the actual back-and-forth, not only the outcome. improved_queries
+    persists too: resume reads the last review's follow-ups, and without them
+    the depth controller can never expand a resumed run."""
     if not isinstance(critique, dict):
         return
-    try:
-        breakdown_json = json.dumps(breakdown or {})
-    except (TypeError, ValueError):
-        breakdown_json = "{}"
+
+    def _dump(value, default: str) -> str:
+        try:
+            return json.dumps(value if value is not None else default)
+        except (TypeError, ValueError):
+            return default
+
+    breakdown_json = _dump(breakdown or {}, "{}")
+    queries_json = _dump(critique.get("improved_queries") or [], "[]")
     async with _connect(database_path) as db:
         await db.execute(
-            "INSERT INTO critic_reviews (run_id, iteration, is_sufficient, reason, confidence, breakdown, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO critic_reviews (run_id, iteration, is_sufficient, reason, confidence, breakdown, improved_queries, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run_id,
                 int(iteration),
@@ -463,6 +473,7 @@ async def save_critic_review(database_path: str, run_id: str, iteration: int, cr
                 str(critique.get("reason", "")),
                 float(critique.get("confidence", 0.0) or 0.0),
                 breakdown_json,
+                queries_json,
                 _now(),
             ),
         )
@@ -628,7 +639,7 @@ async def load_state_for_resume(database_path: str, run_id: str) -> dict | None:
             (run_id,),
         )
         review_rows = await _all(
-            "SELECT iteration, is_sufficient, reason, confidence FROM critic_reviews "
+            "SELECT iteration, is_sufficient, reason, confidence, improved_queries FROM critic_reviews "
             "WHERE run_id = ? ORDER BY iteration DESC LIMIT 1",
             (run_id,),
         )
@@ -696,10 +707,16 @@ async def load_state_for_resume(database_path: str, run_id: str) -> dict | None:
         "resumed_from": run_id,
     }
     if last_review:
+        try:
+            improved = json.loads(last_review.get("improved_queries") or "[]")
+        except (TypeError, ValueError):
+            improved = []
+        if not isinstance(improved, list):
+            improved = []
         state["critique"] = {
             "is_sufficient": bool(last_review["is_sufficient"]),
             "reason": last_review["reason"] or "",
-            "improved_queries": [],
+            "improved_queries": [str(q) for q in improved if str(q).strip()],
             "confidence": last_review["confidence"] or 0.0,
         }
         state["critique_feedback"] = last_review["reason"] or ""

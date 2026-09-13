@@ -307,3 +307,37 @@ def test_resume_does_not_duplicate_persisted_claims(tmp_path, monkeypatch):
             return (await cur.fetchone())[0]
 
     assert asyncio.run(_count()) == 1
+
+
+def test_resume_loads_critic_improved_queries(tmp_path):
+    """Regression: improved_queries were never persisted, so the depth
+    controller could never expand a resumed run — it always finalized,
+    regardless of how thin the recovered evidence was."""
+    db_path = str(tmp_path / "resume-iq.db")
+    _seed(db_path)
+    asyncio.run(save_critic_review(db_path, "run-fail-1", 3, {
+        "is_sufficient": False,
+        "reason": "still missing statistics",
+        "improved_queries": ["RAG adoption statistics 2026", "RAG failure modes research"],
+        "confidence": 0.55,
+    }))
+    state = asyncio.run(load_state_for_resume(db_path, "run-fail-1"))
+    assert state["iteration"] == 3
+    assert state["critique"]["improved_queries"] == [
+        "RAG adoption statistics 2026", "RAG failure modes research",
+    ]
+
+
+def test_resume_tolerates_corrupt_improved_queries(tmp_path):
+    db_path = str(tmp_path / "resume-iq2.db")
+    _seed(db_path)
+
+    async def _corrupt():
+        import aiosqlite
+        async with aiosqlite.connect(db_path) as db:
+            await db.execute("UPDATE critic_reviews SET improved_queries = 'not-json' WHERE run_id = 'run-fail-1'")
+            await db.commit()
+
+    asyncio.run(_corrupt())
+    state = asyncio.run(load_state_for_resume(db_path, "run-fail-1"))
+    assert state["critique"]["improved_queries"] == []
