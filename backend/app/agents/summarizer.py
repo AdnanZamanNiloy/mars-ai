@@ -449,6 +449,7 @@ async def summarizer_agent(
         facts = []
         budget_index = 0
         timeout_second_chance = True
+        fallback_reason = "no_facts_parsed"
         while budget_index < len(_EXCERPT_BUDGET_LADDER):
             excerpt_budget = _EXCERPT_BUDGET_LADDER[budget_index]
             compact_results = _allocate_excerpts(quality_results, excerpt_budget)
@@ -472,12 +473,15 @@ async def summarizer_agent(
                     response_model=SummarizerFactsModel,
                 )
                 facts = payload.get("facts", []) if isinstance(payload, dict) else []
+                if not facts:
+                    fallback_reason = "llm_returned_no_facts"
                 break
             except PromptTooLargeError:
                 logger.warning(
                     "[Summarizer] provider rejected the prompt at %d excerpt chars; retrying smaller",
                     excerpt_budget,
                 )
+                fallback_reason = "payload_too_large"
                 budget_index += 1
                 continue
             except AllProvidersFailedError as exc:
@@ -495,11 +499,13 @@ async def summarizer_agent(
                     ):
                         timeout_second_chance = False
                         budget_index = len(_EXCERPT_BUDGET_LADDER) - 1
+                        fallback_reason = "provider_timeout"
                         logger.warning(
                             "[Summarizer] provider stalled; one second chance at the smallest excerpt budget"
                         )
                         continue
                     logger.warning("[Summarizer] provider too slow (timeout); using heuristic fallback")
+                    fallback_reason = "provider_timeout"
                     break
                 # Rate-limited / provider wall: a smaller prompt needs fewer
                 # tokens — exactly what a TPM-starved window can still serve.
@@ -508,10 +514,12 @@ async def summarizer_agent(
                     "[Summarizer] providers unavailable at %d excerpt chars (%s); retrying smaller",
                     excerpt_budget, str(exc)[:140],
                 )
+                fallback_reason = "providers_unavailable"
                 budget_index += 1
                 continue
             except Exception as exc:
                 logger.warning("[Summarizer] LLM call failed, using heuristic fallback", exc_info=exc)
+                fallback_reason = "llm_error"
                 break
         if not facts:
             logger.warning("[Summarizer] LLM contributed nothing usable, using heuristic fallback")
