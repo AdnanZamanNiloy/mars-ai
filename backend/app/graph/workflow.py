@@ -8,7 +8,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agents.evidence_utils import dedupe_semantic_facts, filter_facts_by_domain, verify_answer_support
 from app.agents.critic import critic_agent
-from app.agents.orchestrator import orchestrate
+from app.agents.orchestrator import MODE_CONFIDENCE_TARGET, orchestrate
 from app.agents.planner import normalize_text, planner_agent
 from app.agents.redteam import redteam_agent
 from app.agents.search import SearchClient
@@ -596,6 +596,22 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
                 "blocking": [], "targeted_queries": [], "summary": "",
             }
 
+        # The critic's optional gate inputs, wired (they were built and tested
+        # but never passed, so the coverage-gap gate could never fire, the
+        # prompt never knew which searches already ran, and mode confidence
+        # targets were honored only by the depth controller, not the gate).
+        searched: List[str] = []
+        for q in state.get("sub_questions", []) or []:
+            if isinstance(q, dict):
+                text = str(q.get("question", "")).strip()
+                if text:
+                    searched.append(text)
+                for v in q.get("variants", []) or []:
+                    vs = str(v or "").strip()
+                    if vs:
+                        searched.append(vs)
+        mode_target = MODE_CONFIDENCE_TARGET.get(str(state.get("mode", "") or "standard"))
+
         critique = await critic_agent(
             llm=llm,
             query=state["query"],
@@ -605,6 +621,9 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             contradictions=contradictions,
             query_type=str(state.get("orchestration", {}).get("query_type", "")),
             redteam_survival=float(redteam_state.get("survival_score", 0.6) or 0.6),
+            plan=state.get("sub_questions", []),
+            searched_queries=searched,
+            confidence_target=mode_target,
         )
 
         # Confidence Engine (Phase 2.4) replaces the inline weighted formula.
