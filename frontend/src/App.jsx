@@ -335,6 +335,7 @@ export default function App() {
             waveReport: Array.isArray(evt.wave_report) ? evt.wave_report : m.run.waveReport,
             citationHealth: evt.citation_health && typeof evt.citation_health === "object"
               ? evt.citation_health : m.run.citationHealth,
+            quality: evt.quality && typeof evt.quality === "object" ? evt.quality : m.run.quality,
             done: true,
             resuming: false,
           };

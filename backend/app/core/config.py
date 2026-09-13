@@ -126,6 +126,14 @@ class Settings(BaseSettings):
     # grounds the plan in the user's likely meaning. Disable to skip the call.
     intent_enabled: bool = True
 
+    # Answer quality gate (final editor): every synthesized answer is scored
+    # 0-100 on accuracy/relevance/evidence/clarity/reasoning from measured
+    # pipeline state (no LLM). A failing answer gets exactly ONE bounded
+    # re-synthesis with the failures fed back, then the better draft ships
+    # (always disclosed — a below-threshold answer is labeled, never silent).
+    quality_gate_enabled: bool = True
+    quality_threshold: float = 70.0
+
     # Dynamic Research Depth (Phase 2.8)
     sufficiency_threshold: float = 0.75
     min_marginal_gain: float = 0.03

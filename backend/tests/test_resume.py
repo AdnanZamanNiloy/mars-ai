@@ -106,7 +106,15 @@ def test_resume_reruns_critic_not_planner_or_search(tmp_path, monkeypatch):
 
     async def fake_synthesizer(llm, query, facts=None, context=None):
         visited.append("synthesizer")
-        return "resumed answer"
+        # Gate-passing draft: the answer-quality gate would otherwise spend its
+        # one bounded retry, adding a second synthesizer call to `visited`.
+        return (
+            "## Executive Summary\n\n"
+            "RAG retrieves documents before generation [1].\n\n"
+            "- RAG grounds outputs in cited sources [1].\n\n"
+            "## Limitations\n\nCould not verify further claims.\n\n"
+            "## Sources\n\n[1] arxiv.org (preprint, primary) — https://arxiv.org/a"
+        )
 
     monkeypatch.setattr(wf, "critic_agent", fake_critic)
     # Force the route to synthesizer so the test never touches real search.

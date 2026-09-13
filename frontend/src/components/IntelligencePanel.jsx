@@ -324,5 +324,12 @@ function deriveHealth(run) {
       value: `${Math.round(run.answerSupport * 100)}%`, hot: run.answerSupport < 0.8,
     });
   }
+  if (run.quality && typeof run.quality.overall === "number") {
+    rows.push({
+      icon: IconChart, label: "Answer quality",
+      tone: run.quality.passed ? "good" : "warn",
+      value: `${run.quality.overall}/100`, hot: !run.quality.passed,
+    });
+  }
   return rows;
 }

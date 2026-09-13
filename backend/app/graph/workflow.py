@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.evidence_utils import dedupe_semantic_facts, filter_facts_by_domain, verify_answer_support
+from app.agents.answer_quality import evaluate_answer
 from app.agents.critic import critic_agent
 from app.agents.intent import classify_intent, heuristic_intent
 from app.agents.orchestrator import MODE_CONFIDENCE_TARGET, orchestrate
@@ -60,6 +61,8 @@ class ResearchState(TypedDict, total=False):
     # grounding search snippets, shared by intent and the planner.
     intent: Dict[str, Any]
     context_snippets: List[str]
+    # Answer quality gate: five-axis 0-100 score of the delivered report.
+    quality: Dict[str, Any]
 
 
 class PlannerUpdate(TypedDict):
@@ -100,6 +103,7 @@ class SynthesizerUpdate(TypedDict):
     synthesized_answer: str
     answer_support: Dict[str, Any]
     citation_health: Dict[str, Any]
+    quality: Dict[str, Any]
 
 
 class FinalizeUpdate(TypedDict):
@@ -345,6 +349,25 @@ def build_markdown_report(
             if o.get("risk_note"):
                 decision_lines.append(f"  Risk: {o['risk_note']}")
         lines.extend(["# Decision Layer", *decision_lines, ""])
+
+    # Answer Quality (final editor): the measured five-axis score of THIS
+    # report, appended from state so the disclosure cannot be skipped.
+    quality = state.get("quality") or {}
+    if isinstance(quality, dict) and quality.get("overall") is not None:
+        quality_lines = [
+            f"Accuracy {quality.get('accuracy', 0)}/100 · "
+            f"Relevance {quality.get('relevance', 0)}/100 · "
+            f"Evidence {quality.get('evidence', 0)}/100 · "
+            f"Clarity {quality.get('clarity', 0)}/100 · "
+            f"Reasoning {quality.get('reasoning', 0)}/100",
+            f"Overall: {quality.get('overall', 0)}/100 — "
+            + ("passed the quality gate." if quality.get("passed")
+               else "BELOW THRESHOLD — treat with additional caution."),
+        ]
+        if not quality.get("passed") and quality.get("failures"):
+            quality_lines.append("Gate findings:")
+            quality_lines.extend(f"- {f}" for f in quality.get("failures", [])[:5])
+        lines.extend(["# Answer Quality", *quality_lines, ""])
 
     lines.extend([
         "# Limitations",
@@ -731,55 +754,92 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         # Only verification-passed facts are usable evidence (Phase 2.3).
         usable = _verified_facts(state.get("facts", []))
         all_facts = state.get("facts", [])
-        answer = await synthesizer_agent(
-            llm=llm,
-            query=state["query"],
-            facts=usable,
-            # Decision-grade context the report contract needs: conflicts
-            # to flag, confidence for the honesty baseline, degraded stages
-            # and pool counts for Confidence & Gaps.
-            context={
-                "contradictions": state.get("contradictions", []),
-                "confidence": state.get("confidence", None),
-                "degraded": take_fallbacks(),
-                "total_facts": len(all_facts),
-                "verified_count": sum(1 for f in all_facts if f.get("verified")),
-                "mode": state.get("mode", "standard"),
-                "redteam_findings": (state.get("redteam", {}) or {}).get("findings", []),
-                # Intent: the synthesis must answer the user's likely meaning
-                # and disambiguate up front when the query was ambiguous.
-                "intent": state.get("intent") or {},
-            },
-        )
-        # Report-contract verification: check the emitted answer's citations
-        # against the evidence (never the reverse). Observational only —
-        # it scores honesty, it does not rewrite.
-        support = verify_answer_support(answer, state.get("facts", []))
-        support_rate = support["rate"]
-        # Citation validation v2: re-validate the legend URLs the answer
-        # actually cites (bounded, never fatal) and fuse with the sentence
-        # support verdicts into per-source health.
-        try:
-            from app.agents.citation_check import check_citations
+        intent = state.get("intent") or {}
+        base_context = {
+            "contradictions": state.get("contradictions", []),
+            "confidence": state.get("confidence", None),
+            "degraded": take_fallbacks(),
+            "total_facts": len(all_facts),
+            "verified_count": sum(1 for f in all_facts if f.get("verified")),
+            "mode": state.get("mode", "standard"),
+            "redteam_findings": (state.get("redteam", {}) or {}).get("findings", []),
+            # Intent: the synthesis must answer the user's likely meaning
+            # and disambiguate up front when the query was ambiguous.
+            "intent": intent,
+        }
+        gate_enabled = bool(getattr(llm.settings, "quality_gate_enabled", True))
+        threshold = float(getattr(llm.settings, "quality_threshold", 70.0) or 70.0)
 
-            citation_health = await check_citations(
-                answer,
-                support,
-                enabled=bool(getattr(llm.settings, "citation_check_enabled", True)),
-                timeout=float(getattr(llm.settings, "citation_check_timeout_sec", 5.0) or 5.0),
-                max_sources=int(getattr(llm.settings, "citation_check_max", 10) or 10),
+        async def _synthesize_and_score(ctx: Dict[str, Any]):
+            answer = await synthesizer_agent(
+                llm=llm,
+                query=state["query"],
+                facts=usable,
+                context=ctx,
             )
-        except Exception as exc:
-            logger.warning("citation_health_check_failed", error=str(exc), exc_info=exc)
-            citation_health = {"checked": 0, "sources": [], "summary": {}, "enabled": False}
+            # Report-contract verification: check the emitted answer's citations
+            # against the evidence (never the reverse). Observational only —
+            # it scores honesty, it does not rewrite.
+            support = verify_answer_support(answer, state.get("facts", []))
+            try:
+                from app.agents.citation_check import check_citations
+
+                health = await check_citations(
+                    answer,
+                    support,
+                    enabled=bool(getattr(llm.settings, "citation_check_enabled", True)),
+                    timeout=float(getattr(llm.settings, "citation_check_timeout_sec", 5.0) or 5.0),
+                    max_sources=int(getattr(llm.settings, "citation_check_max", 10) or 10),
+                )
+            except Exception as exc:
+                logger.warning("citation_health_check_failed", error=str(exc), exc_info=exc)
+                health = {"checked": 0, "sources": [], "summary": {}, "enabled": False}
+            quality = evaluate_answer(
+                state["query"],
+                intent=intent,
+                answer=answer,
+                facts=state.get("facts", []),
+                answer_support=support,
+                citation_health=health,
+                contradictions=state.get("contradictions", []),
+                redteam_findings=(state.get("redteam", {}) or {}).get("findings", []),
+                mode=str(state.get("mode", "standard") or "standard"),
+                threshold=threshold,
+            )
+            return answer, support, health, quality
+
+        answer, support, citation_health, quality = await _synthesize_and_score(base_context)
+
+        # Answer quality gate (final editor): a failing draft gets exactly ONE
+        # re-synthesis with the failures fed back — never a loop — and the
+        # better draft ships either way, with its scores disclosed. Skipped
+        # when the synthesizer itself is on deterministic fallback: the
+        # extractive writer cannot act on feedback, so a retry would only
+        # re-spend nothing and return the same draft.
+        if gate_enabled and not quality.passed and "synthesizer" not in take_fallbacks():
+            try:
+                answer2, support2, health2, quality2 = await _synthesize_and_score({
+                    **base_context,
+                    "quality_feedback": quality.failures,
+                })
+            except Exception as exc:
+                logger.warning("quality_retry_failed", error=str(exc), exc_info=exc)
+            else:
+                if quality2.overall > quality.overall:
+                    answer, support, citation_health, quality = (
+                        answer2, support2, health2, quality2,
+                    )
+
         logger.info("synthesizer_done", answer_chars=len(answer), usable_facts=len(usable),
-                    support_rate=round(support_rate, 2) if support_rate is not None else None,
+                    support_rate=round(support_rate_val, 2) if (support_rate_val := support.get("rate")) is not None else None,
                     unsupported=len(support["unsupported"]),
-                    citation_summary=citation_health.get("summary", {}))
+                    citation_summary=citation_health.get("summary", {}),
+                    quality=quality.overall, quality_passed=quality.passed)
         return {
             "synthesized_answer": answer,
             "answer_support": support,
             "citation_health": citation_health,
+            "quality": quality.to_dict(),
         }
 
     async def finalize_node(state: ResearchState) -> FinalizeUpdate:

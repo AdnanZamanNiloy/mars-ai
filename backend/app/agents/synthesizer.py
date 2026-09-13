@@ -1108,6 +1108,13 @@ def _render_context_block(ctx: Dict[str, Any]) -> str:
                 "Standing objections to this evidence (acknowledge, do not ignore):\n"
                 + "\n".join(lines)
             )
+    feedback = ctx.get("quality_feedback") or []
+    if isinstance(feedback, list) and feedback:
+        parts.append(
+            "QUALITY GATE — your previous draft failed the answer-quality review. "
+            "Fix every point below in the corrected report:\n"
+            + "\n".join(f"- {str(f)}" for f in feedback[:8])
+        )
     if not parts:
         return ""
     return "Research honesty baseline:\n" + "\n".join(parts) + "\n\n"
