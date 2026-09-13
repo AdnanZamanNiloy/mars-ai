@@ -478,3 +478,51 @@ async def test_all_providers_413_aggregates_to_prompt_too_large(test_settings):
         mock.post(GROQ_URL).mock(return_value=httpx.Response(413, json={"error": "too large"}))
         with pytest.raises(PromptTooLargeError):
             await client.generate_json("sp", "up")
+
+
+def test_retry_after_patient_on_first_retry_only():
+    """TPM-limit 429s carry the provider's own wait hint. The FIRST retry may
+    wait up to 20s (one patient wait usually clears a rolling per-minute
+    window — the difference between an LLM-written report and extraction);
+    later retries cap at 3s so a sustained wall fails fast."""
+    from app.core.llm import _wait_with_retry_after
+
+    from types import SimpleNamespace
+
+    def _state(attempt, body):
+        exc = httpx.HTTPStatusError(
+            "429", request=httpx.Request("POST", GROQ_URL),
+            response=httpx.Response(429, headers={"retry-after": "12"}, json={"error": body}),
+        )
+        return SimpleNamespace(
+            outcome=SimpleNamespace(exception=lambda: exc), attempt_number=attempt
+        )
+
+    assert _wait_with_retry_after(_state(1, "rate limit")) == 12.0
+    assert _wait_with_retry_after(_state(2, "rate limit")) == 3.0
+
+
+def test_retry_after_parsed_from_body_hint():
+    """Groq sometimes puts the hint in the body ('Please try again in 8.5s')
+    instead of a header."""
+    from app.core.llm import _retry_after_hint
+
+    exc = httpx.HTTPStatusError(
+        "429", request=httpx.Request("POST", GROQ_URL),
+        response=httpx.Response(429, json={"error": "Rate limit reached. Please try again in 8.52s"}),
+    )
+    assert _retry_after_hint(exc) == 8.52
+
+
+async def test_429_with_provider_hint_recovers_within_call(test_settings):
+    """End-to-end: a TPM 429 followed by success is recovered inside one
+    generate_json call (the wait is real but bounded)."""
+    client = LLMClient(test_settings)
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post(GROQ_URL).mock(side_effect=[
+            httpx.Response(429, headers={"retry-after": "0.4"}, json={"error": "TPM"}),
+            _groq_response({"ok": True}),
+        ])
+        result = await client.generate_json("sp", "up")
+        assert result == {"ok": True}
+        assert route.call_count == 2
