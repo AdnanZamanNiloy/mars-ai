@@ -781,6 +781,19 @@ def _append_evidence_appendix(
     """
     blocks: List[str] = []
 
+    distribution = ctx.get("evidence_distribution")
+    if isinstance(distribution, dict) and any(
+        int(distribution.get(g, 0) or 0) for g in ("A", "B", "C", "D")
+    ):
+        blocks.append(
+            "Evidence grades: "
+            f"A={int(distribution.get('A', 0) or 0)}, "
+            f"B={int(distribution.get('B', 0) or 0)}, "
+            f"C={int(distribution.get('C', 0) or 0)}, "
+            f"D={int(distribution.get('D', 0) or 0)} "
+            "(A/B = verified and strongly/independently sourced)."
+        )
+
     report = ctx.get("confidence_report")
     rendered = ""
     if report is not None and hasattr(report, "render"):
@@ -1164,6 +1177,25 @@ def _render_context_block(ctx: Dict[str, Any]) -> str:
     verified = ctx.get("verified_count", 0) or 0
     if total:
         parts.append(f"Evidence pool: {verified}/{total} facts verified; unverified claims were excluded.")
+
+    # Evidence grades (Step 4): the measured quality distribution, so the
+    # writer can separate what is established from what is merely asserted
+    # instead of presenting every sentence with equal authority.
+    distribution = ctx.get("evidence_distribution")
+    if isinstance(distribution, dict) and any(int(distribution.get(g, 0) or 0) for g in ("A", "B", "C", "D")):
+        parts.append(
+            "Evidence grades for this pool "
+            f"(A {distribution.get('A', 0)}, B {distribution.get('B', 0)}, "
+            f"C {distribution.get('C', 0)}, D {distribution.get('D', 0)}).\n"
+            "Write with these epistemic tiers and label them explicitly:\n"
+            "- ESTABLISHED: A-grade, independently corroborated — state plainly.\n"
+            "- STRONG: B-grade — state with a source.\n"
+            "- DISPUTED: contradicted claims — present as a disagreement, never pick a side silently.\n"
+            "- INFERRED: reasonable synthesis from multiple claims — mark as inference, not fact.\n"
+            "- UNKNOWN: no evidence — say so instead of guessing.\n"
+            "Never present a D-grade claim or an unsupported number as established fact; "
+            "soften it ('one source reports…') or omit it."
+        )
 
     # Surviving red-team objections belong in the brief, not only in the
     # appendix: a writer that knows the strongest counter-argument writes a

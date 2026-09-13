@@ -868,6 +868,19 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             # and disambiguate up front when the query was ambiguous.
             "intent": intent,
         }
+        # Evidence grades (Step 4): the measured quality distribution drives
+        # the writer's epistemic labeling. Computed once, failure-safe.
+        try:
+            from app.core.evidence_grade import grade_facts
+
+            graded = grade_facts(usable, contradictions=state.get("contradictions") or [])
+            dist = {"A": 0, "B": 0, "C": 0, "D": 0}
+            for g in graded:
+                grade = str((g.get("evidence") or {}).get("grade", "D"))
+                dist[grade] = dist.get(grade, 0) + 1
+            base_context["evidence_distribution"] = dist
+        except Exception as exc:
+            logger.warning("evidence_distribution_failed", error=str(exc), exc_info=exc)
         gate_enabled = bool(getattr(llm.settings, "quality_gate_enabled", True))
         revision_enabled = bool(getattr(llm.settings, "synthesis_revision_enabled", True))
         threshold = float(getattr(llm.settings, "quality_threshold", 70.0) or 70.0)
