@@ -28,6 +28,8 @@ handling and honest confidence — see `BENCHMARK_RESULTS.md`.
 
 | Capability | What it does | Where |
 |---|---|---|
+| **Intent classification** | Understands the question BEFORE searching: resolves ambiguity into ranked senses ("transformer": AI architecture 0.75 / electrical device 0.20), sets the research domain and explanation level, and never silently picks the wrong meaning — ambiguous reports open with a disambiguation and keep senses separated end to end | `app/agents/intent.py` |
+| **Answer quality gate** | The finished report is scored 0-100 on accuracy/relevance/evidence/clarity/reasoning from measured state; a failing draft gets exactly one corrective re-synthesis and the scores ship with the answer | `app/agents/answer_quality.py` |
 | **Verification** | Every claim is checked against its source text: weighted lexical overlap, source authority, unit-aware numeric grounding (2% tolerance, scale folding), polarity consistency, quote location | `app/agents/verifier.py` |
 | **Citation validation** | Sentences are checked against the evidence of the source they cite, and the cited URLs are **re-fetched live** (HEAD → ranged GET) — dead or moved links are flagged in the report | `app/agents/citation_check.py` |
 | **Contradiction detection** | Three detectors: numeric (unit-aware divergence), polarity (affirms vs negates), temporal (same measure, different periods) — with severity ranking and resolution follow-ups fed back into research | `app/core/contradictions.py` |

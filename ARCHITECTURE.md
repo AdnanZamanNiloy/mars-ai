@@ -9,17 +9,19 @@ behind the design decisions that differ from a standard RAG chatbot.
 
 ```mermaid
 flowchart TD
-    Q[User query + mode] --> ORCH[Orchestrator<br/>complexity + plan targets]
+    Q[User query + mode] --> IN[Intent<br/>ambiguity, senses, domain,<br/>explanation level]
+    IN --> ORCH[Orchestrator<br/>complexity + plan targets]
     ORCH --> PL[Planner<br/>delegation contracts: axis, search_type,<br/>minimum_sources, wave, variants]
     PL -->|search-informed: one grounding search on the raw query| SE
     SE[Search<br/>Tavily / DuckDuckGo / Wikipedia / arXiv / Crossref<br/>circuit breakers, canonical-URL dedup,<br/>domain diversity caps, disk cache]
     SE --> SU[Summarizer<br/>wave-ordered specialists:<br/>wave N receives wave N-1 findings<br/>as bounded grounding context]
     SU --> VE[Verifier<br/>lexical overlap, source authority,<br/>numeric grounding, polarity,<br/>quote location, freshness]
     VE --> CR[Critic + Contradiction Engine + Red Team + Confidence v2]
-    CR -->|sufficient| SY[Synthesizer<br/>cited answer from verified facts only]
+    CR -->|sufficient| SY[Synthesizer<br/>sense-separated cited answer<br/>with mandatory disambiguation]
     CR -->|expand: novel queries + budget + no stall| PL
     CR -->|stop: budget wall / stall / no novel queries / ceiling| SY
-    SY --> CH[Citation health check<br/>live URL re-validation +<br/>sentence-support fusion]
+    SY --> QG[Answer quality gate<br/>accuracy/relevance/evidence/<br/>clarity/reasoning 0-100<br/>one bounded re-synthesis]
+    QG --> CH[Citation health check<br/>live URL re-validation +<br/>sentence-support fusion]
     CH --> FIN[Finalize<br/>report: answer, evidence,<br/>contradictions, decision layer,<br/>limitations, confidence]
 ```
 
@@ -34,7 +36,9 @@ resume endpoint re-enters at the critic node with state rebuilt from SQLite.
 
 | Module | Responsibility |
 |---|---|
-| `app/agents/planner.py` | Contracts with axis/search_type/minimum_sources/variants/wave; axis-coverage enforcement; dependency waves (max 3). |
+| `app/agents/intent.py` | Intent classification before research: ambiguity → ranked senses, domain, explanation level; deterministic fallback with curated homonym hints; never blocks — the answer disambiguates. |
+| `app/agents/answer_quality.py` | Pre-delivery gate: five-axis 0-100 scoring from measured state; one bounded re-synthesis with failures fed back; below-threshold answers disclosed. |
+| `app/agents/planner.py` | Contracts with axis/search_type/minimum_sources/variants/wave/sense; axis-coverage enforcement; intent domain override; dependency waves (max 3). |
 | `app/agents/search.py` | 5 providers, per-provider circuit breakers + retry policies, fetch bulkhead, PDF extraction, canonical-URL + near-dup snippet dedup, domain diversity caps, freshness half-lives, disk cache. |
 | `app/agents/summarizer.py` | Per-contract specialists (financial/technical/…), source attribution validated against provided documents, direct-quote parsing, token-budgeted chunking, per-URL cache keyed by role + prerequisite digest. |
 | `app/agents/verifier.py` | Deterministic per-fact checks; blanks raw content after each pass (memory hygiene). |

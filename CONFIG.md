@@ -101,6 +101,19 @@ premature stops.
 | `CITATION_CHECK_TIMEOUT_SEC` | `5.0` | Per-URL probe timeout (HEAD, then 2KB ranged GET). |
 | `CITATION_CHECK_MAX` | `10` | Top cited sources re-checked per report (bounded, never fatal). |
 
+## Intent classification (v2.1)
+
+| Variable | Default | Description |
+|---|---|---|
+| `INTENT_ENABLED` | `true` | One small LLM call before planning: resolves ambiguity into ranked senses, sets the research domain and explanation level. Deterministic fallback (curated homonym hints + lexical classifiers) when the call fails. |
+
+## Answer quality gate (v2.1)
+
+| Variable | Default | Description |
+|---|---|---|
+| `QUALITY_GATE_ENABLED` | `true` | Score every synthesized answer 0-100 on accuracy/relevance/evidence/clarity/reasoning from measured state. |
+| `QUALITY_THRESHOLD` | `70` | Passing line. A failing draft gets exactly one corrective re-synthesis; scores are disclosed in the report either way. |
+
 ## API behavior
 
 | Variable | Default | Description |

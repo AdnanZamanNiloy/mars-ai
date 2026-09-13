@@ -1,5 +1,55 @@
 # Changelog
 
+## v2.1 — Intent & Answer-Quality layer
+
+The upgrade against the "What is transformer?" failure class: the pipeline
+used to treat the raw query as a search string, mix electrical-transformer
+statistics into ML answers, and ship whatever the synthesizer produced.
+Understand-before-searching and a pre-delivery quality gate are now
+architectural stages, not prompt hopes.
+
+### New pipeline stage: Intent Classification (`agents/intent.py`)
+
+- START → intent → planner: one small, cache-friendly LLM call resolves the
+  question BEFORE research is shaped — ambiguity into ranked senses with
+  probabilities, the research domain, and the explanation level
+  (basic/practical/expert).
+- Deterministic fallback (same contract as every agent): curated homonym
+  hints + the orchestrator's lexical classifiers, including self-resolution
+  when the user already disambiguated ("python snake feeding habits").
+- MARS never blocks on a clarifying question: `recommended_action` decides
+  whether research targets the dominant sense or structures both, and the
+  answer itself opens with the disambiguation.
+- The grounding search on the raw query moved into the intent node and is
+  shared with the planner (it was the mechanism pulling wrong-sense pages
+  into the plan).
+- Planner: intent overrides the model's domain classification; ambiguous
+  plans tag every contract with a `sense` label; `engineering` added to the
+  domain vocabulary (technical specialist).
+- Summarizer: sense constraint discards other-sense claims at extraction
+  time; facts carry `sense` end to end; cache keyed by sense.
+- Synthesizer: ambiguous reports open with a numbered disambiguation
+  (`1) **Sense** — explanation`), keep each sense's evidence in its own
+  sections, and the citation audit exempts the disambiguation lines; basic
+  level forces a plain-language explanation with an analogy.
+- New `intent` NDJSON event (+ frontend case) and an Intent row in the
+  intelligence panel.
+
+### New pre-delivery stage: Answer Quality Optimizer (`agents/answer_quality.py`)
+
+- Every synthesized answer is scored 0-100 on Accuracy / Relevance /
+  Evidence / Clarity / Reasoning from measured pipeline state only (support
+  verdicts, verification flags, source registry, citation health) — no LLM.
+- Hard floors bind: an ambiguous-query report without the mandatory
+  disambiguation fails relevance regardless of its other scores; data-dump
+  bullets, missing limitations, unsurfaced conflicts and off-band length
+  feed actionable failure strings.
+- A failing draft gets exactly ONE re-synthesis with the failures fed back
+  (never a loop; skipped when the synthesizer itself is degraded); the
+  better draft ships and the scores are disclosed in the report's
+  `# Answer Quality` section and the `final_report` event.
+- Settings: `INTENT_ENABLED`, `QUALITY_GATE_ENABLED`, `QUALITY_THRESHOLD`.
+
 ## v2.0 — Production upgrade
 
 The upgrade from the v1 vision implementation: every dead-ended component
