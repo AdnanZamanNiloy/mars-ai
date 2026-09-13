@@ -280,6 +280,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 mode=payload.mode,
             )
             last_iteration = -1
+            emitted_intent = False
             emitted_plan = False
             emitted_findings = 0
             emitted_annotated = 0
@@ -371,6 +372,25 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                         iteration = int(snapshot.get("iteration", 0))
 
                         await _record_node_events(snapshot)
+
+                        if snapshot.get("intent") and not emitted_intent:
+                            # Understand-before-searching: surface the resolved
+                            # intent (senses, domain, level) before the plan.
+                            emitted_intent = True
+                            intent_data = snapshot.get("intent") or {}
+                            yield event_line("intent", **{
+                                k: intent_data.get(k)
+                                for k in ("query_type", "domain", "explanation_level",
+                                          "ambiguity", "senses", "recommended_action", "origin")
+                            })
+                            await _persist(record_event(
+                                settings.database_url, request_id, "intent", "end",
+                                payload=json.dumps({
+                                    "ambiguity": intent_data.get("ambiguity"),
+                                    "domain": intent_data.get("domain"),
+                                    "origin": intent_data.get("origin"),
+                                }),
+                            ))
 
                         if snapshot.get("sub_questions") and not emitted_plan:
                             yield event_line(

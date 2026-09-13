@@ -348,6 +348,7 @@ async def summarizer_agent(
     search_results: List[Dict[str, str]],
     specialist_role: str = "general",
     prior_findings: Optional[Sequence[Dict[str, Any]]] = None,
+    sense: str = "",
 ) -> List[Dict[str, Any]]:
     """Extract attributable claims from one contract's documents.
 
@@ -356,7 +357,14 @@ async def summarizer_agent(
     them as grounding context so their extraction can resolve references the
     raw pages leave ambiguous. Bounded to 5 claims so the context never crowds
     out the contract's own evidence.
+
+    `sense` (intent disambiguation): the meaning of an ambiguous term this
+    contract researches ("Transformer neural network architecture"). Claims
+    about other senses of the term are discarded at extraction time, so an
+    electrical-transformer page can never contribute "statistics" to an
+    AI-architecture report.
     """
+    sense = str(sense or "").strip()
     quality_results = filter_search_results_by_domain(search_results)
     if not quality_results:
         return []
@@ -398,8 +406,18 @@ async def summarizer_agent(
                 "\n".join(str(f.get("claim", "")) for f in kept).encode("utf-8", "replace")
             ).hexdigest()[:16]
 
+    sense_block = ""
+    if sense:
+        sense_block = (
+            f"\nSENSE CONSTRAINT — this contract researches the '{sense}' meaning of "
+            "the query. The sources may mention other senses of the term: DISCARD "
+            "claims about those other senses, even when well-sourced. Only claims "
+            "about the sense above may be extracted.\n"
+        )
+
     user_prompt = (
         f"Research query: {query}\n\n"
+        f"{sense_block}"
         f"{prior_block}"
         f"Sources ({len(compact_results)}):\n{compact_results}\n\n"
         "Extract high-quality claims as JSON in this schema: "
@@ -416,6 +434,7 @@ async def summarizer_agent(
         "summarize_facts",
         PROMPT_VERSION,
         specialist_role,          # role changes the prompt, so it must key the cache
+        sense,                    # the sense constraint changes the prompt and the filters
         query,
         tuple(sorted(item.get("url", "") for item in compact_results)),
         prior_digest,             # prerequisite context changes the extraction
@@ -469,7 +488,13 @@ async def summarizer_agent(
         source_score = source_reliability_score(source)
         if source_score < 0.55:
             continue
-        if claim_query_overlap(query, claim) < MIN_QUERY_OVERLAP:
+        relevance = claim_query_overlap(query, claim)
+        if sense:
+            # A sense-scoped claim may legitimately share few words with the
+            # raw query ("steps AC voltage" vs "What is transformer?") — the
+            # sense label is the topical contract.
+            relevance = max(relevance, claim_query_overlap(sense, claim))
+        if relevance < MIN_QUERY_OVERLAP:
             continue
 
         profile = classify_source(source)
@@ -498,6 +523,7 @@ async def summarizer_agent(
             "sub_question": str(
                 (record or {}).get("sub_question", "") or meta.get("sub_question", "") or ""
             ),
+            "sense": sense,
             "direct_quote": quote[:240],
             "quote_verified": quote_state,
             "published_at": str(meta.get("published_at", "") or ""),
@@ -543,6 +569,7 @@ async def summarizer_agent(
             relevance = max(
                 claim_query_overlap(query, claim),
                 claim_query_overlap(sub_q, claim) if sub_q else 0.0,
+                claim_query_overlap(sense, claim) if sense else 0.0,
             )
             if relevance < MIN_FALLBACK_OVERLAP:
                 continue
@@ -559,6 +586,7 @@ async def summarizer_agent(
                 ),
                 "agent": specialist_role,
                 "sub_question": sub_q,
+                "sense": sense,
                 "direct_quote": claim[:240],
                 "quote_verified": True,
                 "published_at": str(item.get("published_at", "") or ""),

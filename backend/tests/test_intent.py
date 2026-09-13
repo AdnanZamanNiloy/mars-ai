@@ -145,3 +145,117 @@ def test_to_dict_round_trip_shape():
     assert set(d) == {"query", "query_type", "domain", "explanation_level", "ambiguity",
                       "senses", "recommended_action", "reasoning", "origin"}
     assert d["senses"][0]["probability"] == 0.75
+
+
+def test_planner_assigns_senses_and_fallback_uses_them():
+    """The intent -> planner handoff: contracts get sense tags, domains upgrade
+    from general, and the deterministic fallback plans per sense."""
+    from app.agents.planner import _assign_intent_senses, fallback_plan
+
+    intent = heuristic_intent("What is transformer?").to_dict()
+
+    plan = _assign_intent_senses([
+        {"question": "transformer architecture attention mechanism", "domain": "general",
+         "specialist": "general", "sense": ""},
+        {"question": "transformer statistics official data", "domain": "general",
+         "specialist": "general", "sense": "Electrical transformer (AC voltage device)"},
+    ], intent)
+    # dominant sense only -> every contract targets it
+    assert all(c["sense"] == "Transformer neural network architecture" for c in plan)
+    # general-domain contracts upgrade to the sense's domain + specialist
+    assert plan[0]["domain"] == "machine_learning"
+    assert plan[0]["specialist"] == "technical"
+
+    fb = fallback_plan("What is transformer?", target_count=3,
+                       intent=heuristic_intent("What is transformer?").to_dict())
+    assert fb, "fallback plan must still build"
+    senses = {c.get("sense") for c in fb}
+    assert senses == {"Transformer neural network architecture"}
+    assert all("neural network architecture" in c["question"] for c in fb)
+
+    # research_both: fallback interleaves both senses
+    both = dict(intent)
+    both["recommended_action"] = "research_both"
+    fb2 = fallback_plan("What is transformer?", target_count=4, intent=both)
+    used = {c.get("sense") for c in fb2}
+    assert used == {"Transformer neural network architecture",
+                    "Electrical transformer (AC voltage device)"}
+
+
+def test_unambiguous_intent_leaves_plan_untagged():
+    from app.agents.planner import _assign_intent_senses
+
+    intent = heuristic_intent("What is retrieval augmented generation?").to_dict()
+    plan = _assign_intent_senses([
+        {"question": "RAG definition", "domain": "machine_learning", "specialist": "technical", "sense": ""},
+    ], intent)
+    assert plan[0]["sense"] == ""
+
+
+class _FakeSearchClient:
+    settings = None
+
+    async def run_search(self, queries):
+        return [{
+            "title": "Attention Is All You Need",
+            "snippet": "The transformer is a neural network architecture for sequence transduction.",
+            "url": "https://arxiv.org/abs/1706.03762",
+        }]
+
+
+async def test_graph_runs_intent_before_planner(monkeypatch):
+    """Full-graph wiring: intent resolves first, its context search is shared,
+    and the planner receives the intent report."""
+    import app.graph.workflow as wf
+    from app.core.config import Settings
+    from app.core.llm import LLMClient
+
+    _FakeSearchClient.settings = Settings(groq_api_key="k", _env_file=None)
+    llm = LLMClient(_FakeSearchClient.settings)
+
+    captured = {}
+
+    async def fake_classify(llm_arg, query, context_snippets=None):
+        captured["context"] = list(context_snippets or [])
+        return heuristic_intent(query)
+
+    async def fake_planner(**kwargs):
+        captured["intent"] = kwargs.get("intent")
+        return [{
+            "id": 1, "question": "transformer neural network architecture definition",
+            "axis": "definition", "search_type": "encyclopedia", "priority": 1,
+            "depends_on": [], "domain": "machine_learning", "minimum_sources": 2,
+            "coverage_goal": "", "stop_condition": "", "variants": [], "agent": "",
+            "tools": ["web_search"], "scope": [], "output_format": "structured_findings",
+            "specialist": "technical", "preferred_domains": [], "primary_source_query": "",
+            "wave": 0, "sense": "",
+        }]
+
+    async def fake_summarizer(llm_arg, query, search_results, specialist_role="general",
+                              prior_findings=None, sense=""):
+        captured["sense"] = sense
+        return []
+
+    async def fake_critic(**kwargs):
+        return {"is_sufficient": False, "reason": "thin", "improved_queries": [], "confidence": 0.4}
+
+    async def fake_synthesizer(llm=None, query=None, facts=None, context=None):
+        return "## Executive Summary\n\nAnswer."
+
+    monkeypatch.setattr(wf, "classify_intent", fake_classify)
+    monkeypatch.setattr(wf, "planner_agent", fake_planner)
+    monkeypatch.setattr(wf, "summarizer_agent", fake_summarizer)
+    monkeypatch.setattr(wf, "critic_agent", fake_critic)
+    monkeypatch.setattr(wf, "synthesizer_agent", fake_synthesizer)
+
+    graph = wf.create_workflow(llm, _FakeSearchClient())
+    state = wf.build_initial_state("What is transformer?", 3, mode="quick")
+    final = None
+    async for snap in graph.astream(state, stream_mode="values"):
+        final = snap
+
+    assert captured["context"], "grounding search must feed the intent classifier"
+    assert captured["intent"]["ambiguity"] is True
+    assert captured["intent"]["domain"] == "machine_learning"
+    # intent lands in state for the synthesizer
+    assert final["intent"]["ambiguity"] is True

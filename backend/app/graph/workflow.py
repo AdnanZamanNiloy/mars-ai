@@ -8,6 +8,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agents.evidence_utils import dedupe_semantic_facts, filter_facts_by_domain, verify_answer_support
 from app.agents.critic import critic_agent
+from app.agents.intent import classify_intent, heuristic_intent
 from app.agents.orchestrator import MODE_CONFIDENCE_TARGET, orchestrate
 from app.agents.planner import normalize_text, planner_agent
 from app.agents.redteam import redteam_agent
@@ -54,11 +55,21 @@ class ResearchState(TypedDict, total=False):
     wave_report: List[Dict[str, Any]]
     # Citation validation v2: live URL health of the emitted answer's legend.
     citation_health: Dict[str, Any]
+    # Intent classification (understand-before-searching): ambiguity, senses,
+    # domain and explanation level, resolved before planning. Plus the raw
+    # grounding search snippets, shared by intent and the planner.
+    intent: Dict[str, Any]
+    context_snippets: List[str]
 
 
 class PlannerUpdate(TypedDict):
     sub_questions: List[str]
     execution_waves: List[List[str]]
+
+
+class IntentUpdate(TypedDict):
+    intent: Dict[str, Any]
+    context_snippets: List[str]
 
 
 class SearchUpdate(TypedDict):
@@ -205,6 +216,8 @@ def build_initial_state(
         "deep_research": plan.deep_research,
         "confidence_history": [],
         "mode": mode if preset is not None else "standard",
+        "intent": {},
+        "context_snippets": [],
     }
 
 
@@ -346,14 +359,42 @@ def build_markdown_report(
 def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str | None = None):
     """Compile the research graph.
 
-    entry_node=None (default): START → planner (full pipeline).
+    entry_node=None (default): START → intent → planner (full pipeline).
     entry_node="critic": START → critic — used by the resume endpoint (3.3)
     so a failed/timeout run continues from persisted evidence instead of
-    re-running planner/search.
+    re-running intent/planner/search.
     """
     if entry_node is not None and entry_node != "critic":
         raise ValueError(f"unsupported entry_node={entry_node!r} (only 'critic' is supported)")
     graph = StateGraph(ResearchState)
+
+    async def intent_node(state: ResearchState) -> IntentUpdate:
+        """Understand the question BEFORE shaping research (vision step 1).
+
+        One grounding search on the raw query serves double duty: it gives the
+        intent classifier real-world sense evidence, and the planner its
+        terminology grounding (previously the planner ran this search itself
+        on the raw query — the exact mechanism that pulled electrical-
+        transformer statistics into an ML question's plan). Ambiguity is
+        resolved here, never after the evidence is in.
+        """
+        context_snippets: List[str] = []
+        try:
+            raw_results = await search_client.run_search([state["query"]])
+            context_snippets = [
+                f"{str(r.get('title', '') or '').strip()}: {str(r.get('snippet', '') or '').strip()[:220]}"
+                for r in (raw_results or [])[:6]
+                if isinstance(r, dict) and (r.get("title") or r.get("snippet"))
+            ]
+        except Exception as exc:
+            logger.warning("planner_context_search_failed", error=str(exc), exc_info=exc)
+
+        intent_enabled = bool(getattr(llm.settings, "intent_enabled", True))
+        if intent_enabled:
+            intent = await classify_intent(llm, state["query"], context_snippets)
+        else:
+            intent = heuristic_intent(state["query"])
+        return {"intent": intent.to_dict(), "context_snippets": context_snippets}
 
     async def planner_node(state: ResearchState) -> PlannerUpdate:
         existing = state.get("sub_questions", []) or []
@@ -369,22 +410,19 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
                 + already
             ).strip()
 
-        # Search-informed planning (gpt-researcher parity): one real search on
-        # the raw query grounds the plan in the web's actual terminology and
-        # entities instead of decomposing blind. Initial pass only — expansion
-        # already has critique feedback to aim at. Best-effort: a failed
-        # context search must never block planning.
+        # Search-informed planning (gpt-researcher parity): the grounding
+        # search on the raw query ran once in intent_node; expansion passes
+        # already have critique feedback to aim at and skip the context.
         context_snippets: List[str] = []
         if not expanding:
-            try:
-                raw_results = await search_client.run_search([state["query"]])
-                context_snippets = [
-                    f"{str(r.get('title', '') or '').strip()}: {str(r.get('snippet', '') or '').strip()[:220]}"
-                    for r in (raw_results or [])[:6]
-                    if isinstance(r, dict) and (r.get("title") or r.get("snippet"))
-                ]
-            except Exception as exc:
-                logger.warning("planner_context_search_failed", error=str(exc), exc_info=exc)
+            context_snippets = [
+                str(s) for s in (state.get("context_snippets") or []) if str(s).strip()
+            ]
+
+        # Intent (understand-before-searching): senses, domain and explanation
+        # level resolved before planning. The planner targets the user's
+        # likely meaning instead of whatever the raw query string retrieves.
+        intent = state.get("intent") or {}
 
         # v3 plan targets live on the orchestration dict (build_initial_state).
         orchestration = state.get("orchestration", {})
@@ -394,6 +432,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             critique_feedback=feedback,
             today=datetime.date.today().isoformat(),
             context_snippets=context_snippets or None,
+            intent=intent or None,
             # v3 plan targets from orchestration: the plan is sized and
             # axis-shaped here; the hardware cap below stays as backstop.
             target_count=int(orchestration.get("target_sub_questions", 0) or 0) or None,
@@ -506,7 +545,19 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             # scoped context, never the shared ResearchState (2.9).
             # `prior_findings` is passed ONLY when a dependent wave has
             # prerequisite context — wave-0 calls keep the historical
-            # signature shape so duck-typed fakes keep working.
+            # signature shape so duck-typed fakes keep working. Same for
+            # `sense` (intent disambiguation): passed only when the plan
+            # actually carries one.
+            sense = ctx.sense()
+            if prior and sense:
+                return await summarizer_agent(
+                    llm=llm,
+                    query=state["query"],
+                    search_results=ctx.own_results,
+                    specialist_role=ctx.specialist_role(),
+                    prior_findings=prior,
+                    sense=sense,
+                )
             if prior:
                 return await summarizer_agent(
                     llm=llm,
@@ -514,6 +565,14 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
                     search_results=ctx.own_results,
                     specialist_role=ctx.specialist_role(),
                     prior_findings=prior,
+                )
+            if sense:
+                return await summarizer_agent(
+                    llm=llm,
+                    query=state["query"],
+                    search_results=ctx.own_results,
+                    specialist_role=ctx.specialist_role(),
+                    sense=sense,
                 )
             return await summarizer_agent(
                 llm=llm,
@@ -687,6 +746,9 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
                 "verified_count": sum(1 for f in all_facts if f.get("verified")),
                 "mode": state.get("mode", "standard"),
                 "redteam_findings": (state.get("redteam", {}) or {}).get("findings", []),
+                # Intent: the synthesis must answer the user's likely meaning
+                # and disambiguate up front when the query was ambiguous.
+                "intent": state.get("intent") or {},
             },
         )
         # Report-contract verification: check the emitted answer's citations
@@ -746,6 +808,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             return "planner"
         return "synthesizer"
 
+    graph.add_node("intent", intent_node)
     graph.add_node("planner", planner_node)
     graph.add_node("search", search_node)
     graph.add_node("summarizer", summarizer_node)
@@ -754,7 +817,10 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
     graph.add_node("synthesizer", synthesizer_node)
     graph.add_node("finalize", finalize_node)
 
-    graph.add_edge(START, entry_node if entry_node else "planner")
+    graph.add_edge(START, entry_node if entry_node else "intent")
+    if entry_node is None:
+        # Understand-before-searching: intent runs before any plan is shaped.
+        graph.add_edge("intent", "planner")
     graph.add_edge("planner", "search")
     graph.add_edge("search", "summarizer")
     graph.add_edge("summarizer", "verifier")

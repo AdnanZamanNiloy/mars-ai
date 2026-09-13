@@ -86,6 +86,7 @@ async def test_planner_uses_llm_for_non_trivial_query():
                 "site:worldbank.org OR site:imf.org"
             ),
             "wave": 0,
+            "sense": "",
         },
         {
             "id": 2,
@@ -110,6 +111,7 @@ async def test_planner_uses_llm_for_non_trivial_query():
                 "site:reuters.com OR site:apnews.com"
             ),
             "wave": 0,
+            "sense": "",
         },
     ]
     assert llm.calls, "planner never called the LLM"

@@ -28,6 +28,8 @@ class SubQuestionModel(BaseModel):
     tools: List[str] = Field(default_factory=lambda: ["web_search"])
     scope: List[str] = Field(default_factory=list, max_length=5)
     output_format: str = "structured_findings"
+    # Intent sense label this sub-question researches ("" when unambiguous).
+    sense: str = ""
 
 
 class PlannerOutputModel(BaseModel):

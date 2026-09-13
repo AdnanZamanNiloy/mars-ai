@@ -75,6 +75,7 @@ class SubQuestion(TypedDict, total=False):
     preferred_domains: List[str]
     primary_source_query: str  # site:-scoped variant aimed at publishers
     wave: int                  # execution wave from dependency order
+    sense: str                 # intent sense label this contract researches ("" = unambiguous)
 
 
 DEFAULT_MINIMUM_SOURCES = 2
@@ -413,6 +414,7 @@ def _contract(
     agent: str = "",
     tools: Optional[Sequence[str]] = None,
     scope: Optional[Sequence[str]] = None,
+    sense: str = "",
 ) -> Dict[str, Any]:
     """Build one fully-populated delegation contract.
 
@@ -446,6 +448,7 @@ def _contract(
         "preferred_domains": hints,
         "primary_source_query": build_primary_source_query(question, search_type, domain),
         "wave": 0,
+        "sense": str(sense or "").strip(),
     }
 
 
@@ -504,6 +507,78 @@ def sanitize_dependencies(plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for item in by_id.values():
         if not item.get("depends_on") and int(item.get("wave", 0) or 0) > 0:
             item["wave"] = 0
+    return plan
+
+
+def _intent_research_senses(intent: Optional[Dict[str, Any]]) -> List[Tuple[str, str]]:
+    """(sense_label, domain) pairs the intent stage says research should target.
+
+    Empty when the query is unambiguous (or intent is absent): nothing in the
+    plan is sense-tagged and behaviour is exactly the pre-intent one.
+    """
+    if not intent or not intent.get("ambiguity"):
+        return []
+    senses = [
+        s for s in (intent.get("senses") or [])
+        if isinstance(s, dict) and str(s.get("label", "")).strip()
+    ]
+    if not senses:
+        return []
+    chosen = senses[:2] if intent.get("recommended_action") == "research_both" else senses[:1]
+    return [
+        (str(s["label"]).strip(), normalize_domain(str(s.get("domain", "")) or "general"))
+        for s in chosen
+    ]
+
+
+def _sense_concept(label: str) -> str:
+    """Lowercased, parenthetical-stripped sense label — a search-ready phrase."""
+    return re.sub(r"\s*\([^)]*\)", "", (label or "")).strip().lower()
+
+
+def _assign_intent_senses(
+    plan: List[Dict[str, Any]],
+    intent: Optional[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Stamp the intent's sense labels onto contracts (deterministic).
+
+    The model's own sense tags win when they name a researched sense; the
+    rest are assigned by round-robin (research_both) or the single dominant
+    sense. A sense's domain upgrades a `general` contract so the right
+    specialist prompt loads downstream.
+    """
+    research = _intent_research_senses(intent)
+    if not research:
+        return plan
+    domains = dict(research)
+    valid = {label for label, _ in research}
+
+    unassigned: List[Dict[str, Any]] = []
+    for item in plan:
+        sense = str(item.get("sense", "") or "").strip()
+        if sense in valid:
+            if item.get("domain", "general") == "general" and domains[sense] != "general":
+                item["domain"] = domains[sense]
+                item["specialist"] = DOMAIN_TO_SPECIALIST.get(item["domain"], "general")
+        else:
+            item["sense"] = ""
+            unassigned.append(item)
+
+    if len(valid) == 1:
+        only = next(iter(valid))
+        for item in unassigned:
+            item["sense"] = only
+            if item.get("domain", "general") == "general" and domains[only] != "general":
+                item["domain"] = domains[only]
+                item["specialist"] = DOMAIN_TO_SPECIALIST.get(item["domain"], "general")
+    else:
+        labels = [label for label, _ in research]
+        for i, item in enumerate(unassigned):
+            sense = labels[i % len(labels)]
+            item["sense"] = sense
+            if item.get("domain", "general") == "general" and domains[sense] != "general":
+                item["domain"] = domains[sense]
+                item["specialist"] = DOMAIN_TO_SPECIALIST.get(item["domain"], "general")
     return plan
 
 
@@ -652,13 +727,16 @@ def fallback_plan(
     target_count: int = 4,
     required_axes: Sequence[str] = ("definition", "evidence", "criticism"),
     today: str = "",
+    intent: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Deterministic plan for when the LLM call fails.
 
     Now shaped by the same axis contract as a real plan (an evidence angle and a
     criticism angle, not four definition variants) and sized to the
     orchestrator's target, so a degraded run is a smaller research plan rather
-    than a different, weaker kind of plan.
+    than a different, weaker kind of plan. When the intent stage flagged the
+    query ambiguous, contracts are sense-scoped and split across the researched
+    senses — a degraded plan still targets the user's likely meaning.
     """
     concept = _query_concept(query)
     year = _year_from(today)
@@ -673,6 +751,25 @@ def fallback_plan(
     ordered = [b for b in blueprint if b[1] in set(required_axes or ())] + [
         b for b in blueprint if b[1] not in set(required_axes or ())
     ]
+
+    research = _intent_research_senses(intent)
+    specs: List[Tuple[str, str, str, int, str, str]] = []
+    if research:
+        # Interleave senses so each researched meaning gets the top axes.
+        for bi, (question, axis, search_type, priority) in enumerate(ordered):
+            for si, (label, domain) in enumerate(research):
+                if len(specs) >= max(1, target_count):
+                    break
+                sense_question = f"{_sense_concept(label)}{question[len(concept):]}"
+                specs.append((sense_question, axis, search_type, priority, label, domain))
+            if len(specs) >= max(1, target_count):
+                break
+    else:
+        specs = [
+            (question, axis, search_type, priority, "", "general")
+            for (question, axis, search_type, priority) in ordered[: max(1, target_count)]
+        ]
+
     plan = [
         _contract(
             index=i + 1,
@@ -680,12 +777,11 @@ def fallback_plan(
             axis=axis,
             search_type=search_type,
             priority=priority,
-            domain="general",
+            domain=domain,
             coverage_goal=f"fallback {axis} coverage",
+            sense=sense,
         )
-        for i, (question, axis, search_type, priority) in enumerate(
-            ordered[: max(1, target_count)]
-        )
+        for i, (question, axis, search_type, priority, sense, domain) in enumerate(specs)
     ]
     return sanitize_dependencies(plan)
 
@@ -703,12 +799,15 @@ async def planner_agent(
     target_count: Optional[int] = None,
     required_axes: Sequence[str] = (),
     minimum_sources: int = DEFAULT_MINIMUM_SOURCES,
+    intent: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Produce a validated, axis-complete, dependency-ordered research plan.
 
     New optional arguments come from `OrchestrationPlan.targets`; omitting them
     reproduces the previous behaviour (five sub-questions, no axis enforcement),
-    so existing call sites keep working while the workflow migrates.
+    so existing call sites keep working while the workflow migrates. `intent`
+    (when provided) steers the plan at the user's likely meaning and tags
+    contracts with sense labels for ambiguous queries.
     """
     target = int(target_count) if target_count else 5
     target = max(1, min(8, target))
@@ -719,6 +818,57 @@ async def planner_agent(
     date_block = (
         f"\nToday is {today.strip()} — use this year in time-sensitive questions."
         if today.strip() else ""
+    )
+
+    # Intent block: the resolved understanding of the question. It overrides
+    # the model's own reading — that is the whole point of resolving intent
+    # BEFORE research is shaped.
+    intent = intent or {}
+    intent_senses = [
+        s for s in (intent.get("senses") or [])
+        if isinstance(s, dict) and str(s.get("label", "")).strip()
+    ]
+    intent_parts: List[str] = []
+    if intent.get("ambiguity") and intent_senses:
+        listed = "\n".join(
+            f"  {i + 1}. {str(s.get('label')).strip()} "
+            f"({s.get('domain', 'general')}, p={float(s.get('probability', 0) or 0):.2f})"
+            for i, s in enumerate(intent_senses[:3])
+        )
+        if intent.get("recommended_action") == "research_both":
+            stance = (
+                "Research BOTH leading senses — split the plan's budget across them, "
+                "and never mix the two meanings inside one sub-question."
+            )
+        else:
+            stance = (
+                f"Research ONLY the most likely sense ('{intent_senses[0].get('label')}'); "
+                "the report will cover the other meaning(s) in a brief disambiguation "
+                "paragraph, so do not spend sub-questions on them."
+            )
+        intent_parts.append(
+            "AMBIGUOUS QUERY — the user's term has distinct meanings:\n"
+            f"{listed}\n{stance}\n"
+            "Every sub-question MUST carry a \"sense\" field set to the exact label "
+            "of the meaning it researches."
+        )
+    elif intent_senses:
+        intent_parts.append(
+            f"Likely meaning: {intent_senses[0].get('label')} — target the plan at this sense."
+        )
+    if intent.get("domain"):
+        intent_parts.append(
+            f"Research domain: {intent.get('domain')} (overrides your own classification)."
+        )
+    if intent.get("explanation_level") == "basic":
+        intent_parts.append(
+            "Explanation level: basic — prefer one clear definitional sub-question "
+            "over many technical angles."
+        )
+    intent_block = (
+        "\nUser intent (resolved before research — obey it):\n" + "\n".join(intent_parts) + "\n"
+        if intent_parts
+        else ""
     )
     axis_block = ""
     if required_axes:
@@ -747,6 +897,7 @@ async def planner_agent(
 Query: {query}
 {feedback_block}
 {date_block}
+{intent_block}
 {axis_block}
 {budget_block}
 {context_block}
@@ -764,17 +915,20 @@ Return JSON only.
     except Exception as e:
         logger.error(f"[Planner] LLM failed: {e}", exc_info=e)
         record_fallback("planner")
-        return fallback_plan(query, target, required_axes or ("definition", "evidence", "criticism"), today)
+        return fallback_plan(query, target, required_axes or ("definition", "evidence", "criticism"), today, intent=intent)
 
     sub_questions = payload.get("sub_questions", []) if isinstance(payload, dict) else []
     if not sub_questions:
         logger.warning("[Planner] Empty LLM output, using fallback")
         record_fallback("planner")
-        return fallback_plan(query, target, required_axes or ("definition", "evidence", "criticism"), today)
+        return fallback_plan(query, target, required_axes or ("definition", "evidence", "criticism"), today, intent=intent)
 
     dominant_domain = normalize_domain(
         str(payload.get("dominant_domain", "general")) if isinstance(payload, dict) else "general"
     )
+    # Intent overrides the model's own domain classification when confident.
+    if intent.get("domain"):
+        dominant_domain = normalize_domain(str(intent["domain"]))
 
     # ---------------- post-processing ----------------
 
@@ -819,6 +973,7 @@ Return JSON only.
                 variants=variants,
                 depends_on=item.get("depends_on", []),
                 agent=str(item.get("agent", "") or "").strip(),
+                sense=str(item.get("sense", "") or "").strip(),
                 tools=[
                     t for t in _clean_str_list(item.get("tools", ["web_search"]))
                     if t in VALID_TOOLS
@@ -844,11 +999,12 @@ Return JSON only.
     # survives, and required axes are protected inside it.
     final = select_plan(cleaned, target, required_axes)
     final = sanitize_dependencies(final)
+    final = _assign_intent_senses(final, intent)
 
     if not final:
         logger.warning("[Planner] All filtered out, fallback used")
         record_fallback("planner")
-        return fallback_plan(query, target, required_axes or ("definition", "evidence", "criticism"), today)
+        return fallback_plan(query, target, required_axes or ("definition", "evidence", "criticism"), today, intent=intent)
 
     logger.info(
         "[Planner] %d contract(s), axes=%s, search_types=%s, injected=%s",

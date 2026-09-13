@@ -149,6 +149,9 @@ function blankRun(query, mode) {
     budget: null,
     citationHealth: null,
     contradictions: 0,
+    // v2.1: resolved intent (senses, domain, explanation level).
+    intent: null,
+    quality: null,
     done: false,
     error: "",
     resumable: false,
@@ -251,6 +254,19 @@ export default function App() {
           });
         }
         if (evt.message) pushTrace({ text: evt.message, kind: "active" });
+        break;
+      case "intent":
+        patchRun(tempId, {
+          intent: {
+            domain: evt.domain, queryType: evt.query_type, level: evt.explanation_level,
+            ambiguity: evt.ambiguity, senses: Array.isArray(evt.senses) ? evt.senses : [],
+            action: evt.recommended_action, origin: evt.origin,
+          },
+        });
+        pushTrace({
+          text: `Understood: ${evt.domain || "?"}${evt.ambiguity ? " — ambiguous, will disambiguate" : ""}`,
+          kind: "done",
+        });
         break;
       case "plan":
         patchRun(tempId, {

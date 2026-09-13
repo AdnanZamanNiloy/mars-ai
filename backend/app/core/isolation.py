@@ -25,6 +25,7 @@ SPECIALIST_DOMAINS = {
     "economics": "financial",
     "machine_learning": "technical",
     "software": "technical",
+    "engineering": "technical",
     "science": "scientific",
     "legal": "legal",
     "policy": "policy",
@@ -75,6 +76,10 @@ class AgentContext:
     def specialist_role(self) -> str:
         """Role selected by this contract's domain (3.1)."""
         return specialist_role_for_domain(str(self.contract.get("domain", "general")))
+
+    def sense(self) -> str:
+        """Intent sense label this contract researches ("" = unambiguous)."""
+        return str(self.contract.get("sense", "") or "").strip()
 
     def domain(self) -> str:
         return str(self.contract.get("domain", "general")).strip()

@@ -309,6 +309,15 @@ function deriveHealth(run) {
     { icon: IconAlert, label: "Critic passes", value: String(run.critiques.length), tone: run.critiques.length > 1 ? "warn" : "muted", hot: run.critiques.length > 1 },
     { icon: IconTarget, label: "Research confidence", value: typeof run.confidence === "number" ? `${Math.round(run.confidence * 100)}%` : "—", tone: "muted" },
   ];
+  if (run.intent && run.intent.domain) {
+    rows.unshift({
+      icon: IconTarget,
+      label: `Intent · ${run.intent.level || "practical"}`,
+      value: `${run.intent.domain}${run.intent.ambiguity ? " · ambiguous" : ""}`,
+      tone: run.intent.ambiguity ? "warn" : "good",
+      hot: run.intent.ambiguity,
+    });
+  }
   if (typeof run.answerSupport === "number") {
     rows.push({
       icon: IconCheckCircle, label: "Answer support", tone: run.answerSupport >= 0.8 ? "good" : "warn",

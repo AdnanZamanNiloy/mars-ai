@@ -313,6 +313,11 @@ def heuristic_intent(query: str) -> IntentReport:
 
     dimensions = detect_dimensions(query, limit=1)
     domain = _normalize_llm_domain(dimensions[0]) if dimensions else "general"
+    # When the homonym table fired, the dominant sense IS the research
+    # target — its domain outranks the generic lexical classification
+    # ("What is transformer?" carries no dimension signal on its own).
+    if senses and senses[0].domain != "general":
+        domain = senses[0].domain
 
     return IntentReport(
         query=str(query or ""),
