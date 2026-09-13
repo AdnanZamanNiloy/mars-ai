@@ -30,7 +30,18 @@ def test_fallback_flags_transformer_ambiguity():
     assert len(report.senses) == 2
     assert report.senses[0].domain == "machine_learning"
     assert report.senses[1].domain == "engineering"
-    # 0.75 vs 0.20 gap > 0.30 -> research the dominant sense only.
+    # Bare definitional question on an ambiguous term: the spec-mandated
+    # behavior is to research and present BOTH meanings, regardless of the
+    # probability gap ("Transformer can mean two things...").
+    assert report.recommended_action == "research_both"
+    assert len(report.research_senses) == 2
+
+
+def test_non_definitional_ambiguous_query_stays_dominant():
+    """A query whose phrasing carries no definitional frame keeps the gap
+    rule: 0.75 vs 0.20 -> research the dominant sense only."""
+    report = heuristic_intent("transformer efficiency standards 2024")
+    assert report.ambiguity is True
     assert report.recommended_action == "research_dominant"
     assert report.research_senses == [report.senses[0]]
 
@@ -124,6 +135,45 @@ async def test_context_snippets_reach_the_prompt():
     assert "Attention is all you need" in llm.calls[0]["user_prompt"]
 
 
+async def test_llm_ranking_overridden_for_bare_definitional():
+    """The live failure: the model ranked electrical 0.8 / ML 0.2 on bare
+    'What is transformer?'. Definitional phrasing forces BOTH meanings into
+    the plan — the ranking may set focus, never silently drop a sense."""
+    llm = FakeLLM({
+        "query_type": "factual",
+        "domain": "engineering",
+        "explanation_level": "practical",
+        "ambiguity": True,
+        "senses": [
+            {"label": "Transformer (electrical device)", "domain": "engineering",
+             "probability": 0.8},
+            {"label": "Transformer (neural network architecture)", "domain": "machine_learning",
+             "probability": 0.2},
+        ],
+        "reasoning": "context skews electrical",
+    })
+    report = await classify_intent(llm, "What is transformer?")
+    assert report.recommended_action == "research_both"
+    assert len(report.research_senses) == 2
+
+
+async def test_user_named_sense_beats_llm_ranking():
+    llm = FakeLLM({
+        "query_type": "factual", "domain": "machine_learning",
+        "explanation_level": "practical", "ambiguity": True,
+        "senses": [
+            {"label": "Transformer (electrical device)", "domain": "engineering",
+             "probability": 0.8},
+            {"label": "Transformer neural network architecture",
+             "domain": "machine_learning", "probability": 0.2},
+        ],
+        "reasoning": "",
+    })
+    report = await classify_intent(llm, "transformer neural network architecture explained")
+    assert report.ambiguity is False
+    assert report.senses[0].domain == "machine_learning"
+
+
 def test_research_both_when_genuinely_split():
     report = IntentReport(
         query="what is jaguar", query_type="factual", domain="general",
@@ -152,7 +202,9 @@ def test_planner_assigns_senses_and_fallback_uses_them():
     from general, and the deterministic fallback plans per sense."""
     from app.agents.planner import _assign_intent_senses, fallback_plan
 
-    intent = heuristic_intent("What is transformer?").to_dict()
+    # Non-definitional phrasing -> dominant sense only; a hand-written sense
+    # tag that names a researched sense is preserved.
+    intent = heuristic_intent("transformer efficiency standards 2024").to_dict()
 
     plan = _assign_intent_senses([
         {"question": "transformer architecture attention mechanism", "domain": "general",
@@ -160,22 +212,13 @@ def test_planner_assigns_senses_and_fallback_uses_them():
         {"question": "transformer statistics official data", "domain": "general",
          "specialist": "general", "sense": "Electrical transformer (AC voltage device)"},
     ], intent)
-    # dominant sense only -> every contract targets it
     assert all(c["sense"] == "Transformer neural network architecture" for c in plan)
     # general-domain contracts upgrade to the sense's domain + specialist
     assert plan[0]["domain"] == "machine_learning"
     assert plan[0]["specialist"] == "technical"
 
-    fb = fallback_plan("What is transformer?", target_count=3,
-                       intent=heuristic_intent("What is transformer?").to_dict())
-    assert fb, "fallback plan must still build"
-    senses = {c.get("sense") for c in fb}
-    assert senses == {"Transformer neural network architecture"}
-    assert all("neural network architecture" in c["question"] for c in fb)
-
     # research_both: fallback interleaves both senses
-    both = dict(intent)
-    both["recommended_action"] = "research_both"
+    both = heuristic_intent("What is transformer?").to_dict()
     fb2 = fallback_plan("What is transformer?", target_count=4, intent=both)
     used = {c.get("sense") for c in fb2}
     assert used == {"Transformer neural network architecture",

@@ -246,6 +246,9 @@ class IntentReport:
     senses: List[SenseCandidate] = field(default_factory=list)
     reasoning: str = ""
     origin: str = "heuristic"          # llm | heuristic
+    # Set when the user's phrasing itself demands both meanings ("What is
+    # transformer?") regardless of the probability gap.
+    forced_both: bool = False
 
     @property
     def dominant_sense(self) -> Optional[SenseCandidate]:
@@ -261,6 +264,8 @@ class IntentReport:
         (answer disambiguates in one paragraph, then goes deep on the likely
         meaning). MARS never blocks on a clarifying question; the disambiguation
         lives in the answer itself."""
+        if self.forced_both and len(self.senses) >= 2:
+            return "research_both"
         if not self.ambiguity or len(self.senses) < 2:
             return "research_dominant"
         gap = self.senses[0].probability - self.senses[1].probability
@@ -357,7 +362,14 @@ def heuristic_intent(query: str) -> IntentReport:
         senses=senses,
         reasoning="Classified lexically (deterministic fallback; LLM intent unavailable).",
         origin="heuristic",
+        forced_both=bool(ambiguity and len(senses) >= 2
+                         and _DEFINITIONAL_QUERY_RE.match((query or "").strip())),
     )
+
+
+_DEFINITIONAL_QUERY_RE = re.compile(
+    r"^\s*(what\s+is|what\s+are|what's|define|explain)\b", re.IGNORECASE
+)
 
 
 def _finalize(
@@ -369,6 +381,7 @@ def _finalize(
     """Shared post-processing: normalize domains, clamp + rank probabilities,
     apply the deterministic ambiguity floor so a hedging model can never
     silently drop a real second sense."""
+    lowered = (query or "").lower()
     senses = [
         SenseCandidate(
             label=str(s.get("label", "")).strip() or "unnamed sense",
@@ -390,6 +403,24 @@ def _finalize(
         ambiguity = False
         senses = senses[:1]
 
+    # The user may have resolved the homonym themselves ("what is python
+    # snake?"): when exactly one sense's distinctive words appear in the
+    # query, that sense IS the meaning — never research the other one.
+    forced_both = False
+    if ambiguity and len(senses) >= 2:
+        matched = [
+            s for s in senses
+            if any(w in lowered for w in _sense_distinctive_words(s.to_dict()))
+        ]
+        if len(matched) == 1:
+            senses = matched
+            ambiguity = False
+        elif _DEFINITIONAL_QUERY_RE.match((query or "").strip()):
+            # Bare "What is X?" on an ambiguous term: the user's phrasing
+            # carries no sense signal, so the answer must present BOTH
+            # meanings ("X can mean two things...") — never pick one.
+            forced_both = True
+
     return IntentReport(
         query=str(query or ""),
         query_type=str(payload.get("query_type", fallback.query_type) or fallback.query_type),
@@ -399,6 +430,7 @@ def _finalize(
         senses=senses,
         reasoning=str(payload.get("reasoning", "") or "").strip() or fallback.reasoning,
         origin=origin,
+        forced_both=forced_both,
     )
 
 
