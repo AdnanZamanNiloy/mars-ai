@@ -149,6 +149,9 @@ function blankRun(query, mode) {
     budget: null,
     citationHealth: null,
     contradictions: 0,
+    // Red team (adversarial review): survival score + findings from the
+    // critic pass. Streamed on every `critic` event; previously dropped.
+    redteam: null,
     // v2.1: resolved intent (senses, domain, explanation level).
     intent: null,
     quality: null,
@@ -288,6 +291,7 @@ export default function App() {
                   critiques: [...m.run.critiques, { iteration: evt.iteration, reason: evt.reason || "" }],
                   breakdown: evt.breakdown && typeof evt.breakdown === "object" ? evt.breakdown : m.run.breakdown,
                   budget: evt.budget && typeof evt.budget === "object" ? evt.budget : m.run.budget,
+                  redteam: evt.redteam && typeof evt.redteam === "object" ? evt.redteam : m.run.redteam,
                 } }
               : m
           ));
@@ -759,7 +763,7 @@ function ThreadMessage({ message, running, onResume, onRegenerate, steps }) {
   }
   if (message.kind === "notice") {
     return (
-      <MarsMessageShell id={message.id} text={message.text}>
+      <MarsMessageShell text={message.text}>
         <div className="error-box">{message.text}</div>
       </MarsMessageShell>
     );

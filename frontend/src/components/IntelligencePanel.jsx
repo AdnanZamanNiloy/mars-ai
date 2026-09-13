@@ -97,6 +97,11 @@ export default function IntelligencePanel({
         <ConfidenceBreakdown breakdown={run?.breakdown} />
       </section>
 
+      <section className="intel-section">
+        <h3>Red team</h3>
+        <RedTeamPanel redteam={run?.redteam} />
+      </section>
+
       {run?.error && run?.resumable ? (
         <section className="intel-section">
           <button className="btn" onClick={onResume} disabled={run?.resuming} style={{ width: "100%" }}>
@@ -253,6 +258,44 @@ function CitationHealthRow({ health }) {
       <IconShield size={15} className={`tone-${tone}`} />
       <span className="k">Citation health</span>
       <span className="v" style={broken ? { color: "var(--mars-soft)" } : undefined}>{label}</span>
+    </div>
+  );
+}
+
+function RedTeamPanel({ redteam }) {
+  /* Adversarial review (Feature 08): the critic's red team attacks the
+   * evidence every pass. The survival score is computed from the findings,
+   * never taken from the model. Show the score, then the highest-severity
+   * attacks so a run's weaknesses are visible instead of only in the trace. */
+  if (!redteam || typeof redteam !== "object") {
+    return <p className="empty">No adversarial review yet.</p>;
+  }
+  const score = typeof redteam.survival_score === "number"
+    ? Math.round(redteam.survival_score * 100) : null;
+  const findings = Array.isArray(redteam.findings) ? redteam.findings : [];
+  const top = [...findings].sort((a, b) => (b.severity || 0) - (a.severity || 0)).slice(0, 4);
+  const weak = score !== null && score < 60;
+  return (
+    <div>
+      <div className="health-row">
+        <IconShield size={15} className={weak ? "tone-warn" : "tone-good"} />
+        <span className="k">Evidence survival</span>
+        <span className="v" style={weak ? { color: "var(--mars-soft)" } : undefined}>
+          {score !== null ? `${score}%` : "—"}
+        </span>
+      </div>
+      {top.length > 0 ? (
+        top.map((f, i) => (
+          <div key={`${f.kind}-${i}`} className="budget-sub" style={{ textAlign: "left", marginBottom: 6 }}>
+            <strong>{f.kind || "weakness"}</strong>
+            {typeof f.severity === "number" ? ` (${Math.round(f.severity * 100)}%)` : ""} — {f.statement}
+          </div>
+        ))
+      ) : (
+        <div className="budget-sub" style={{ textAlign: "left", marginBottom: 6 }}>
+          No weakness found in the evidence base.
+        </div>
+      )}
     </div>
   );
 }
