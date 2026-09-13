@@ -16,13 +16,13 @@ class StubSlowWorkflow:
     def __init__(self, delay: float):
         self.delay = delay
 
-    async def astream(self, state, stream_mode=None):
+    async def astream(self, state, stream_mode=None, config=None):
         await asyncio.sleep(self.delay)
         yield {}
 
 
 class StubFastWorkflow:
-    async def astream(self, state, stream_mode=None):
+    async def astream(self, state, stream_mode=None, config=None):
         yield {"final_report": "# Final Answer\nok", "confidence": 0.5}
 
 
@@ -88,7 +88,7 @@ async def test_normal_run_completes_within_timeout():
 class StubCriticWorkflow:
     """Yields plan → critic (with breakdown) → final_report like the real route."""
 
-    async def astream(self, state, stream_mode=None):
+    async def astream(self, state, stream_mode=None, config=None):
         yield {"sub_questions": [{"question": "what is RAG today?"}]}
         yield {"sub_questions": [{"question": "what is RAG today?"}],
                "iteration": 1,
@@ -126,7 +126,7 @@ class StubVerifyWorkflow:
     """Pre-verifier snapshot (unverified facts) then post-verifier snapshot
     (same length, annotated in place) — the re-emission case."""
 
-    async def astream(self, state, stream_mode=None):
+    async def astream(self, state, stream_mode=None, config=None):
         yield {"facts": [
             {"claim": "RAG combines search with generation", "source": "https://a.com", "confidence": 0.8},
             {"claim": "Dense indexes serve the retriever", "source": "https://b.com", "confidence": 0.7},
@@ -164,7 +164,7 @@ class StubManyFactsWorkflow:
     snapshot while marking the whole batch consumed, so facts 4..N never
     streamed to the UI."""
 
-    async def astream(self, state, stream_mode=None):
+    async def astream(self, state, stream_mode=None, config=None):
         yield {"facts": [
             {"claim": f"Claim number {i}", "source": f"https://s{i}.com", "confidence": 0.8}
             for i in range(6)
@@ -257,7 +257,7 @@ class StubExpansionWorkflow:
     summarizer snapshot with verified=0 and never re-saved — the length
     never changes at the verifier snapshot)."""
 
-    async def astream(self, state, stream_mode=None):
+    async def astream(self, state, stream_mode=None, config=None):
         f1 = {"claim": "Claim one", "source": "https://a.com", "confidence": 0.8}
         f2 = {"claim": "Claim two", "source": "https://b.com", "confidence": 0.8}
         f1v = {**f1, "verified": True, "verification_score": 0.9}
@@ -324,7 +324,7 @@ async def test_client_disconnect_marks_run_timeout(tmp_path):
         """Yields one snapshot, then the stream gets cancelled — the same
         shape a real client disconnect produces inside the generator."""
 
-        async def astream(self, state, stream_mode=None):
+        async def astream(self, state, stream_mode=None, config=None):
             yield {"sub_questions": [{"question": "q1"}]}
             raise asyncio.CancelledError()
 

@@ -33,7 +33,7 @@ from app.db.sqlite import (
     start_research_run,
 )
 from app.core.logging import bind_request_context, get_logger, unbind_request_context
-from app.graph.workflow import build_initial_state
+from app.graph.workflow import build_initial_state, graph_recursion_limit
 
 
 router = APIRouter()
@@ -367,7 +367,11 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 # module-level state, so nothing to leak.
                 last_snapshot: Dict[str, Any] = {}
                 async with asyncio.timeout(settings.research_timeout_sec):
-                    async for snapshot in workflow.astream(state, stream_mode="values"):
+                    async for snapshot in workflow.astream(
+                        state,
+                        stream_mode="values",
+                        config={"recursion_limit": graph_recursion_limit(state)},
+                    ):
                         last_snapshot = snapshot
                         iteration = int(snapshot.get("iteration", 0))
 
@@ -706,7 +710,11 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
             last_snapshot: Dict[str, Any] = {}
             try:
                 async with asyncio.timeout(settings.research_timeout_sec):
-                    async for snapshot in resume_workflow.astream(state, stream_mode="values"):
+                    async for snapshot in resume_workflow.astream(
+                        state,
+                        stream_mode="values",
+                        config={"recursion_limit": graph_recursion_limit(state)},
+                    ):
                         last_snapshot = snapshot
                         iteration = int(snapshot.get("iteration", 0))
 

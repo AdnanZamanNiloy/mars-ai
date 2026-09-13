@@ -169,6 +169,31 @@ def _unanswered_questions(sub_questions: List[Any], search_results: List[Any]) -
     ]
 
 
+# Nodes traversed per research pass after the first (planner→search→
+# summarizer→verifier→critic) plus the intent/planner/search/summarizer/
+# verifier/critic entry and the synthesizer→finalize tail. A pass budget is
+# converted to a LangGraph superstep budget so a legitimate deep run cannot
+# trip LangGraph's default recursion limit before route_after_critic's
+# ceiling is ever reached.
+_NODES_PER_PASS = 5
+_GRAPH_ENTRY_AND_TAIL = 8
+
+
+def graph_recursion_limit(state: ResearchState, extra: int = 4) -> int:
+    """LangGraph superstep budget for a run.
+
+    LangGraph's default recursion limit is 25, which a 5-pass deep run
+    exceeds (intent + 5×(planner/search/summarizer/verifier/critic) +
+    synthesizer/finalize ≈ 26+). Without this, the run aborts with
+    GraphRecursionError before the routing-level iteration ceiling can
+    finalize it. The budget is derived from the run's own ceiling plus a
+    small margin, so a misconfigured `max_iterations` still cannot loop
+    unbounded — route_after_critic is the actual stop, this is headroom.
+    """
+    max_iterations = max(1, int(state.get("max_iterations", 3) or 3))
+    return _GRAPH_ENTRY_AND_TAIL + _NODES_PER_PASS * max_iterations + max(0, int(extra))
+
+
 def build_initial_state(
     query: str,
     max_iterations: int,
@@ -1065,8 +1090,17 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         is_sufficient = bool(critique.get("is_sufficient", False))
 
         # Hard walls (budget/time, iteration ceiling) are absolute — an
-        # evidence gap cannot be acted on if no pass can run.
-        hard_wall = depth_controller.hard_wall_reached(state)
+        # evidence gap cannot be acted on if no pass can run. Checked here,
+        # before ANY expand branch, so no evidence-gap override or
+        # critic-insufficient expansion can route past the ceiling and run
+        # LangGraph into its recursion limit.
+        if depth_controller.hard_wall_reached(state):
+            logger.info(
+                "route_hard_wall_finalize",
+                iteration=int(state.get("iteration", 0)),
+                max_iterations=int(state.get("max_iterations", 0)),
+            )
+            return "synthesizer"
 
         # Evidence-first sufficiency (Step 3): a critic saying "enough" is an
         # OPINION, not proof. Before trusting it, check the measured evidence
@@ -1074,7 +1108,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         # unresolved contradictions are grounds to keep researching even when
         # the model is satisfied. When the evidence gate is clean, the critic
         # wins exactly as before (no extra iteration, no score change).
-        if is_sufficient and not hard_wall and _evidence_gaps_remain(state):
+        if is_sufficient and _evidence_gaps_remain(state):
             logger.info("evidence_gate_overrides_critic", iteration=int(state.get("iteration", 0)))
             is_sufficient = False
 

@@ -71,7 +71,7 @@ def test_final_report_event_carries_degraded_list(tmp_path):
     asyncio.run(init_db(db_path))
 
     class StubDegradedWorkflow:
-        async def astream(self, state, stream_mode=None):
+        async def astream(self, state, stream_mode=None, config=None):
             record_fallback("planner")
             yield {"final_report": "# Final Answer\nok", "confidence": 0.5}
 

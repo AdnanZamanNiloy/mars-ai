@@ -373,12 +373,18 @@ def decide_with_checks(
 
     # ------------------------------------------------------------------
     # Hard walls are ABSOLUTE — nothing below can preempt them. Budget and the
-    # iteration/depth ceiling are the anti-infinite-loop guarantee.
+    # iteration/depth ceiling are the anti-infinite-loop guarantee. The
+    # ceiling is checked BEFORE every evidence-completeness block so an
+    # uncovered axis, an uncorroborated claim or a severe contradiction can
+    # only ever trigger expansion while iterations remain — never past the
+    # ceiling. `hard_wall_reached` (used by route_after_critic) mirrors both.
     # ------------------------------------------------------------------
     if checks["budget_stop"]:
         # Budget is a hard wall: never expand into a pass we cannot pay for.
         return "finalize", checks
     if checks["ceiling_reached"]:
+        # The iteration/depth ceiling is a hard wall alongside budget: at the
+        # limit the run finalizes even if gaps remain (they become limitations).
         return "finalize", checks
 
     # Mode demands a minimum depth (audit re-scopes even a sufficient-looking

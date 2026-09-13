@@ -283,3 +283,118 @@ def test_no_novel_queries_stops_when_gaps_cannot_be_searched():
     assert checks["needs_corroboration_count"] > 0
     assert checks["novel_followups"] == []
     assert depth_controller.decide(state, _settings()) == "finalize"
+
+
+# ---------------------------------------------------------------------------
+# 7. Regression: max_iterations is a HARD routing stop (GraphRecursionError)
+# ---------------------------------------------------------------------------
+
+def _route_after_critic():
+    """The routing closure is registered as a conditional edge on 'critic'."""
+    import app.graph.workflow as wfmod
+
+    graph = wfmod.create_workflow(llm=None, search_client=None)
+    branch = graph.builder.branches["critic"]["route_after_critic"]
+    return branch.path.func
+
+
+def test_ceiling_is_hard_stop_with_every_expansion_trigger_present():
+    """At the ceiling, uncovered axes + critic-insufficiency + uncorroborated
+    claims must ALL yield to the iteration ceiling: decide() finalizes and the
+    router returns 'synthesizer' — never the planner edge."""
+    state = _state(
+        iteration=4,
+        max_iterations=4,
+        confidence=0.2,
+        critique={
+            "is_sufficient": False,
+            "improved_queries": ["independent evaluation of X versus Y"],
+            "reason": "gaps remain",
+        },
+        facts=[
+            {"claim": "Adoption grew 42% in 2024", "source": "https://blog.example.com/a", "verified": True},
+        ],
+    )
+    checks = depth_controller.evaluate(state, _settings())
+    # All three expansion triggers are genuinely latched on...
+    assert "comparison" in checks["uncovered_axes"]
+    assert checks["needs_corroboration_count"] > 0
+    assert checks["critic_sufficient"] is False
+    assert checks["ceiling_reached"] is True
+    # ...yet the ceiling wins at both layers.
+    assert depth_controller.decide(state, _settings()) == "finalize"
+    assert depth_controller.hard_wall_reached(state, _settings()) is True
+    assert _route_after_critic()(state) == "synthesizer"
+
+
+def test_evidence_gap_override_yields_to_ceiling_in_router():
+    """Even when the critic says sufficient and the evidence gate detects a
+    genuine gap, the router must finalize at the ceiling — the evidence gap
+    cannot route back to the planner past max_iterations."""
+    state = _state(
+        iteration=3,
+        max_iterations=3,
+        facts=[
+            {"claim": "Adoption grew 42% in 2024", "source": "https://blog.example.com/a", "verified": True},
+        ],
+        critique={"is_sufficient": True, "improved_queries": [], "reason": "ok"},
+    )
+    assert _evidence_gaps_remain(state) is True
+    assert _route_after_critic()(state) == "synthesizer"
+
+
+def test_uncovered_axes_still_expand_while_iterations_remain():
+    """The fix must not disable the research loop: below the ceiling the same
+    uncovered-axis state still routes to the planner."""
+    state = _state(
+        iteration=1,
+        max_iterations=4,
+        confidence=0.2,
+        critique={
+            "is_sufficient": False,
+            "improved_queries": ["independent evaluation of X versus Y"],
+            "reason": "gaps remain",
+        },
+    )
+    assert depth_controller.evaluate(state, _settings())["ceiling_reached"] is False
+    assert depth_controller.decide(state, _settings()) == "expand"
+    assert _route_after_critic()(state) == "planner"
+
+
+async def test_deep_run_terminates_without_graph_recursion_error():
+    """A full mocked deep run whose critic NEVER reports sufficient must still
+    terminate: the iteration ceiling stops it and the graph recursion budget
+    accommodates every pass, asserting final iteration <= max_iterations."""
+    from bench.mock_pipeline import FakeLLM, FakeSearch
+    from app.core import llm_cache as _lc
+    from app.core.usage import clear_run_usage, start_run_usage
+    from app.graph.workflow import (
+        build_initial_state,
+        create_workflow,
+        graph_recursion_limit,
+    )
+
+    _lc._force_disabled = True  # the fake LLM must not be masked by the cache
+
+    settings = _settings()
+    llm = FakeLLM(settings, critic_pass_on_iteration=10_000)
+    search = FakeSearch(settings)
+    workflow = create_workflow(llm, search_client=search)
+
+    state = build_initial_state("What is the current trend of AI?", max_iterations=5, mode="deep")
+    assert state["max_iterations"] == 5
+
+    usage = start_run_usage("test-deep-loop", settings, mode="deep")
+    try:
+        final = dict(state)
+        async for snapshot in workflow.astream(
+            state,
+            stream_mode="values",
+            config={"recursion_limit": graph_recursion_limit(state)},
+        ):
+            final = {**final, **{k: v for k, v in snapshot.items() if v}}
+    finally:
+        clear_run_usage()
+
+    assert int(final.get("iteration", 0)) <= state["max_iterations"]
+    assert final.get("final_report")

@@ -18,7 +18,7 @@ from app.core.config import Settings
 class StubEvidenceWorkflow:
     """Emits a final_report snapshot carrying an evidence distribution."""
 
-    async def astream(self, state, stream_mode=None):
+    async def astream(self, state, stream_mode=None, config=None):
         yield {
             "final_report": "# Final Answer\nok",
             "confidence": 0.8,

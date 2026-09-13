@@ -165,7 +165,7 @@ def test_incremental_sources_saved_without_duplicates(tmp_path):
     asyncio.run(init_db(db_path))
 
     class StubSourceWorkflow:
-        async def astream(self, state, stream_mode=None):
+        async def astream(self, state, stream_mode=None, config=None):
             yield {"search_results": [
                 {"url": "https://a.com/1", "snippet": "s1"},
                 {"url": "https://b.com/2", "snippet": "s2"},
