@@ -259,7 +259,9 @@ async def test_graph_runs_intent_before_planner(monkeypatch):
     captured = {}
 
     async def fake_classify(llm_arg, query, context_snippets=None):
-        captured["context"] = list(context_snippets or [])
+        # Intent runs CONCURRENTLY with the grounding search and reads only
+        # the query's phrasing; the search results ground the PLANNER.
+        captured["context_arg"] = context_snippets
         return heuristic_intent(query)
 
     async def fake_planner(**kwargs):
@@ -297,7 +299,8 @@ async def test_graph_runs_intent_before_planner(monkeypatch):
     async for snap in graph.astream(state, stream_mode="values"):
         final = snap
 
-    assert captured["context"], "grounding search must feed the intent classifier"
+    assert captured["context_arg"] is None, "intent reads the query, not the search"
+    assert final.get("context_snippets"), "grounding search must still reach the planner via state"
     assert captured["intent"]["ambiguity"] is True
     assert captured["intent"]["domain"] == "machine_learning"
     # intent lands in state for the synthesizer

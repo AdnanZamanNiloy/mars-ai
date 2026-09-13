@@ -148,6 +148,7 @@ async def critic_agent(
     searched_queries: Sequence[str] = (),
     confidence_target: Optional[float] = None,
     redteam_survival: Optional[float] = None,
+    use_llm: bool = True,
 ) -> Dict[str, Any]:
     """Judge the evidence pool. Returns the verdict dict the workflow consumes.
 
@@ -229,22 +230,33 @@ async def critic_agent(
         '{"is_sufficient": true/false, "reason": "...", "improved_queries": ["..."], "confidence": 0.0}'
     )
 
-    try:
-        payload = await llm.generate_json(
-            CRITIC_SYSTEM_PROMPT,
-            user_prompt,
-            response_model=CriticVerdictModel,
-        )
-    except Exception as exc:
-        logger.warning("[Critic] LLM call failed, treating as insufficient", exc_info=exc)
-        record_fallback("critic")
+    if not use_llm:
+        # Gates-only review (quick mode): the iteration ceiling makes the
+        # verdict routing-neutral, and measured evidence stats stand in for
+        # the model's confidence. A mode choice, NOT a degradation — no
+        # fallback recorded.
         payload = {}
+    else:
+        try:
+            payload = await llm.generate_json(
+                CRITIC_SYSTEM_PROMPT,
+                user_prompt,
+                response_model=CriticVerdictModel,
+            )
+        except Exception as exc:
+            logger.warning("[Critic] LLM call failed, treating as insufficient", exc_info=exc)
+            record_fallback("critic")
+            payload = {}
 
     if not isinstance(payload, dict):
         payload = {}
 
     is_sufficient = bool(payload.get("is_sufficient", False))
-    reason = str(payload.get("reason", "Insufficient assessment.") or "Insufficient assessment.")
+    reason = str(payload.get("reason", "") or "").strip()
+    if not reason:
+        reason = (
+            "Gates-only review (quick mode)" if not use_llm else "Insufficient assessment."
+        )
     improved_queries = payload.get("improved_queries", []) or []
     model_confidence = clamp_confidence(payload.get("confidence", 0.4))
 
@@ -300,6 +312,11 @@ async def critic_agent(
                 f"confidence={confidence:.2f}<target={target:.2f}"
             )
     else:
+        # Gates-only mode has no model verdict: the measured evidence quality
+        # stands in, so a strong pool can still pass the target honestly.
+        model_confidence = (
+            clamp_confidence(stats["avg_confidence"]) if not use_llm else model_confidence
+        )
         confidence = model_confidence
         if stats["avg_confidence"] < 0.60:
             gate_failures.append(f"avg_fact_conf={stats['avg_confidence']:.2f}<0.60")

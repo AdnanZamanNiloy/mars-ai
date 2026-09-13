@@ -401,23 +401,32 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         transformer statistics into an ML question's plan). Ambiguity is
         resolved here, never after the evidence is in.
         """
-        context_snippets: List[str] = []
-        try:
-            raw_results = await search_client.run_search([state["query"]])
-            context_snippets = [
-                f"{str(r.get('title', '') or '').strip()}: {str(r.get('snippet', '') or '').strip()[:220]}"
-                for r in (raw_results or [])[:6]
-                if isinstance(r, dict) and (r.get("title") or r.get("snippet"))
-            ]
-        except Exception as exc:
-            logger.warning("planner_context_search_failed", error=str(exc), exc_info=exc)
+        # Latency: the grounding search and the intent LLM call are
+        # independent — run them CONCURRENTLY. The classifier reads the
+        # query's own phrasing (the primary signal; the forced-both policy
+        # covers definitional ambiguity); the search results still ground
+        # the planner, which was their original job.
+        async def _context_search() -> List[str]:
+            try:
+                raw_results = await search_client.run_search([state["query"]])
+                return [
+                    f"{str(r.get('title', '') or '').strip()}: {str(r.get('snippet', '') or '').strip()[:220]}"
+                    for r in (raw_results or [])[:6]
+                    if isinstance(r, dict) and (r.get("title") or r.get("snippet"))
+                ]
+            except Exception as exc:
+                logger.warning("planner_context_search_failed", error=str(exc), exc_info=exc)
+                return []
 
         intent_enabled = bool(getattr(llm.settings, "intent_enabled", True))
-        if intent_enabled:
-            intent = await classify_intent(llm, state["query"], context_snippets)
-        else:
-            intent = heuristic_intent(state["query"])
-        return {"intent": intent.to_dict(), "context_snippets": context_snippets}
+
+        async def _classify() -> Dict[str, Any]:
+            if intent_enabled:
+                return (await classify_intent(llm, state["query"])).to_dict()
+            return heuristic_intent(state["query"]).to_dict()
+
+        context_snippets, intent_dict = await asyncio.gather(_context_search(), _classify())
+        return {"intent": intent_dict, "context_snippets": context_snippets}
 
     async def planner_node(state: ResearchState) -> PlannerUpdate:
         existing = state.get("sub_questions", []) or []
@@ -710,6 +719,11 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             plan=state.get("sub_questions", []),
             searched_queries=searched,
             confidence_target=mode_target,
+            # Quick mode: the iteration ceiling makes the verdict
+            # routing-neutral, so the critic runs gates-only (no LLM call)
+            # and measured evidence stats stand in for the model verdict —
+            # one fewer serial LLM call on the latency-sensitive mode.
+            use_llm=str(state.get("mode", "standard")) != "quick",
         )
 
         # Confidence Engine (Phase 2.4) replaces the inline weighted formula.
@@ -817,7 +831,15 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         # draft ships. Never a loop (budget rule). Skipped when the gate is
         # disabled or the synthesizer itself is on deterministic fallback
         # (extraction cannot act on feedback).
-        if gate_enabled and revision_enabled and "synthesizer" not in take_fallbacks():
+        # Quick mode trades the unconditional polish pass for latency; the
+        # gate still repairs a FAILING draft there.
+        quick_mode = str(state.get("mode", "standard")) == "quick"
+        run_revision = (
+            gate_enabled and revision_enabled
+            and ("synthesizer" not in take_fallbacks())
+            and (not quick_mode or not quality.passed)
+        )
+        if run_revision:
             try:
                 answer2, support2, health2, quality2 = await _synthesize_and_score({
                     **base_context,

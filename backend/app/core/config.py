@@ -91,15 +91,13 @@ class Settings(BaseSettings):
 
     # Timeouts (seconds)
     llm_timeout_sec: float = 25.0
-    # Slower OpenAI-compatible providers routinely take 20-30s on
-    # planner-sized prompts (measured live: glm-5.3-flash 20-30s where
-    # small calls take 2-4s) and stall past 60s under load. The shared
-    # 25s budget timed out real calls, tripping the breaker and silently
-    # degrading whole runs. Worst case per chain pass stays inside the
-    # research budget: 90s custom + 25s groq, one pass, no timeout
-    # retries. Applies to the custom provider only; Groq/HF keep
-    # llm_timeout_sec.
-    custom_llm_timeout_sec: float = 90.0
+    # Slower OpenAI-compatible providers take 15-30s on planner-sized
+    # prompts (measured live). 60s gives 2-3x headroom while halving the
+    # cost of a stalled provider: a free proxy that will not answer at all
+    # previously burned 90s (x2 with the ladder second chance) per stage
+    # before the breaker opened. Applies to the custom provider only;
+    # Groq/HF keep llm_timeout_sec.
+    custom_llm_timeout_sec: float = 60.0
     search_timeout_sec: float = 20.0
     # Full multi-agent runs take minutes (retrieval + 6 LLM stages), the
     # same as upstream GPT Researcher. Per-provider fail-fasts (auth/402/
