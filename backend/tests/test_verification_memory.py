@@ -62,6 +62,38 @@ def test_citations_parse_legend(tmp_path):
     assert asyncio.run(save_citations(db_path, "run-v", "no legend here")) == 0
 
 
+def test_citations_parse_tiered_legend(tmp_path):
+    """Regression: the synthesizer's legend always carries a tier annotation
+    ('[1] domain (tier, primary) — url'); the old regex required exactly
+    '[n] domain — url', so the citations table silently received zero rows
+    from every real run."""
+    db_path = str(tmp_path / "v.db")
+    _seed(db_path)
+    report = (
+        "Body [1].\n\n## Sources\n\n"
+        "[1] nature.com (peer_reviewed, primary) — https://www.nature.com/articles/x\n"
+        "[2] en.wikipedia.org (reference) — https://en.wikipedia.org/wiki/RAG\n"
+        "[3] iea.org (official, primary) — https://www.iea.org/reports/y"
+    )
+    n = asyncio.run(save_citations(db_path, "run-v", report))
+    assert n == 3
+
+    async def _rows():
+        async with aiosqlite.connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT marker, domain, url FROM citations WHERE run_id = 'run-v' ORDER BY marker"
+            )
+            return [dict(r) for r in await cur.fetchall()]
+
+    rows = asyncio.run(_rows())
+    assert rows[0] == {
+        "marker": 1,
+        "domain": "nature.com",
+        "url": "https://www.nature.com/articles/x",
+    }
+
+
 def test_trace_includes_verification_tables(tmp_path):
     db_path = str(tmp_path / "v.db")
     _seed(db_path)

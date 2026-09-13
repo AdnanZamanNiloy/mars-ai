@@ -565,7 +565,11 @@ async def save_citations(database_path: str, run_id: str, report_markdown: str) 
         _, _, legend = text.partition("\nSources:")
     async with _connect(database_path) as db:
         for line in legend.splitlines():
-            match = _re.match(r"^\[(\d+)\]\s+(\S+)\s+—\s*(\S+)\s*$", line.strip())
+            # Legend entries carry an optional tier annotation:
+            # "[1] nature.com (peer_reviewed, primary) — https://..." — the
+            # domain group must not swallow the parenthetical, and legacy
+            # bare "[1] domain — url" lines must keep matching.
+            match = _re.match(r"^\[(\d+)\]\s+(\S+)(?:\s*\([^)]*\))?\s+—\s*(\S+)\s*$", line.strip())
             if not match:
                 continue
             await db.execute(
