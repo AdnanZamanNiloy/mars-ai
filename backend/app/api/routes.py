@@ -584,7 +584,8 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                                  budget=budget_snapshot,
                                  wave_report=last_snapshot.get("wave_report") or [],
                                  citation_health=last_snapshot.get("citation_health") or {},
-                                 quality=last_snapshot.get("quality") or {})
+                                 quality=last_snapshot.get("quality") or {},
+                                 evidence_distribution=last_snapshot.get("evidence_distribution") or {})
             else:
                 yield event_line("final_report", report="No final report generated.", confidence=confidence,
                                  degraded=take_fallbacks(), budget=budget_snapshot)

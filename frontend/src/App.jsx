@@ -155,6 +155,7 @@ function blankRun(query, mode) {
     // v2.1: resolved intent (senses, domain, explanation level).
     intent: null,
     quality: null,
+    evidenceDistribution: null,
     done: false,
     error: "",
     resumable: false,
@@ -340,6 +341,8 @@ export default function App() {
             citationHealth: evt.citation_health && typeof evt.citation_health === "object"
               ? evt.citation_health : m.run.citationHealth,
             quality: evt.quality && typeof evt.quality === "object" ? evt.quality : m.run.quality,
+            evidenceDistribution: evt.evidence_distribution && typeof evt.evidence_distribution === "object"
+              ? evt.evidence_distribution : m.run.evidenceDistribution,
             done: true,
             resuming: false,
           };

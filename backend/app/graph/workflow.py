@@ -63,6 +63,8 @@ class ResearchState(TypedDict, total=False):
     context_snippets: List[str]
     # Answer quality gate: five-axis 0-100 score of the delivered report.
     quality: Dict[str, Any]
+    # Evidence grades (Step 5): A/B/C/D counts over the verified fact pool.
+    evidence_distribution: Dict[str, int]
 
 
 class PlannerUpdate(TypedDict):
@@ -104,6 +106,7 @@ class SynthesizerUpdate(TypedDict):
     answer_support: Dict[str, Any]
     citation_health: Dict[str, Any]
     quality: Dict[str, Any]
+    evidence_distribution: Dict[str, int]
 
 
 class FinalizeUpdate(TypedDict):
@@ -870,6 +873,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         }
         # Evidence grades (Step 4): the measured quality distribution drives
         # the writer's epistemic labeling. Computed once, failure-safe.
+        evidence_distribution: Dict[str, int] = {}
         try:
             from app.core.evidence_grade import grade_facts
 
@@ -879,6 +883,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
                 grade = str((g.get("evidence") or {}).get("grade", "D"))
                 dist[grade] = dist.get(grade, 0) + 1
             base_context["evidence_distribution"] = dist
+            evidence_distribution = dist
         except Exception as exc:
             logger.warning("evidence_distribution_failed", error=str(exc), exc_info=exc)
         gate_enabled = bool(getattr(llm.settings, "quality_gate_enabled", True))
@@ -964,6 +969,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             "answer_support": support,
             "citation_health": citation_health,
             "quality": quality.to_dict(),
+            "evidence_distribution": evidence_distribution,
         }
 
     async def finalize_node(state: ResearchState) -> FinalizeUpdate:

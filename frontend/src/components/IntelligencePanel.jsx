@@ -82,6 +82,8 @@ export default function IntelligencePanel({
         <CitationHealthRow health={run?.citationHealth} />
       </section>
 
+      <EvidenceGrades distribution={run?.evidenceDistribution} />
+
       <section className="intel-section">
         <h3>Execution waves</h3>
         <WaveStrip waves={run?.waves} waveReport={run?.waveReport} />
@@ -259,6 +261,26 @@ function CitationHealthRow({ health }) {
       <span className="k">Citation health</span>
       <span className="v" style={broken ? { color: "var(--mars-soft)" } : undefined}>{label}</span>
     </div>
+  );
+}
+
+function EvidenceGrades({ distribution }) {
+  if (!distribution || typeof distribution !== "object") return null;
+  const counts = ["A", "B", "C", "D"].map((g) => ({
+    grade: g,
+    count: Number(distribution[g]) || 0,
+  }));
+  const total = counts.reduce((sum, c) => sum + c.count, 0);
+  if (!total) return null;
+  return (
+    <section className="intel-section">
+      <h3>Evidence grades</h3>
+      <div className="health-row">
+        <IconShieldCheck size={15} className="tone-muted" />
+        <span className="k">A/B/C/D</span>
+        <span className="v">{counts.map((c) => `${c.grade}${c.count}`).join(" · ")}</span>
+      </div>
+    </section>
   );
 }
 
