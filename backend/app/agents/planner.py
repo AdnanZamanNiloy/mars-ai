@@ -110,6 +110,7 @@ VALID_DOMAINS = {
     "legal",
     "policy",
     "academic",
+    "engineering",
     "general",
 }
 
@@ -141,6 +142,7 @@ DOMAIN_TO_SPECIALIST: Dict[str, str] = {
     "economics": "financial",
     "machine_learning": "technical",
     "software": "technical",
+    "engineering": "technical",
     "science": "scientific",
     "legal": "legal",
     "policy": "policy",

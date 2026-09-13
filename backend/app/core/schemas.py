@@ -95,3 +95,30 @@ class CriticVerdictModel(BaseModel):
 
 class SynthesizerAnswerModel(BaseModel):
     answer: str = Field(min_length=1)
+
+
+class IntentSenseModel(BaseModel):
+    """One candidate meaning of an ambiguous query term."""
+    label: str = Field(min_length=1)
+    domain: str = "general"
+    probability: float = 0.5
+    note: str = ""
+
+    @field_validator("probability", mode="before")
+    @classmethod
+    def _clamp_probability(cls, v):
+        try:
+            return max(0.0, min(1.0, float(v)))
+        except (TypeError, ValueError):
+            return 0.5
+
+
+class IntentOutputModel(BaseModel):
+    """Intent Classification Agent output — the schema INTENT_SYSTEM_PROMPT
+    documents and the parser reads (AGENTS.md 4.2)."""
+    query_type: Literal["factual", "comparative", "analytical", "exploratory"] = "factual"
+    domain: str = "general"
+    explanation_level: Literal["basic", "practical", "expert"] = "practical"
+    ambiguity: bool = False
+    senses: List[IntentSenseModel] = Field(default_factory=list)
+    reasoning: str = ""

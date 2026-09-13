@@ -120,6 +120,12 @@ class Settings(BaseSettings):
     # Rate limiting (Phase 1.7)
     rate_limit: str = "5/minute"
 
+    # Intent classification (understand-before-searching): one small LLM call
+    # before planning that resolves ambiguous queries ("transformer": AI model
+    # vs electrical device), sets the domain and the explanation level, and
+    # grounds the plan in the user's likely meaning. Disable to skip the call.
+    intent_enabled: bool = True
+
     # Dynamic Research Depth (Phase 2.8)
     sufficiency_threshold: float = 0.75
     min_marginal_gain: float = 0.03
