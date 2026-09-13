@@ -266,12 +266,22 @@ class ResearchBudget:
         input_tokens: Optional[int] = None,
         output_tokens: Optional[int] = None,
         model: Optional[str] = None,
+        cached: bool = False,
     ) -> SpendRecord:
         """Record one LLM call. Prefers provider-reported token counts and
-        falls back to a character estimate."""
+        falls back to a character estimate.
+
+        `cached=True` records the tokens (they still represent the request a
+        provider would have served, and free-tier daily quotas are token-based
+        conceptually) but only charges $0 — a disk cache hit never billed a
+        provider. Recording the zero cost HERE, at write time, is what lets
+        the fragile "record then refund the last record" pattern go away: the
+        ledger total is always correct by construction, with no assumption
+        that this record is still the last one.
+        """
         tin = int(input_tokens) if input_tokens is not None else estimate_tokens(prompt)
         tout = int(output_tokens) if output_tokens is not None else estimate_tokens(completion)
-        cost = self.cost_of(tin, tout, model)
+        cost = 0.0 if cached else self.cost_of(tin, tout, model)
         record = SpendRecord(
             stage=stage, kind="llm", model=str(model or self.model),
             input_tokens=tin, output_tokens=tout, cost_usd=cost,

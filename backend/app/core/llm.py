@@ -278,6 +278,13 @@ class LLMClient:
         # it every stream request re-pinged every provider — free-tier
         # rate meters ticked for pings, and users waited for them.
         self._probe_cache: tuple[float, bool, str] | None = None
+        # Negative cache for the provider-store lookup. When the DB has no
+        # `llm_providers` table (bench/scripts, or a route that runs before
+        # init_db), every generation used to re-query and log a full
+        # traceback — hundreds of identical warnings per benchmark run. A
+        # short hold (10s) collapses the spam while still retrying soon
+        # enough that a startup-ordering issue self-heals.
+        self._provider_store_down_until: float = 0.0
 
     async def probe_targets(self) -> List[Dict[str, str]]:
         """Providers a pre-flight probe should ping. Exclusive active
@@ -408,7 +415,7 @@ class LLMClient:
                     validated = response_model.model_validate(payload)
                     return validated.model_dump()
                 return payload
-            except (httpx.TimeoutException, TimeoutError, AllProvidersFailedError, PromptTooLargeError) as exc:
+            except (httpx.TimeoutException, TimeoutError, AllProvidersFailedError, PromptTooLargeError):
                 raise
             except Exception as exc:
                 if attempt == retries - 1:
@@ -423,14 +430,25 @@ class LLMClient:
         """(config, exclusive). A DB-selected active provider wins and is
         EXCLUSIVE — the user's explicit choice, so no other key is spent.
         Otherwise the env CUSTOM_LLM_* trio (non-exclusive, legacy chain)."""
-        try:
-            from app.core.providers import get_active_provider
+        now = time.monotonic()
+        if now >= self._provider_store_down_until:
+            try:
+                from app.core.providers import get_active_provider
 
-            active = await get_active_provider(self.settings.database_url)
-        except Exception as exc:
-            logger.warning(
-                "[LLM] provider store unreadable, using env config: %s", exc, exc_info=exc
-            )
+                active = await get_active_provider(self.settings.database_url)
+            except Exception as exc:
+                # Warn once, then stay quiet for the hold window: the same
+                # missing table would otherwise log a traceback on every LLM
+                # call. exc_info is included only on the first failure.
+                logger.warning(
+                    "[LLM] provider store unreadable, using env config: %s", exc,
+                    exc_info=exc,
+                )
+                self._provider_store_down_until = now + 10.0
+                active = None
+            else:
+                self._provider_store_down_until = 0.0
+        else:
             active = None
         if active:
             base = str(active.get("base_url", "") or "").strip().rstrip("/")
@@ -589,6 +607,9 @@ class LLMClient:
             return
         stage = usage.stage_hint or "llm"
         try:
+            # `cached` is threaded into the budget so a cache hit records $0
+            # at write time — no post-hoc "refund the last record" step that
+            # could subtract the wrong amount if records interleave.
             usage.record_llm(
                 stage,
                 prompt=f"{system_prompt}\n{user_prompt}"[:20000],
@@ -598,11 +619,6 @@ class LLMClient:
                 model=model or None,
                 cached=cached,
             )
-            if cached:
-                # Cache hits never billed a provider: refund the dollar cost
-                # the budget just recorded while keeping tokens/calls visible.
-                refund = usage.budget.records[-1].cost_usd if usage.budget.records else 0.0
-                usage.budget.spent_usd = max(0.0, usage.budget.spent_usd - refund)
         except Exception as exc:  # accounting must never break generation
             logger.warning("usage recording failed: %s", exc)
 

@@ -57,7 +57,9 @@ class RunUsage:
     ) -> None:
         """Record one LLM call. Cached hits record tokens (they still count
         against free-tier daily quotas conceptually) but at zero cost —
-        diskcache serves them without a provider round-trip."""
+        diskcache serves them without a provider round-trip. The budget does
+        the zero-cost bookkeeping itself, so the run total is correct even if
+        another record lands between this call and the next."""
         self.budget.record_llm(
             stage,
             prompt=prompt,
@@ -65,12 +67,10 @@ class RunUsage:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             model=model,
+            cached=cached,
         )
         if cached:
-            # A cache hit costs nothing: refund the recorded cost while
-            # keeping the token/call accounting visible.
             self.cache_hits += 1
-            self.budget.spent_usd = max(0.0, self.budget.spent_usd)
         else:
             self.cache_misses += 1
 
