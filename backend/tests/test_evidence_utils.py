@@ -76,3 +76,22 @@ def test_filter_facts_by_domain_uses_fallback_when_no_strong_sources():
     kept = filter_facts_by_domain(facts)
     assert any("example.org" in str(f["source"]) for f in kept)
     assert all("medium.com" not in str(f["source"]) for f in kept)
+
+
+def test_clean_snippet_strips_wiki_edit_marks():
+    """MediaWiki '[ edit source ]' furniture must never reach a claim — it
+    reads as cut-and-paste debris in the finished report (live leak)."""
+    from app.agents.evidence_utils import clean_snippet_text
+
+    out = clean_snippet_text(
+        "Metallurgy [ edit source ] Electrical steel is an iron alloy which may have "
+        "from zero to 6.5 percent silicon for magnetic applications."
+    )
+    assert "[ edit source ]" not in out
+    assert "edit source" not in out
+    assert "Electrical steel is an iron alloy" in out
+    out2 = clean_snippet_text(
+        "History [edit] The term was coined by Lord Kelvin in 1872 for electrostatic "
+        "applications in telegraphy equipment."
+    )
+    assert "[edit]" not in out2

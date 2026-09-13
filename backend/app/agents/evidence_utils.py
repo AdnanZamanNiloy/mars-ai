@@ -839,6 +839,10 @@ TITLE_PREFIX_RE = re.compile(r"^([^.!?]{2,80}):\s*[^.!?]{2,80}\.?$")
 # Cookie/consent and paywall furniture. These reach the claim pool through
 # fetched page text on publishers that render banners server-side, and read as
 # broken evidence in a finished report.
+# Wiki section-furniture ("[edit]", "[ edit source ]") leaks from MediaWiki
+# HTML into mined claims and reads as cut-and-paste debris in the report.
+WIKI_EDIT_MARK_RE = re.compile(r"\[\s*edit(?:\s+source)?\s*\]", re.IGNORECASE)
+
 CONSENT_NOISE_RE = re.compile(
     r"\b(accept all cookies|manage (your )?(cookie|consent) preferences|"
     r"subscribe to (continue|read)|sign in to (continue|read)|"
@@ -892,6 +896,7 @@ def clean_snippet_text(
     """
     text = re.sub(r"\s+", " ", (snippet or "")).strip()
     text = html.unescape(text).strip()
+    text = WIKI_EDIT_MARK_RE.sub(" ", text).strip()
     text = DATE_STAMP_RE.sub("", text).strip()
     text = LEADING_HASH_RE.sub("", text).strip()
     text = BLOCKQUOTE_RE.sub("", text).strip()
