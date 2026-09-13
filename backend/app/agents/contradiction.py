@@ -9,9 +9,8 @@ the v3 result shape (kind/severity dicts, the `Contradiction` record, and the
 helpers the critic, synthesizer and red-team already consume) so the deferred
 mission port imports a single name.
 
-The live detector currently reports numeric conflicts only; polarity and
-temporal detection return with the mission-port adapter commit, where the v3
-detection rules are re-decided against the mission's own tests.
+The live detector reports numeric, polarity and temporal conflicts; this
+adapter passes all three through in the v3 result shape.
 """
 from __future__ import annotations
 

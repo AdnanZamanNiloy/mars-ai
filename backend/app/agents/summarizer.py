@@ -404,7 +404,7 @@ async def summarizer_agent(
             prior_block = (
                 "Prerequisite findings already established by earlier research "
                 "waves (use as grounding; do NOT re-extract these; cite your OWN "
-                f"documents for anything you add):\n" + "\n".join(lines) + "\n\n"
+                "documents for anything you add):\n" + "\n".join(lines) + "\n\n"
             )
             import hashlib as _hashlib
             prior_digest = _hashlib.sha256(

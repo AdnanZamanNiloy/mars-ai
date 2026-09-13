@@ -37,7 +37,6 @@ import html
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from difflib import SequenceMatcher
 
 from app.core.semantic import cross_similarity, pair_similarity, similarity_matrix
 from email.utils import parsedate_to_datetime

@@ -52,7 +52,6 @@ def _load_queries() -> List[str]:
 async def run_one(query: str, settings: Any) -> Dict[str, Any]:
     """One full live research run through the production graph."""
     from app.agents.search import SearchClient
-    from app.core import llm_cache
     from app.core.llm import LLMClient
     from app.core.usage import clear_run_usage, start_run_usage
     from app.graph.workflow import build_initial_state, create_workflow

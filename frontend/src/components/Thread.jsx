@@ -13,7 +13,7 @@ export function UserMessage({ text, time }) {
   );
 }
 
-export function MessageActions({ messageId, text, onRegenerate, canRegenerate }) {
+export function MessageActions({ text, onRegenerate, canRegenerate }) {
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {
@@ -45,13 +45,13 @@ export function MessageActions({ messageId, text, onRegenerate, canRegenerate })
   );
 }
 
-export function MarsMessageShell({ id, text, onRegenerate, canRegenerate, children }) {
+export function MarsMessageShell({ text, onRegenerate, canRegenerate, children }) {
   return (
     <div className="msg-mars anim-rise">
       <div className="msg-body">
         {children}
         {text ? (
-          <MessageActions messageId={id} text={text} onRegenerate={onRegenerate} canRegenerate={canRegenerate} />
+          <MessageActions text={text} onRegenerate={onRegenerate} canRegenerate={canRegenerate} />
         ) : null}
       </div>
     </div>

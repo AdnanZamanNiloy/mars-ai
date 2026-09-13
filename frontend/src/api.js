@@ -1,7 +1,8 @@
 /* Backend client — the single place that talks to the FastAPI backend.
  * Event protocol mirrors app/api/routes.py exactly:
- *   progress | plan | search_progress | critic | findings | budget |
+ *   progress | intent | plan | search_progress | critic | findings |
  *   decisions | final_report | error
+ * (budget rides on `critic` and `final_report`, not its own event.)
  */
 
 export async function streamNDJSON(url, { method = "POST", body, signal, onEvent, onHttpError }) {

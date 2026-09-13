@@ -21,7 +21,7 @@ all counts the pipeline already has.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any, Dict, List, Sequence, Set
 
 from app.agents.confidence import SUFFICIENCY_THRESHOLD, ConfidenceReport
 from app.agents.evidence_utils import canonical_url, extract_domain

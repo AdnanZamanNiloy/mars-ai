@@ -32,9 +32,8 @@ existing consumers are unaffected.
 """
 from __future__ import annotations
 
-import math
 import re
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Sequence, Set, Tuple
 
 from app.core.logging import get_logger
 
@@ -44,7 +43,7 @@ from app.agents.evidence_utils import (
     numbers_grounded,
     source_reliability_score,
 )
-from app.agents.sources import canonical_url, classify_source, freshness_score
+from app.agents.sources import canonical_url, freshness_score
 
 logger = get_logger(__name__)
 

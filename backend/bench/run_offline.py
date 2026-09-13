@@ -238,7 +238,6 @@ def bench_confidence(settings: Settings) -> Dict[str, Any]:
     rows = []
     in_band = 0
     ordering_ok = True
-    prev_overall = None
     for scenario in CALIBRATION_SCENARIOS:
         result = compute_confidence(
             facts=scenario["facts"],
@@ -646,8 +645,8 @@ def write_markdown_report(report: Dict[str, Any], results_dir: Path) -> Path:
     a("### Verification (claim vs source)")
     a("")
     a(f"{v['tp']} true positives, {v['fp']} false accepts, {v['fn']} false rejects, {v['tn']} true rejects.")
-    a(f"Hard checks: weighted lexical overlap, source authority, unit-aware numeric grounding,")
-    a(f"polarity consistency vs the most-similar source sentence, direct-quote location.")
+    a("Hard checks: weighted lexical overlap, source authority, unit-aware numeric grounding,")
+    a("polarity consistency vs the most-similar source sentence, direct-quote location.")
     a(f"Per-claim latency {_fmt(v['per_case_us'])} µs. Misses: {len(v['misses'])}.")
     a("")
     a("### Hallucination adversarial set")
@@ -657,14 +656,14 @@ def write_markdown_report(report: Dict[str, Any], results_dir: Path) -> Path:
     a("")
     a("### Contradiction engine v2")
     a("")
-    a(f"Numeric (unit-aware), polarity and temporal detectors over the shared semantic")
+    a("Numeric (unit-aware), polarity and temporal detectors over the shared semantic")
     a(f"engine. Kinds detected this run: {co['kinds_detected']}. Pairwise scan latency")
     a(f"{_fmt(co['latency_ms'])} ms for {co['n']} labeled pairs.")
     a("")
     a("### Confidence engine v2")
     a("")
     a(f"Scores: {cf['scores']}. Contradictions apply a pool-size-scaled penalty;")
-    a(f"citation support and axis coverage blend in when present.")
+    a("citation support and axis coverage blend in when present.")
     a("")
     a("## Performance detail")
     a("")
@@ -681,7 +680,7 @@ def write_markdown_report(report: Dict[str, Any], results_dir: Path) -> Path:
     a("")
     mem = c["memory"]
     a(f"Peak-RSS delta across a 300-fact matrix workload: {mem['delta_kib']} KiB —")
-    a(f"the engine fits comfortably in the 8 GB RAM budget with the whole stack.")
+    a("the engine fits comfortably in the 8 GB RAM budget with the whole stack.")
     a("")
     a("## Known limitations (measured, not hidden)")
     a("")

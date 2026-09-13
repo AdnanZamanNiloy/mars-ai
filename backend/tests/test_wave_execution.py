@@ -1,7 +1,6 @@
 """Wave-based parallel execution (Feature 03): dependency-ordered summarization
 with prerequisite context passing."""
 
-import asyncio
 
 import app.graph.workflow as wf
 from app.core.config import Settings

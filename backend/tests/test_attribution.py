@@ -104,7 +104,6 @@ def test_summarizer_quote_grounding_end_to_end(tmp_path):
     from app.agents.summarizer import summarizer_agent
     from app.core.config import Settings
     from app.core.degradation import clear_fallbacks, reset_fallbacks
-    from app.core.schemas import SummarizerFactsModel
 
     content = (
         "Solar capacity in Bangladesh doubled in 2025 as imports surged. "

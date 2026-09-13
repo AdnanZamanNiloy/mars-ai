@@ -1,6 +1,5 @@
 """Intent Classification Agent: ambiguity resolution before research."""
 
-import pytest
 
 from app.agents.intent import (
     IntentReport,

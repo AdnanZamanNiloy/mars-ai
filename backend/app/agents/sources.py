@@ -25,7 +25,7 @@ existing thresholds elsewhere in the pipeline keep their meaning.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode

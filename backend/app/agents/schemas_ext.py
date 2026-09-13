@@ -11,7 +11,7 @@ not the call, which is the right trade for an optional hardening layer.
 """
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import List
 
 try:  # pragma: no cover - environment dependent
     from pydantic import BaseModel, Field

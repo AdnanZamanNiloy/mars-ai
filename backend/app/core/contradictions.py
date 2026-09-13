@@ -25,7 +25,6 @@ import re
 from typing import Any, Dict, List
 
 from app.agents.evidence_utils import (
-    _significant_quantities,
     claim_polarity,
     numeric_conflict,
 )

@@ -53,9 +53,11 @@ cd frontend && npm run dev
 # Test
 cd backend && pytest tests/ -v
 
-# Lint/format — repo has none configured yet. If you add ruff/black/mypy
-# (recommended, not yet done), wire the exact commands here so future
-# sessions don't have to rediscover them.
+# Lint (configured in backend/pyproject.toml; install: pip install "ruff>=0.6")
+cd backend && ruff check app tests bench scripts
+
+# Type check (baseline, informational — see [tool.mypy] in backend/pyproject.toml)
+cd backend && mypy app
 
 # Smoke test
 curl -s http://127.0.0.1:8000/api/health

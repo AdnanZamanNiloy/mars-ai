@@ -3,7 +3,6 @@
 import time
 
 import numpy as np
-import pytest
 
 from app.core.semantic import (
     cross_similarity,

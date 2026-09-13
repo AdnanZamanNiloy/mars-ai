@@ -1,0 +1,36 @@
+[tool.ruff]
+# Backend-only project root (repo root also holds frontend/).
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# High-signal rules only. This codebase predates linting and carries a large
+# volume of PEP-585/604 style debt (UP006/UP035/UP045) that is intentionally
+# NOT enforced here — the goal is catching real bugs (undefined names, unused
+# imports/vars, blind excepts, blocking calls in async code), not a reformat.
+select = [
+    "E9",    # SyntaxError-adjacent runtime errors
+    "F",     # Pyflakes: undefined names, unused imports/vars
+    "ASYNC", # Blocking I/O inside async functions (8GB host cares about stalls)
+]
+ignore = [
+    # Bench/test-only leftovers that are cosmetic, not bugs:
+    # an unused cache_dir literal in the benchmark setup, and unused
+    # timing markers kept for readability next to their pass.
+    "F841",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Scripts and benchmarks legitimately open files synchronously in async
+# drivers; those are one-shot CLI tools, not the request-serving path.
+"bench/*" = ["ASYNC230", "ASYNC240"]
+"scripts/*" = ["ASYNC230", "ASYNC240"]
+
+[tool.mypy]
+# Pragmatic baseline: catch real type errors without demanding annotations
+# across a 30k-line codebase that has none. Not enforced in CI yet.
+python_version = "3.10"
+ignore_missing_imports = true
+follow_imports = "silent"
+warn_unused_configs = true
+no_strict_optional = false
