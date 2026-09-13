@@ -79,6 +79,17 @@ export default function IntelligencePanel({
         ) : (
           <p className="empty">No health signals yet.</p>
         )}
+        <CitationHealthRow health={run?.citationHealth} />
+      </section>
+
+      <section className="intel-section">
+        <h3>Execution waves</h3>
+        <WaveStrip waves={run?.waves} waveReport={run?.waveReport} />
+      </section>
+
+      <section className="intel-section">
+        <h3>Cost &amp; budget</h3>
+        <BudgetMeter budget={run?.budget} />
       </section>
 
       <section className="intel-section">
@@ -111,6 +122,8 @@ const SIGNAL_LABELS = {
   source_quality: "Source quality",
   source_diversity: "Source diversity",
   citation_coverage: "Citation coverage",
+  citation_support: "Citation support",
+  axis_coverage: "Axis coverage",
   claim_verification_strength: "Claim verification",
   cross_source_agreement: "Cross-source agreement",
   critic_survival: "Critic survival",
@@ -151,6 +164,95 @@ function ConfidenceBreakdown({ breakdown }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function BudgetMeter({ budget }) {
+  /* Cost-aware reasoning (Feature 12): live spend against the run's
+   * ceilings — dollars, tokens, calls, cache hits. */
+  if (!budget || typeof budget !== "object") {
+    return <p className="empty">Budget telemetry arrives with the first LLM call.</p>;
+  }
+  const tokens = budget.spent_tokens ?? 0;
+  const calls = budget.llm_calls ?? 0;
+  const usd = typeof budget.spent_usd === "number" ? budget.spent_usd : 0;
+  const util = typeof budget.utilization === "number" ? Math.round(budget.utilization * 100) : null;
+  const hits = budget.cache_hits ?? 0;
+  const hitRate = budget.cache_hit_rate ?? 0;
+  const fmtTokens = tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
+  return (
+    <div>
+      <div className="health-row">
+        <span className="k">LLM calls</span>
+        <span className="v">{calls}{hits > 0 ? ` (${hits} cached)` : ""}</span>
+      </div>
+      <div className="health-row">
+        <span className="k">Tokens spent</span>
+        <span className="v">{fmtTokens}</span>
+      </div>
+      <div className="health-row">
+        <span className="k">Estimated cost</span>
+        <span className="v">${usd < 0.01 && usd > 0 ? usd.toFixed(4) : usd.toFixed(3)}</span>
+      </div>
+      {util !== null ? (
+        <>
+          <div className="health-row" style={{ paddingBottom: 2 }}>
+            <span className="k">Budget utilization</span>
+            <span className="v" style={util >= 80 ? { color: "var(--mars-soft)" } : undefined}>{util}%</span>
+          </div>
+          <div className="bar" style={{ marginBottom: 8 }}>
+            <div style={{ width: `${util}%`, background: util >= 80 ? "var(--mars-soft)" : undefined }} />
+          </div>
+        </>
+      ) : null}
+      {hits > 0 ? (
+        <div className="budget-sub" style={{ textAlign: "left", marginBottom: 6 }}>
+          cache hit rate {Math.round(hitRate * 100)}% — repeated prompts served from disk, free
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function WaveStrip({ waves, waveReport }) {
+  /* Dependency-wave execution (Feature 03): the plan's shape and what each
+   * wave produced. */
+  const shape = Array.isArray(waves) ? waves.filter(Array.isArray) : [];
+  const report = Array.isArray(waveReport) ? waveReport : [];
+  if (!shape.length && !report.length) {
+    return <p className="empty">Wave structure appears once the plan is built.</p>;
+  }
+  const items = (shape.length ? shape : report.map(() => [])).map((w, i) => {
+    const info = report[i];
+    return (
+      <div className="health-row" key={i}>
+        <span className="k">Wave {i + 1}{shape.length ? ` · ${w.length} contract${w.length === 1 ? "" : "s"}` : ""}</span>
+        <span className="v">{info ? `${info.facts_extracted} fact${info.facts_extracted === 1 ? "" : "s"}` : "pending"}</span>
+      </div>
+    );
+  });
+  return <div>{items}</div>;
+}
+
+function CitationHealthRow({ health }) {
+  const summary = health && typeof health.summary === "object" ? health.summary : null;
+  if (!summary) return null;
+  const broken = (summary.broken || 0) + (summary.bad || 0);
+  const warn = summary.warn || 0;
+  const ok = summary.ok || 0;
+  const total = ok + warn + broken + (summary.unchecked || 0);
+  if (!total) return null;
+  const tone = broken ? "warn" : warn ? "muted" : "good";
+  const label = broken
+    ? `${broken} broken of ${total}`
+    : warn ? `${warn} flagged of ${total}`
+    : `${ok}/${total} verified live`;
+  return (
+    <div className="health-row">
+      <IconShield size={15} className={`tone-${tone}`} />
+      <span className="k">Citation health</span>
+      <span className="v" style={broken ? { color: "var(--mars-soft)" } : undefined}>{label}</span>
     </div>
   );
 }
@@ -200,11 +302,18 @@ function deriveAgents(run) {
 
 function deriveHealth(run) {
   const verified = run.findings.filter((f) => f.verified === true).length;
-  return [
+  const rows = [
     { icon: IconDoc, label: "Sources analyzed", value: String(run.snippets), tone: "muted" },
     { icon: IconCheckCircle, label: "Total claims", value: String(run.findings.length), tone: "muted" },
     { icon: IconCheckCircle, label: "Verified claims", value: String(verified), tone: "good" },
     { icon: IconAlert, label: "Critic passes", value: String(run.critiques.length), tone: run.critiques.length > 1 ? "warn" : "muted", hot: run.critiques.length > 1 },
     { icon: IconTarget, label: "Research confidence", value: typeof run.confidence === "number" ? `${Math.round(run.confidence * 100)}%` : "—", tone: "muted" },
   ];
+  if (typeof run.answerSupport === "number") {
+    rows.push({
+      icon: IconCheckCircle, label: "Answer support", tone: run.answerSupport >= 0.8 ? "good" : "warn",
+      value: `${Math.round(run.answerSupport * 100)}%`, hot: run.answerSupport < 0.8,
+    });
+  }
+  return rows;
 }

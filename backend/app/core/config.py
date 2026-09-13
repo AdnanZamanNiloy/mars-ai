@@ -103,7 +103,19 @@ class Settings(BaseSettings):
 
     # Cache (Phase 1.4)
     cache_size_limit_bytes: int = 250_000_000  # 250MB, diskcache size cap
-    cache_ttl_sec: int = 3600  # 1 hour
+    cache_ttl_sec: int = 3600  # 1 hour (search results)
+    # LLM response cache: exact-prompt disk cache. Research pipelines re-issue
+    # identical prompts (critic re-evals, re-runs, deterministic preambles) —
+    # serving those from disk saves free-tier tokens and seconds of latency.
+    # Tests disable it (conftest) so respx mocks are never bypassed.
+    llm_cache_enabled: bool = True
+    llm_cache_ttl_sec: int = 21600  # 6 hours — sources age out
+    # Citation validation v2: live URL re-check of the sources the final
+    # answer actually cites. Bounded (top N sources, small timeout) and
+    # never fatal — a dead link becomes a report warning, not an error.
+    citation_check_enabled: bool = True
+    citation_check_timeout_sec: float = 5.0
+    citation_check_max: int = 10
 
     # Rate limiting (Phase 1.7)
     rate_limit: str = "5/minute"

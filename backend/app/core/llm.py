@@ -3,7 +3,8 @@ import json
 from app.core.logging import get_logger
 import re
 import time
-from typing import Any, Dict, List, Type
+from dataclasses import dataclass
+from typing import Any, Dict, List, Tuple, Type
 
 import httpx
 from pydantic import BaseModel
@@ -15,8 +16,36 @@ from tenacity import (
 )
 
 from app.core.config import Settings
+from app.core import llm_cache
+from app.core.usage import get_run_usage
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class CompletionResult:
+    """One provider completion with the accounting the budget governor needs.
+
+    `input_tokens`/`output_tokens` come from the provider's `usage` field
+    when present; HF's text-only responses fall back to char estimates.
+    """
+
+    text: str
+    provider: str
+    model: str
+    endpoint: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+def _parse_usage(data: Any) -> Tuple[int, int]:
+    """Extract (prompt_tokens, completion_tokens) from an OpenAI-compatible
+    response; (0, 0) when the provider omits usage (callers estimate)."""
+    try:
+        usage = data.get("usage") or {}
+        return int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0)
+    except (AttributeError, TypeError, ValueError):
+        return 0, 0
 
 HF_FALLBACK_MODELS: List[str] = [
     "Qwen/Qwen2.5-7B-Instruct",
@@ -147,6 +176,11 @@ def _wait_with_retry_after(retry_state) -> float:
 class LLMClient:
     def __init__(self, settings: Settings):
         self.settings = settings
+        # Seed the response cache (idempotent; disabled flag respected).
+        try:
+            llm_cache.configure(settings)
+        except Exception as exc:  # pragma: no cover - cache must never block startup
+            logger.warning("llm cache configure failed: %s", exc)
         # Breaker state lives on the client instance (created once at app
         # startup), is bounded, and resets on success — not per-request state.
         self.groq_breaker = CircuitBreaker(threshold=3, cooldown_sec=60.0)
@@ -164,6 +198,10 @@ class LLMClient:
         # dead provider A timed out once would otherwise block healthy
         # provider B for the full cooldown.
         self._custom_identity: tuple | None = None
+        # Pre-flight probe cache: successes hold 30s, failures 10s. Without
+        # it every stream request re-pinged every provider — free-tier
+        # rate meters ticked for pings, and users waited for them.
+        self._probe_cache: tuple[float, bool, str] | None = None
 
     async def probe_targets(self) -> List[Dict[str, str]]:
         """Providers a pre-flight probe should ping. Exclusive active
@@ -203,6 +241,10 @@ class LLMClient:
         """Pre-flight check for the research stream: one tiny parallel ping
         per configured provider, each capped at `timeout` seconds.
 
+        Results are cached briefly (30s success / 10s failure) so a burst of
+        queued requests doesn't re-ping providers — the probes themselves
+        consume free-tier rate budget.
+
         Returns (any_ok, failure_detail). Fail-open on internal errors —
         a probe bug must never block research; the pipeline's own
         degradation handling still applies. When every provider fails the
@@ -210,6 +252,9 @@ class LLMClient:
         fail fast with the per-provider reasons instead of wasting the
         research budget.
         """
+        now = time.monotonic()
+        if self._probe_cache is not None and now < self._probe_cache[0]:
+            return self._probe_cache[1], self._probe_cache[2]
         try:
             targets = await self.probe_targets()
         except Exception as exc:
@@ -249,8 +294,13 @@ class LLMClient:
         results = await asyncio.gather(*(_ping(t) for t in targets))
         any_ok = any(ok for ok, _, _ in results)
         if any_ok:
+            # Cache successes only: a healthy provider stays healthy for the
+            # next 30s, but failures must re-probe (the test suite's recovery
+            # case, and users retrying after a quota reset, need fresh state).
+            self._probe_cache = (time.monotonic() + 30.0, True, "")
             return True, ""
         detail = "; ".join(f"{name}: {err}" for _, name, err in results)
+        self._probe_cache = None
         return False, detail
 
     async def generate_json(
@@ -331,14 +381,29 @@ class LLMClient:
         if identity is not None and self._custom_identity is not None and identity != self._custom_identity:
             self.custom_breaker = CircuitBreaker(threshold=3, cooldown_sec=60.0)
         self._custom_identity = identity
+
+        # ---- Response cache: exact-prompt hits skip providers entirely ----
+        cache_endpoint = (custom or {}).get("endpoint", "https://api.groq.com/openai/v1/chat/completions")
+        cache_model = (custom or {}).get("model", self.settings.groq_model)
+        cached = llm_cache.get(cache_endpoint, cache_model, system_prompt, user_prompt)
+        if cached is not None:
+            self._record_usage(
+                cached["text"], provider="cache", model=cache_model,
+                input_tokens=cached.get("input_tokens") or None,
+                output_tokens=cached.get("output_tokens") or None,
+                cached=True,
+            )
+            return cached["text"]
+
         attempted = 0
         async with self._llm_semaphore:
             if custom and not self.custom_breaker.is_open():
                 attempted += 1
                 try:
-                    text = await self._call_custom(system_prompt, user_prompt, custom)
+                    result = await self._call_custom(system_prompt, user_prompt, custom)
                     self.custom_breaker.record_success()
-                    return text
+                    self._cache_and_record(result, system_prompt, user_prompt)
+                    return result.text
                 except Exception as exc:
                     self._last_errors["custom"] = f"{type(exc).__name__}: {exc}"
                     self._record_provider_failure(self.custom_breaker, exc)
@@ -357,9 +422,10 @@ class LLMClient:
             if groq_key and not self.groq_breaker.is_open():
                 attempted += 1
                 try:
-                    text = await self._call_groq(system_prompt, user_prompt)
+                    result = await self._call_groq(system_prompt, user_prompt)
                     self.groq_breaker.record_success()
-                    return text
+                    self._cache_and_record(result, system_prompt, user_prompt)
+                    return result.text
                 except Exception as exc:
                     self._last_errors["groq"] = f"{type(exc).__name__}: {exc}"
                     self._record_provider_failure(self.groq_breaker, exc)
@@ -373,7 +439,9 @@ class LLMClient:
             if hf_key:
                 attempted += 1
                 try:
-                    return await self._call_huggingface(system_prompt, user_prompt)
+                    result = await self._call_huggingface(system_prompt, user_prompt)
+                    self._cache_and_record(result, system_prompt, user_prompt)
+                    return result.text
                 except Exception as exc:
                     self._last_errors["huggingface"] = f"{type(exc).__name__}: {exc}"
                     raise
@@ -406,6 +474,75 @@ class LLMClient:
         )
 
     @staticmethod
+    def _record_usage(
+        text: str,
+        *,
+        provider: str,
+        model: str,
+        input_tokens: int | None,
+        output_tokens: int | None,
+        cached: bool = False,
+        system_prompt: str = "",
+        user_prompt: str = "",
+    ) -> None:
+        """Feed the per-run ledger if one is active (research runs only).
+
+        Outside a run (provider probes, tests) there is no ledger and
+        nothing is recorded — the call still works exactly as before."""
+        usage = get_run_usage()
+        if usage is None:
+            return
+        stage = usage.stage_hint or "llm"
+        try:
+            usage.record_llm(
+                stage,
+                prompt=f"{system_prompt}\n{user_prompt}"[:20000],
+                completion=text,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                model=model or None,
+                cached=cached,
+            )
+            if cached:
+                # Cache hits never billed a provider: refund the dollar cost
+                # the budget just recorded while keeping tokens/calls visible.
+                refund = usage.budget.records[-1].cost_usd if usage.budget.records else 0.0
+                usage.budget.spent_usd = max(0.0, usage.budget.spent_usd - refund)
+        except Exception as exc:  # accounting must never break generation
+            logger.warning("usage recording failed: %s", exc)
+
+    def _cache_and_record(
+        self, result: "CompletionResult", system_prompt: str, user_prompt: str
+    ) -> None:
+        """Persist a successful completion and feed the run ledger."""
+        llm_cache.put(
+            result.endpoint,
+            result.model,
+            system_prompt,
+            user_prompt,
+            result.text,
+            input_tokens=result.input_tokens or None,
+            output_tokens=result.output_tokens or None,
+        )
+        tin, tout = result.input_tokens, result.output_tokens
+        if not tin:
+            from app.agents.budget import estimate_tokens
+            tin = estimate_tokens(f"{system_prompt}\n{user_prompt}")
+        if not tout:
+            from app.agents.budget import estimate_tokens
+            tout = estimate_tokens(result.text)
+        self._record_usage(
+            result.text,
+            provider=result.provider,
+            model=result.model,
+            input_tokens=tin,
+            output_tokens=tout,
+            cached=False,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
+
+    @staticmethod
     def _record_provider_failure(breaker: CircuitBreaker, exc: Exception) -> None:
         """Timeouts open the breaker immediately (one 25s stall is enough
         signal inside a 90s budget); fast failures use the normal
@@ -434,7 +571,7 @@ class LLMClient:
         wait=_wait_with_retry_after,
         retry=retry_if_exception(_is_retryable),
     )
-    async def _call_custom(self, system_prompt: str, user_prompt: str, custom: Dict[str, str]) -> str:
+    async def _call_custom(self, system_prompt: str, user_prompt: str, custom: Dict[str, str]) -> CompletionResult:
         """Generic OpenAI-compatible chat completions call.
 
         Uses custom_llm_timeout_sec (not the shared llm_timeout_sec):
@@ -463,7 +600,15 @@ class LLMClient:
             )
             response.raise_for_status()
             data = response.json()
-            return data["choices"][0]["message"]["content"]
+            tin, tout = _parse_usage(data)
+            return CompletionResult(
+                text=data["choices"][0]["message"]["content"],
+                provider="custom",
+                model=custom["model"],
+                endpoint=custom["endpoint"],
+                input_tokens=tin,
+                output_tokens=tout,
+            )
 
     @retry(
         reraise=True,
@@ -471,7 +616,7 @@ class LLMClient:
         wait=_wait_with_retry_after,
         retry=retry_if_exception(_is_retryable),
     )
-    async def _call_groq(self, system_prompt: str, user_prompt: str) -> str:
+    async def _call_groq(self, system_prompt: str, user_prompt: str) -> CompletionResult:
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.settings.groq_api_key}",
@@ -494,7 +639,15 @@ class LLMClient:
             response = await client.post(url, headers=headers, json=payload)
             response.raise_for_status()
             data = response.json()
-            return data["choices"][0]["message"]["content"]
+            tin, tout = _parse_usage(data)
+            return CompletionResult(
+                text=data["choices"][0]["message"]["content"],
+                provider="groq",
+                model=self.settings.groq_model,
+                endpoint=url,
+                input_tokens=tin,
+                output_tokens=tout,
+            )
 
     @retry(
         reraise=True,
@@ -502,7 +655,7 @@ class LLMClient:
         wait=_wait_with_retry_after,
         retry=retry_if_exception(_is_retryable),
     )
-    async def _call_huggingface(self, system_prompt: str, user_prompt: str) -> str:
+    async def _call_huggingface(self, system_prompt: str, user_prompt: str) -> CompletionResult:
         headers = {
             "Authorization": f"Bearer {self.settings.huggingface_api_key}",
             "Content-Type": "application/json",
@@ -536,13 +689,25 @@ class LLMClient:
                 response.raise_for_status()
                 data = response.json()
 
+                text = None
                 if isinstance(data, list) and data and "generated_text" in data[0]:
-                    return data[0]["generated_text"]
-                if isinstance(data, dict) and "generated_text" in data:
-                    return data["generated_text"]
-                if isinstance(data, dict) and "error" in data:
+                    text = data[0]["generated_text"]
+                elif isinstance(data, dict) and "generated_text" in data:
+                    text = data["generated_text"]
+                elif isinstance(data, dict) and "error" in data:
                     # Model can be valid but unavailable due to provider-side load.
                     raise RuntimeError(f"HuggingFace model '{model_name}' error: {data.get('error')}")
+                if text is not None:
+                    # HF inference returns bare text: estimate token usage.
+                    from app.agents.budget import estimate_tokens
+                    return CompletionResult(
+                        text=text,
+                        provider="huggingface",
+                        model=model_name,
+                        endpoint=url,
+                        input_tokens=estimate_tokens(prompt),
+                        output_tokens=estimate_tokens(text),
+                    )
 
         tried = ", ".join(not_available_errors) if not_available_errors else "no models tried"
         raise RuntimeError(

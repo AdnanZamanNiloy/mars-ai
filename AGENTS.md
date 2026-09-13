@@ -21,13 +21,18 @@ Hardware:   target host has 8GB RAM. Concurrency and memory footprint
 
 Entrypoint:      main.py (FastAPI app, lifespan init)
 Agents:          app/agents/*.py (planner, search, summarizer, critic,
-                 synthesizer, evidence_utils — one file per pipeline
-                 stage or shared utility)
-Orchestration:   app/graph/workflow.py (LangGraph StateGraph)
-API:             app/api/routes.py (the /api/research/stream route)
-Core utilities:  app/core/*.py (config, llm client, caching, confidence,
-                 isolation, degradation, providers)
-Persistence:     app/db/sqlite.py
+                 synthesizer, verifier, evidence_utils, contradiction
+                 adapter, citation_check, budget, redteam — one file per
+                 pipeline stage or shared utility)
+Orchestration:   app/graph/workflow.py (LangGraph StateGraph; wave-ordered
+                 summarization with prerequisite context)
+API:             app/api/routes.py (stream, resume, trace, providers)
+Core utilities:  app/core/*.py (config, llm client + response cache, usage
+                 ledger, semantic engine, confidence, contradictions, depth
+                 controller, isolation, degradation, providers)
+Persistence:     app/db/sqlite.py (auto-initializing schema)
+Benchmarks:      bench/ (run_offline.py deterministic suite, run_live.py
+                 live-provider suite, datasets.py labeled fixtures)
 Frontend:        frontend/src/App.jsx consumes the NDJSON stream; components
                  in frontend/src/components/
 ```
@@ -62,6 +67,14 @@ curl -N -X POST http://127.0.0.1:8000/api/research/stream \
 ---
 
 ## 2. Confirmed bug history (read this before touching agent code)
+
+> v2 note: six additional bugs were found by `bench/run_offline.py` and are
+> documented in CHANGELOG.md ("Benchmark-driven bug fixes") — the notable
+> classes for future work: (1) bare "up"/"down" as direction tokens leak
+> from hyphenated words; (2) negation words must NEVER be stopwords in any
+> similarity/verification component; (3) a dedup threshold alone cannot
+> merge "X"/"not X" safely — always pair lexical merging with a polarity
+> guard.
 
 These are real bugs found by reading the code, not hypotheticals. Each one below is turned into a standing rule in Section 4. Keep this list updated — when you fix a bug or find a new one, add it here with the same format, so the next session doesn't reintroduce it.
 

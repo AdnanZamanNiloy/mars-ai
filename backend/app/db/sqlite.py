@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import json
+import os
 import re
 
 import aiosqlite
@@ -148,9 +149,82 @@ CREATE TABLE IF NOT EXISTS llm_providers (
 
 SCHEMA_VERSION = 4
 
+# Process-level memo: paths whose schema has been ensured this process.
+# Avoids re-running the CREATE TABLE block on every connect while still
+# auto-healing fresh databases (first connect initializes, later connects
+# skip straight to queries).
+_initialized_paths: set[str] = set()
+
+
+def normalize_db_path(database_path: str) -> str:
+    """Resolve DATABASE_URL-ish values to a plain filesystem path.
+
+    Accepts plain paths ("./research.db"), sqlite/file URI forms
+    ("file:/abs/path.db", "sqlite:///abs/path.db") and strips query
+    fragments. Missing parent directories are created so first-run
+    deployments with a nested DATABASE_URL never fail with
+    "unable to open database file".
+    """
+    path = str(database_path or "./research.db").strip()
+    if not path:
+        path = "./research.db"
+    for prefix in ("sqlite://", "file:"):
+        if path.startswith(prefix):
+            path = path[len(prefix):]
+            break
+    # sqlite:///abs/path.db -> //abs/path.db after prefix strip
+    while path.startswith("//"):
+        path = path[1:]
+    path = path.split("?", 1)[0].split("#", 1)[0]
+    if not path:
+        path = "./research.db"
+    parent = os.path.dirname(os.path.abspath(path))
+    if parent and not os.path.isdir(parent):
+        try:
+            os.makedirs(parent, exist_ok=True)
+        except OSError:
+            pass  # unwritable location: let aiosqlite surface a clear error
+    return path
+
+
+class _AutoInitConnect:
+    """Drop-in replacement for ``aiosqlite.connect(path)`` as an async
+    context manager that first ensures the schema exists.
+
+    Usage is unchanged at call sites::
+
+        async with _connect(database_path) as db:
+            ...
+
+    A fresh database (or a route-level test that never ran app startup)
+    transparently gets the schema created instead of raising
+    ``no such table``.
+    """
+
+    __slots__ = ("_path", "_conn")
+
+    def __init__(self, database_path: str):
+        self._path = normalize_db_path(database_path)
+        self._conn: aiosqlite.Connection | None = None
+
+    async def __aenter__(self) -> aiosqlite.Connection:
+        if self._path not in _initialized_paths:
+            await init_db(self._path)
+            _initialized_paths.add(self._path)
+        self._conn = aiosqlite.connect(self._path)
+        return await self._conn.__aenter__()
+
+    async def __aexit__(self, *exc_info) -> None:
+        if self._conn is not None:
+            await self._conn.__aexit__(*exc_info)
+
+
+def _connect(database_path: str) -> _AutoInitConnect:
+    return _AutoInitConnect(database_path)
+
 
 async def init_db(database_path: str) -> None:
-    async with aiosqlite.connect(database_path) as db:
+    async with aiosqlite.connect(normalize_db_path(database_path)) as db:
         # WAL allows concurrent readers alongside a writer; busy_timeout
         # stops spurious "database is locked" errors under contention.
         await db.execute("PRAGMA journal_mode=WAL;")
@@ -182,7 +256,7 @@ async def init_db(database_path: str) -> None:
 
 async def save_report(database_path: str, query: str, report: str, confidence: float) -> None:
     created_at = datetime.now(timezone.utc).isoformat()
-    async with aiosqlite.connect(database_path) as db:
+    async with _connect(database_path) as db:
         await db.execute(
             "INSERT INTO research_reports (query, report, confidence, created_at) VALUES (?, ?, ?, ?)",
             (query, report, confidence, created_at),
@@ -200,7 +274,7 @@ def _now() -> str:
 
 async def start_research_run(database_path: str, run_id: str, query: str, complexity: str, agent_count: int,
                            max_iterations: int = 3) -> None:
-    async with aiosqlite.connect(database_path) as db:
+    async with _connect(database_path) as db:
         await db.execute(
             "INSERT OR IGNORE INTO research_runs (id, query, complexity, agent_count, status, max_iterations, created_at) "
             "VALUES (?, ?, ?, ?, 'running', ?, ?)",
@@ -216,7 +290,7 @@ async def complete_research_run(
     confidence: float,
     estimated_cost: float | None,
 ) -> None:
-    async with aiosqlite.connect(database_path) as db:
+    async with _connect(database_path) as db:
         await db.execute(
             "UPDATE research_runs SET status = ?, confidence = ?, estimated_cost = ?, completed_at = ? WHERE id = ?",
             (status, confidence, estimated_cost, _now(), run_id),
@@ -239,7 +313,7 @@ async def save_agent_tasks(database_path: str, run_id: str, sub_questions: list)
     ]
     if not rows:
         return
-    async with aiosqlite.connect(database_path) as db:
+    async with _connect(database_path) as db:
         await db.executemany(
             "INSERT INTO agent_tasks (run_id, question, axis, search_type, priority, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
@@ -259,7 +333,7 @@ async def save_sources(database_path: str, run_id: str, search_results: list) ->
         rows.append((run_id, url, float(item.get("reliability_score", 0.0) or 0.0), _now()))
     if not rows:
         return
-    async with aiosqlite.connect(database_path) as db:
+    async with _connect(database_path) as db:
         await db.executemany(
             "INSERT INTO sources (run_id, url, reliability_score, fetched_at) VALUES (?, ?, ?, ?)",
             rows,
@@ -283,7 +357,7 @@ async def save_claims(database_path: str, run_id: str, facts: list) -> None:
     ]
     if not rows:
         return
-    async with aiosqlite.connect(database_path) as db:
+    async with _connect(database_path) as db:
         await db.executemany(
             "INSERT INTO claims (run_id, claim, source_url, confidence, verified, agent, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -311,7 +385,7 @@ async def mark_challenged_claims(database_path: str, run_id: str, contradictions
     if not sides:
         return 0
     flagged = 0
-    async with aiosqlite.connect(database_path) as db:
+    async with _connect(database_path) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute("SELECT id, claim FROM claims WHERE run_id = ?", (run_id,))
         ids = [
@@ -334,7 +408,7 @@ async def record_event(
     started_at: str = "",
     ended_at: str = "",
 ) -> None:
-    async with aiosqlite.connect(database_path) as db:
+    async with _connect(database_path) as db:
         await db.execute(
             "INSERT INTO agent_events (run_id, node, event_type, payload, started_at, ended_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
@@ -348,7 +422,7 @@ async def save_evidence(database_path: str, run_id: str, search_results: list) -
     the rewritten claims): one row per source with its raw snippet."""
     if not search_results:
         return
-    async with aiosqlite.connect(database_path) as db:
+    async with _connect(database_path) as db:
         for item in search_results:
             url = str(item.get("url", "")).strip()
             snippet = str(item.get("snippet", "")).strip()
@@ -378,7 +452,7 @@ async def save_critic_review(database_path: str, run_id: str, iteration: int, cr
         breakdown_json = json.dumps(breakdown or {})
     except (TypeError, ValueError):
         breakdown_json = "{}"
-    async with aiosqlite.connect(database_path) as db:
+    async with _connect(database_path) as db:
         await db.execute(
             "INSERT INTO critic_reviews (run_id, iteration, is_sufficient, reason, confidence, breakdown, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -412,7 +486,7 @@ async def save_decisions(database_path: str, run_id: str, options: list) -> None
     ]
     if not rows:
         return
-    async with aiosqlite.connect(database_path) as db:
+    async with _connect(database_path) as db:
         await db.executemany(
             "INSERT INTO decisions (run_id, option_label, description, is_recommended, rationale, risk_note, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -437,7 +511,7 @@ async def save_contradictions(database_path: str, run_id: str, contradictions: l
     ]
     if not rows:
         return 0
-    async with aiosqlite.connect(database_path) as db:
+    async with _connect(database_path) as db:
         await db.executemany(
             "INSERT INTO contradictions (run_id, claim_a, source_a, claim_b, source_b, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
@@ -465,7 +539,7 @@ async def save_verification_results(database_path: str, run_id: str, facts: list
     ]
     if not rows:
         return 0
-    async with aiosqlite.connect(database_path) as db:
+    async with _connect(database_path) as db:
         await db.executemany(
             "INSERT INTO verification_results (run_id, claim, verified, score, reason, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
@@ -489,7 +563,7 @@ async def save_citations(database_path: str, run_id: str, report_markdown: str) 
         legend = text[match.end():]
     else:
         _, _, legend = text.partition("\nSources:")
-    async with aiosqlite.connect(database_path) as db:
+    async with _connect(database_path) as db:
         for line in legend.splitlines():
             match = _re.match(r"^\[(\d+)\]\s+(\S+)\s+—\s*(\S+)\s*$", line.strip())
             if not match:
@@ -507,7 +581,7 @@ async def save_citations(database_path: str, run_id: str, report_markdown: str) 
 async def save_final_report(database_path: str, run_id: str, report_markdown: str, confidence: float) -> None:
     """Canonical report row keyed by run_id (research_reports stays for
     backward compatibility)."""
-    async with aiosqlite.connect(database_path) as db:
+    async with _connect(database_path) as db:
         await db.execute(
             "INSERT OR REPLACE INTO final_reports (run_id, report_markdown, confidence, generated_at) "
             "VALUES (?, ?, ?, ?)",
@@ -522,7 +596,7 @@ async def load_state_for_resume(database_path: str, run_id: str) -> dict | None:
 
     Returns None if the run doesn't exist or is not resumable.
     """
-    async with aiosqlite.connect(database_path) as db:
+    async with _connect(database_path) as db:
         db.row_factory = aiosqlite.Row
 
         cur = await db.execute(
@@ -633,7 +707,7 @@ async def load_state_for_resume(database_path: str, run_id: str) -> dict | None:
 
 async def mark_run_resumable_reset(database_path: str, run_id: str) -> None:
     """Flip a failed/timeout run back to 'running' when a resume starts."""
-    async with aiosqlite.connect(database_path) as db:
+    async with _connect(database_path) as db:
         await db.execute(
             "UPDATE research_runs SET status = 'running', completed_at = NULL WHERE id = ?",
             (run_id,),
@@ -648,7 +722,7 @@ async def get_run_trace(database_path: str, run_id: str) -> dict | None:
     agent_tasks / sources / claims so the trace answers "why did this report
     reach this confidence", not just "what was the answer".
     """
-    async with aiosqlite.connect(database_path) as db:
+    async with _connect(database_path) as db:
         db.row_factory = aiosqlite.Row
 
         cur = await db.execute("SELECT * FROM research_runs WHERE id = ?", (run_id,))

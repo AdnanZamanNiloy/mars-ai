@@ -27,6 +27,30 @@ def fake_groq_json():
 
 
 @pytest.fixture(autouse=True)
+def _disable_llm_cache(monkeypatch):
+    """The LLM response cache sits ABOVE httpx: a warm disk entry would
+    bypass respx mocks entirely and make HTTP-level assertions flaky
+    (and order-dependent across pytest invocations). Every test runs
+    uncached; dedicated cache tests re-enable it explicitly."""
+    from app.core import llm_cache
+
+    monkeypatch.setattr(llm_cache, "_force_disabled", True)
+
+
+@pytest.fixture(autouse=True)
+def _disable_live_citation_check(monkeypatch):
+    """Unit tests must never fire real HTTP at cited URLs. The synthesizer
+    node imports check_citations at call time, so patching the module
+    attribute covers every path; dedicated citation tests re-enable it."""
+    from app.agents import citation_check
+
+    async def _noop(answer, answer_support, **kw):
+        return {"checked": 0, "sources": [], "summary": {}, "enabled": False}
+
+    monkeypatch.setattr(citation_check, "check_citations", _noop)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_provider_store(monkeypatch):
     """Unit tests must never read the developer's real research.db: an
     active provider selected in the Providers tab would hijack every

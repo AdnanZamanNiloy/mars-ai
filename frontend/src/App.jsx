@@ -142,6 +142,13 @@ function blankRun(query, mode) {
     confidence: null,
     degraded: [],
     answerSupport: null,
+    // v2 signals: dependency-wave plan shape, live budget ledger,
+    // per-source citation health, contradiction count.
+    waves: [],
+    waveReport: [],
+    budget: null,
+    citationHealth: null,
+    contradictions: 0,
     done: false,
     error: "",
     resumable: false,
@@ -249,6 +256,7 @@ export default function App() {
         patchRun(tempId, {
           plan: Array.isArray(evt.items) ? evt.items : [],
           orchestration: evt.orchestration || {},
+          waves: Array.isArray(evt.waves) ? evt.waves : [],
         });
         pushTrace({ text: `Strategy created (${(evt.items || []).length} agents)`, kind: "done" });
         break;
@@ -263,6 +271,7 @@ export default function App() {
               ? { ...m, run: { ...m.run,
                   critiques: [...m.run.critiques, { iteration: evt.iteration, reason: evt.reason || "" }],
                   breakdown: evt.breakdown && typeof evt.breakdown === "object" ? evt.breakdown : m.run.breakdown,
+                  budget: evt.budget && typeof evt.budget === "object" ? evt.budget : m.run.budget,
                 } }
               : m
           ));
@@ -306,13 +315,18 @@ export default function App() {
             confidence: typeof evt.confidence === "number" ? evt.confidence : null,
             degraded: Array.isArray(evt.degraded) ? evt.degraded : [],
             answerSupport: typeof evt.answer_support === "number" ? evt.answer_support : null,
+            budget: evt.budget && typeof evt.budget === "object" ? evt.budget : m.run.budget,
+            waveReport: Array.isArray(evt.wave_report) ? evt.wave_report : m.run.waveReport,
+            citationHealth: evt.citation_health && typeof evt.citation_health === "object"
+              ? evt.citation_health : m.run.citationHealth,
             done: true,
             resuming: false,
           };
           if (run.runId) {
             saveMissions(upsertMission({
               runId: run.runId, query: run.query, mode: run.mode,
-              status: "completed", confidence: run.confidence, cost: null,
+              status: "completed", confidence: run.confidence,
+              cost: run.budget && typeof run.budget.spent_usd === "number" ? run.budget.spent_usd : null,
               degraded: run.degraded,
             }));
           }

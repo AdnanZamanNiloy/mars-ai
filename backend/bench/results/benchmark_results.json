@@ -1,0 +1,286 @@
+{
+  "suite": "mars-offline-benchmarks",
+  "version": "2.0",
+  "ran_at": "2026-09-12T11:08:35.648311+00:00",
+  "python": "3.12.14",
+  "platform": "Linux-5.10.134-013.15.kangaroo.al8.x86_64-x86_64-with-glibc2.41",
+  "quick": false,
+  "components": {
+    "verification": {
+      "n": 16,
+      "tp": 8,
+      "fp": 0,
+      "fn": 0,
+      "tn": 8,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "accuracy": 1.0,
+      "latency_ms": 2.45,
+      "per_case_us": 152.9,
+      "misses": []
+    },
+    "hallucination": {
+      "n": 6,
+      "rejected": 6,
+      "false_accepts": 0,
+      "hallucination_leak_rate": 0.0,
+      "rejection_rate": 1.0,
+      "leaked": []
+    },
+    "citation_support": {
+      "n": 5,
+      "correct": 5,
+      "accuracy": 1.0,
+      "overall_rate": 0.8,
+      "numeric_rate": 1.0,
+      "errors": []
+    },
+    "contradictions": {
+      "n": 12,
+      "tp": 6,
+      "fp": 0,
+      "fn": 0,
+      "tn": 6,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "kinds_detected": {
+        "numeric": 2,
+        "polarity": 3,
+        "temporal": 1
+      },
+      "latency_ms": 4.02,
+      "errors": []
+    },
+    "confidence_calibration": {
+      "n": 4,
+      "in_band": 4,
+      "in_band_rate": 1.0,
+      "monotonic_ordering": true,
+      "scores": {
+        "strong": 0.823,
+        "moderate": 0.714,
+        "weak": 0.283,
+        "conflicted": 0.75
+      },
+      "rows": [
+        {
+          "scenario": "strong",
+          "overall": 0.823,
+          "band": [
+            0.7,
+            1.0
+          ],
+          "in_band": true,
+          "signals": {
+            "source_quality": 0.917,
+            "source_diversity": 0.8,
+            "citation_coverage": 1.0,
+            "claim_verification_strength": 0.8,
+            "cross_source_agreement": 0.333,
+            "critic_survival": 1.0,
+            "freshness": 0.0
+          }
+        },
+        {
+          "scenario": "moderate",
+          "overall": 0.714,
+          "band": [
+            0.45,
+            0.75
+          ],
+          "in_band": true,
+          "signals": {
+            "source_quality": 0.883,
+            "source_diversity": 1.0,
+            "citation_coverage": 1.0,
+            "claim_verification_strength": 0.517,
+            "cross_source_agreement": 0.0,
+            "critic_survival": 0.6,
+            "freshness": 0.0
+          }
+        },
+        {
+          "scenario": "weak",
+          "overall": 0.283,
+          "band": [
+            0.0,
+            0.45
+          ],
+          "in_band": true,
+          "signals": {
+            "source_quality": 0.29,
+            "source_diversity": 1.0,
+            "citation_coverage": 0.0,
+            "claim_verification_strength": 0.1,
+            "cross_source_agreement": 0.0,
+            "critic_survival": 0.6,
+            "freshness": 0.0
+          }
+        },
+        {
+          "scenario": "conflicted",
+          "overall": 0.75,
+          "band": [
+            0.0,
+            0.8
+          ],
+          "in_band": true,
+          "signals": {
+            "source_quality": 0.95,
+            "source_diversity": 1.0,
+            "citation_coverage": 1.0,
+            "claim_verification_strength": 0.8,
+            "cross_source_agreement": 0.667,
+            "critic_survival": 0.6,
+            "freshness": 0.0
+          }
+        }
+      ]
+    },
+    "semantic_engine": {
+      "pairs": 20,
+      "spearman_vs_labels": 0.7094,
+      "pair_latency_us": 140.7,
+      "dedup": {
+        "n": 10,
+        "precision": 1.0,
+        "recall": 0.6,
+        "f1": 0.75,
+        "threshold": 0.86
+      },
+      "matrix_ms": {
+        "100": 648.65,
+        "300": 667.91
+      },
+      "score_label_sample": [
+        {
+          "a": "Solar capacity grew 40% in 2024",
+          "b": "Solar capacity grew 40% in 2024",
+          "score": 1.0,
+          "label": 1.0
+        },
+        {
+          "a": "Global solar capacity grew by 40% in 202",
+          "b": "Global solar capacity grew 40% in 2024",
+          "score": 1.0,
+          "label": 0.95
+        },
+        {
+          "a": "Wind and solar capacity roughly doubled ",
+          "b": "Capacity from wind and solar nearly doub",
+          "score": 0.449,
+          "label": 0.85
+        },
+        {
+          "a": "The central bank raised interest rates b",
+          "b": "The monetary authority increased its pol",
+          "score": 0.229,
+          "label": 0.75
+        },
+        {
+          "a": "Battery pack prices fell 14% in 2023",
+          "b": "Lithium-ion battery costs declined sharp",
+          "score": 0.039,
+          "label": 0.6
+        },
+        {
+          "a": "Solar capacity grew 40% in 2024",
+          "b": "Wind capacity grew 40% in 2024",
+          "score": 0.807,
+          "label": 0.75
+        }
+      ]
+    },
+    "llm_cache": {
+      "prompts": 24,
+      "unique": 8,
+      "provider_calls_first_pass": 8,
+      "provider_calls_second_pass": 8,
+      "cache_hit_ratio_first_pass": 0.6667,
+      "uncached_pass_ms": 95.46,
+      "cached_pass_ms": 15.24,
+      "speedup": 6.26,
+      "tokens_saved_per_repeat": 70,
+      "note": "second pass serves 24/24 from cache; provider_calls unchanged"
+    },
+    "e2e_pipeline": {
+      "wall_sec": 0.264,
+      "graph_snapshots": 13,
+      "iterations": 2,
+      "planned_sub_questions": 4,
+      "planned_axes": [
+        "criticism",
+        "definition",
+        "evidence"
+      ],
+      "waves_executed": 2,
+      "wave_detail": [
+        {
+          "wave": 0,
+          "contracts": 3,
+          "facts_extracted": 8,
+          "with_prerequisites": false
+        },
+        {
+          "wave": 1,
+          "contracts": 1,
+          "facts_extracted": 4,
+          "with_prerequisites": true
+        }
+      ],
+      "facts_extracted": 4,
+      "facts_verified": 4,
+      "contradictions_found": 0,
+      "answer_support_rate": 1.0,
+      "citation_health": {
+        "ok": 0,
+        "warn": 0,
+        "broken": 3,
+        "bad": 0,
+        "unchecked": 0
+      },
+      "confidence": 0.775,
+      "confidence_signals": {
+        "source_quality": 0.75,
+        "source_diversity": 1.0,
+        "citation_coverage": 1.0,
+        "claim_verification_strength": 1.0,
+        "cross_source_agreement": 0.5,
+        "critic_survival": 1.0,
+        "freshness": 0.0,
+        "axis_coverage": 0.0
+      },
+      "report_chars": 2173,
+      "llm_calls": 9,
+      "llm_call_stages": {
+        "planner": 2,
+        "critic": 3,
+        "summarizer": 4
+      },
+      "budget": {
+        "llm_calls": 9,
+        "spent_tokens": 22423,
+        "spent_usd": 0.010409,
+        "search_calls": 0,
+        "utilization": 0.15
+      },
+      "stopped_sufficient": true
+    },
+    "latency": {
+      "matrix_60_facts_ms": 365.71,
+      "matrix_200_facts_ms": 924.84,
+      "cross_40x200_ms": 16.01,
+      "contradictions_60_facts_ms": 406.48,
+      "dedupe_60_facts_ms": 396.0,
+      "answer_support_40sent_ms": 0.4
+    },
+    "memory": {
+      "rss_before_kib": 114584,
+      "rss_after_kib": 136388,
+      "delta_kib": 21804,
+      "note": "ru_maxrss is process-lifetime max; delta bounds engine cost"
+    }
+  }
+}

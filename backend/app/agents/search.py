@@ -727,6 +727,18 @@ class SearchClient:
         if not contracts:
             return []
 
+        # Budget accounting (Feature 12): every provider-backed contract
+        # search counts against the run ledger when one is active. Recorded
+        # before execution so a mid-batch failure still shows the spend.
+        try:
+            from app.core.usage import get_run_usage
+
+            usage = get_run_usage()
+            if usage is not None:
+                usage.record_search("multi", stage="search", count=len(contracts))
+        except Exception:
+            pass
+
         factories = [(lambda c=c: self._search(c)) for c in contracts]
         batches = await gather_bounded(factories, self._search_limit)
 

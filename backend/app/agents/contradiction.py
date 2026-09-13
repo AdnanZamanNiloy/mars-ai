@@ -109,29 +109,39 @@ def detect_contradictions(
 
     found: List[Contradiction] = []
     for raw in find_contradictions([f for f in (facts or []) if isinstance(f, dict)]):
-        pair = _report_pair(raw, divergence)
-        if pair is None:
-            continue
-        rel = pair["relative_divergence"]
+        kind = str(raw.get("kind", "numeric") or "numeric")
+        severity = float(raw.get("severity", 0.0) or 0.0)
+        raw_values = dict(raw.get("values") or {})
+        if kind == "numeric":
+            pair = _report_pair(raw, divergence)
+            if pair is None:
+                continue
+            rel = pair["relative_divergence"]
+            severity = max(severity, min(1.0, 0.35 + rel))
+            values = {
+                "unit": str(raw_values.get("unit", "dimensionless") or "dimensionless"),
+                "value_a": pair["value_a"],
+                "value_b": pair["value_b"],
+                "relative_divergence": round(rel, 4),
+                "topic_similarity": float(raw.get("topic_similarity", 0.0)),
+            }
+            detail = str(raw.get("note", ""))
+        else:
+            values = {
+                **raw_values,
+                "topic_similarity": float(raw.get("topic_similarity", 0.0)),
+            }
+            detail = str(raw.get("note", ""))
         found.append(
             Contradiction(
                 claim_a=str(raw.get("claim_a", "")),
                 claim_b=str(raw.get("claim_b", "")),
                 source_a=str(raw.get("source_a", "") or ""),
                 source_b=str(raw.get("source_b", "") or ""),
-                kind="numeric",
-                severity=min(1.0, 0.35 + rel),
-                detail=str(raw.get("note", "")),
-                values={
-                    # The live engine normalizes scales but does not extract
-                    # units yet; numeric_ranges groups these under the
-                    # dimensionless bucket until it does.
-                    "unit": "dimensionless",
-                    "value_a": pair["value_a"],
-                    "value_b": pair["value_b"],
-                    "relative_divergence": round(rel, 4),
-                    "topic_similarity": float(raw.get("topic_similarity", 0.0)),
-                },
+                kind=kind,
+                severity=severity,
+                detail=detail,
+                values=values,
                 # The live engine already skips same-source pairs.
                 intra_source=False,
             )

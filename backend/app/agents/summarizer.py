@@ -347,7 +347,16 @@ async def summarizer_agent(
     query: str,
     search_results: List[Dict[str, str]],
     specialist_role: str = "general",
+    prior_findings: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
+    """Extract attributable claims from one contract's documents.
+
+    `prior_findings` (wave execution): claims extracted by earlier dependency
+    waves. Dependent contracts ("compare X vs Y" after "what is X") receive
+    them as grounding context so their extraction can resolve references the
+    raw pages leave ambiguous. Bounded to 5 claims so the context never crowds
+    out the contract's own evidence.
+    """
     quality_results = filter_search_results_by_domain(search_results)
     if not quality_results:
         return []
@@ -366,8 +375,32 @@ async def summarizer_agent(
         str(item.get("url", "")): item for item in quality_results if item.get("url")
     }
 
+    prior_block = ""
+    prior_digest = ""
+    if prior_findings:
+        kept = [
+            f for f in prior_findings
+            if isinstance(f, dict) and str(f.get("claim", "")).strip()
+        ][:5]
+        if kept:
+            lines = []
+            for f in kept:
+                claim = str(f["claim"]).strip()[:120]
+                domain = str(f.get("source", "")).split("/")[2] if str(f.get("source", "")).startswith("http") else ""
+                lines.append(f"- {claim}" + (f" (source: {domain})" if domain else ""))
+            prior_block = (
+                "Prerequisite findings already established by earlier research "
+                "waves (use as grounding; do NOT re-extract these; cite your OWN "
+                f"documents for anything you add):\n" + "\n".join(lines) + "\n\n"
+            )
+            import hashlib as _hashlib
+            prior_digest = _hashlib.sha256(
+                "\n".join(str(f.get("claim", "")) for f in kept).encode("utf-8", "replace")
+            ).hexdigest()[:16]
+
     user_prompt = (
         f"Research query: {query}\n\n"
+        f"{prior_block}"
         f"Sources ({len(compact_results)}):\n{compact_results}\n\n"
         "Extract high-quality claims as JSON in this schema: "
         '{"facts": [{"claim": "...", "source": "https://...", "confidence": 0.0, '
@@ -385,6 +418,7 @@ async def summarizer_agent(
         specialist_role,          # role changes the prompt, so it must key the cache
         query,
         tuple(sorted(item.get("url", "") for item in compact_results)),
+        prior_digest,             # prerequisite context changes the extraction
     )
     try:
         cached = cache.get(key)

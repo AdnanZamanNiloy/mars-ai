@@ -38,6 +38,8 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from difflib import SequenceMatcher
+
+from app.core.semantic import cross_similarity, pair_similarity, similarity_matrix
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
@@ -130,30 +132,15 @@ def _jaccard(a: Set[str], b: Set[str]) -> float:
 
 
 def _semantic_similarity(a: str, b: str) -> float:
-    """Blended char-ratio + token-Jaccard similarity in [0, 1].
+    """Hybrid char-ratio + token-Jaccard + TF-IDF similarity in [0, 1].
 
-    The Jaccard term is computed first and used as a gate: SequenceMatcher is
-    ~100x more expensive, and two claims sharing under 15% of their vocabulary
-    can never reach the 0.86 merge threshold (max blended score with
-    jaccard=0.15 is 0.6*1.0 + 0.4*0.15 = 0.66). Skipping the char diff in
-    that case is the difference between a 40ms and a 4s dedup pass on a deep
-    run, with identical output.
+    Delegates to the shared semantic engine (app/core/semantic.py): the
+    TF-IDF term catches paraphrase-level overlap the pure char-diff missed,
+    while cheap gates keep the fast path fast. Blend weights were calibrated
+    so the 0.86 dedup threshold and the 0.50-0.86 contradiction band keep
+    their historical meaning for near-duplicates.
     """
-    a_norm = normalize_claim_text(a).lower()
-    b_norm = normalize_claim_text(b).lower()
-    if not a_norm or not b_norm:
-        return 0.0
-    if a_norm == b_norm:
-        return 1.0
-
-    tok_a = _tokenize(a_norm)
-    tok_b = _tokenize(b_norm)
-    jaccard = _jaccard(tok_a, tok_b)
-    if jaccard < 0.15:
-        return round(0.4 * jaccard, 4)
-
-    seq_ratio = SequenceMatcher(None, a_norm, b_norm).ratio()
-    return 0.6 * seq_ratio + 0.4 * jaccard
+    return pair_similarity(a, b)
 
 
 def semantic_similarity(a: str, b: str) -> float:
@@ -338,8 +325,13 @@ _DIRECTION_UP = {
     "increase", "increases", "increased", "increasing", "rise", "rises",
     "rising", "rose", "grow", "grows", "growing", "grew", "growth",
     "higher", "surge", "surged", "expand", "expanded", "expansion",
-    "improve", "improved", "gain", "gained", "up", "accelerate",
+    "improve", "improved", "gain", "gained", "accelerate",
     "accelerated", "more", "exceeds", "exceeded", "outperforms",
+    # state assertions: "approved" vs "not approved" is the cleanest
+    # polarity flip in regulatory/medical text (benchmark case).
+    "approved", "approves", "authorized", "permitted", "allowed",
+    "effective", "works", "succeeded", "succeeds", "passed", "valid",
+    "safe", "confirmed", "supports", "supported", "enabled",
 }
 
 _DIRECTION_DOWN = {
@@ -347,8 +339,10 @@ _DIRECTION_DOWN = {
     "falling", "fell", "decline", "declines", "declined", "declining",
     "drop", "drops", "dropped", "lower", "shrink", "shrank", "reduce",
     "reduced", "reduction", "contract", "contracted", "worsen", "worsened",
-    "loss", "lose", "lost", "down", "decelerate", "less", "below",
-    "underperforms",
+    "loss", "lose", "lost", "decelerate", "less", "below",
+    "underperforms", "rejected", "rejects", "banned", "prohibited",
+    "blocked", "failed", "failing", "ineffective", "harmful", "unsafe",
+    "invalid", "refuted", "disabled", "stalled", "weakened",
 }
 
 
@@ -358,6 +352,10 @@ def claim_polarity(text: str) -> int:
     Deliberately coarse. Its only job is to catch the case lexical overlap
     cannot see: a claim asserting the OPPOSITE of its source shares nearly
     all of the source's vocabulary and therefore verified cleanly before.
+    Bare "up"/"down" are intentionally excluded — they leak out of
+    hyphenated words ("follow-up", "setup") and flip real verdicts (a
+    benchmark-found bug: "failed to reduce" vs "led to a reduction" read as
+    the same polarity because "up" from "follow-up" canceled "reduction").
     """
     tokens = re.findall(r"[a-z']+", (text or "").lower())
     flat = {t.replace("'", "") for t in tokens}
@@ -509,10 +507,15 @@ def dedupe_semantic_facts(
         merged_claims          — the alternate phrasings seen
       Confidence is nudged up (capped at 0.97) per independent domain, which
       is what "cross-source agreement" means operationally.
-    """
-    deduped: List[Dict[str, Any]] = []
-    token_cache: List[Set[str]] = []
 
+    Performance: the full n x n hybrid-similarity matrix is computed once
+    (vectorized TF-IDF matmul + gated lexical enrichment) and the greedy
+    merge loop then runs on O(1) matrix lookups instead of re-scoring every
+    candidate/kept pair — deep runs with hundreds of facts drop from seconds
+    of SequenceMatcher work to milliseconds.
+    """
+    # Pass 1: normalize/sanitize candidates, keep original order.
+    candidates: List[Dict[str, Any]] = []
     for item in facts or []:
         if not isinstance(item, dict):
             continue
@@ -532,41 +535,70 @@ def dedupe_semantic_facts(
         candidate["confidence"] = confidence
         candidate.setdefault("agent", str(item.get("agent", "") or ""))
         candidate.setdefault("sub_question", str(item.get("sub_question", "") or ""))
-        candidate_tokens = _tokenize(claim)
+        candidates.append(candidate)
 
-        merge_index = -1
-        for idx, kept in enumerate(deduped):
-            if _jaccard(candidate_tokens, token_cache[idx]) < 0.15:
-                continue
-            if _semantic_similarity(claim, str(kept.get("claim", ""))) >= threshold:
-                merge_index = idx
+    if len(candidates) <= 1:
+        for candidate in candidates:
+            prior_sources = [
+                str(u) for u in (candidate.get("corroborating_sources") or []) if str(u).strip()
+            ]
+            if not any(canonical_url(u) == canonical_url(candidate["source"]) for u in prior_sources):
+                prior_sources.append(candidate["source"])
+            try:
+                prior_count = int(candidate.get("corroboration_count", 1) or 1)
+            except (TypeError, ValueError):
+                prior_count = 1
+            candidate["corroborating_sources"] = prior_sources
+            candidate["corroboration_count"] = max(len(prior_sources), prior_count, 1)
+        return candidates
+
+    # Pass 2: one vectorized similarity matrix over all claims.
+    claims = [c["claim"] for c in candidates]
+    sim = similarity_matrix(claims)
+    # Polarity guard: "X" and "not X" score ~0.90 — above the merge
+    # threshold — and dedup used to fold them together, counting the
+    # negating source as CORROBORATION of the claim (benchmark-found bug).
+    polarities = [claim_polarity(c) for c in claims]
+
+    # Pass 3: greedy incremental merge on matrix lookups.
+    deduped: List[Dict[str, Any]] = []   # merged facts in emission order
+    kept_idx: List[int] = []             # original-claim index backing each kept row
+    for i, candidate in enumerate(candidates):
+        merge_row = -1
+        for row, orig in enumerate(kept_idx):
+            if float(sim[i, orig]) >= threshold:
+                pa, pb = polarities[i], polarities[orig]
+                if pa != 0 and pb != 0 and pa != pb:
+                    continue  # a claim never merges with its own negation
+                merge_row = row
                 break
 
-        if merge_index == -1:
+        if merge_row == -1:
             # Corroboration already established upstream (e.g. the same claim
             # was matched across pages during extraction) must not be reset to
             # 1 just because this pass saw the fact once. Dedup only ever adds
             # evidence of agreement; it never removes it.
             prior_sources = [
-                str(u) for u in (item.get("corroborating_sources") or []) if str(u).strip()
+                str(u) for u in (candidate.get("corroborating_sources") or []) if str(u).strip()
             ]
-            if not any(canonical_url(u) == canonical_url(source) for u in prior_sources):
-                prior_sources.append(source)
+            if not any(canonical_url(u) == canonical_url(candidate["source"]) for u in prior_sources):
+                prior_sources.append(candidate["source"])
             try:
-                prior_count = int(item.get("corroboration_count", 1) or 1)
+                prior_count = int(candidate.get("corroboration_count", 1) or 1)
             except (TypeError, ValueError):
                 prior_count = 1
             candidate["corroborating_sources"] = prior_sources
             candidate["corroboration_count"] = max(len(prior_sources), prior_count, 1)
             deduped.append(candidate)
-            token_cache.append(candidate_tokens)
+            kept_idx.append(i)
             continue
 
-        kept = deduped[merge_index]
+        kept = deduped[merge_row]
+        source = candidate["source"]
         corroborating: List[str] = list(kept.get("corroborating_sources") or [])
         known_domains = {extract_domain(u) for u in corroborating}
         new_domain = extract_domain(source)
-        incoming = [str(u) for u in (item.get("corroborating_sources") or []) if str(u).strip()]
+        incoming = [str(u) for u in (candidate.get("corroborating_sources") or []) if str(u).strip()]
         if source not in incoming:
             incoming.append(source)
         seen_documents = {canonical_url(u) for u in corroborating}
@@ -575,11 +607,12 @@ def dedupe_semantic_facts(
                 corroborating.append(extra)
                 seen_documents.add(canonical_url(extra))
 
+        claim = candidate["claim"]
         variants: List[str] = list(kept.get("merged_claims") or [])
         if claim != str(kept.get("claim", "")) and claim not in variants:
             variants.append(claim)
 
-        winner = candidate if confidence > float(kept.get("confidence", 0.0) or 0.0) else kept
+        winner = candidate if candidate["confidence"] > float(kept.get("confidence", 0.0) or 0.0) else kept
         merged = dict(winner)
         merged["corroborating_sources"] = corroborating
         merged["corroboration_count"] = len(corroborating)
@@ -598,8 +631,9 @@ def dedupe_semantic_facts(
             merged["verification_score"] = kept.get("verification_score")
             merged["verification_reason"] = kept.get("verification_reason")
 
-        deduped[merge_index] = merged
-        token_cache[merge_index] = _tokenize(str(merged.get("claim", "")))
+        # The kept row is now backed by the winner's original claim text.
+        kept_idx[merge_row] = i if winner is candidate else kept_idx[merge_row]
+        deduped[merge_row] = merged
 
     return deduped
 
@@ -614,19 +648,11 @@ LEGEND_RE = re.compile(r"^\[(\d+)\]\s+\S.*?—\s*(\S+)\s*$")
 SUPPORT_THRESHOLD = 0.30
 
 
-def verify_answer_support(
-    answer: str,
-    facts: List[Dict[str, Any]],
-    threshold: float = SUPPORT_THRESHOLD,
-) -> Dict[str, Any]:
-    """Post-synthesis check: every cited sentence must overlap verified
-    evidence from the source it cites, AND every significant number in that
-    sentence must appear in that source's evidence.
+def parse_answer_legend(answer: str) -> Tuple[str, Dict[int, str]]:
+    """Split an emitted answer into (body, {marker_number: url}).
 
-    The legend is parsed back out of the answer itself, so numbering can never
-    drift from what was emitted. Sentences without markers count as uncited
-    (not failed). Return shape is a superset of the previous one: existing
-    keys are unchanged, `numeric_failures` and `numeric_rate` are new.
+    Shared by verify_answer_support and the citation health check so the
+    two can never disagree about which source a [n] marker points at.
     """
     match = SOURCES_HEADING_RE.search(answer or "")
     if match:
@@ -643,6 +669,29 @@ def verify_answer_support(
                 legend_urls[int(m.group(1))] = m.group(2)
             except (TypeError, ValueError):
                 continue
+    return body, legend_urls
+
+
+def verify_answer_support(
+    answer: str,
+    facts: List[Dict[str, Any]],
+    threshold: float = SUPPORT_THRESHOLD,
+) -> Dict[str, Any]:
+    """Post-synthesis check: every cited sentence must overlap verified
+    evidence from the source it cites, AND every significant number in that
+    sentence must appear in that source's evidence.
+
+    The legend is parsed back out of the answer itself, so numbering can never
+    drift from what was emitted. Sentences without markers count as uncited
+    (not failed). Return shape is a superset of the previous one: existing
+    keys are unchanged; `numeric_failures`, `numeric_rate` and
+    `sentence_details` (per-sentence support score + status, consumed by the
+    citation-status badge and the benchmark suite) are new.
+
+    Scoring is batched: one cross-similarity matrix (sentences x claims)
+    replaces the per-pair SequenceMatcher loop.
+    """
+    body, legend_urls = parse_answer_legend(answer)
 
     verified_by_url: Dict[str, List[str]] = {}
     for fact in facts or []:
@@ -659,16 +708,55 @@ def verify_answer_support(
                 verified_by_url.setdefault(extra_url, []).append(claim)
 
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", body) if s.strip()]
+
+    # ---- Batch support scoring -------------------------------------------
+    cited_rows: List[int] = []          # sentence indexes that carry markers
+    cited_markers: Dict[int, List[int]] = {}
+    claim_pool: List[str] = []          # unique verified claims
+    claim_index: Dict[str, int] = {}
+    sentence_claim_cols: Dict[int, List[int]] = {}
+
+    for si, sentence in enumerate(sentences):
+        numbers = [int(n) for n in CITATION_RE.findall(sentence)]
+        if not numbers:
+            continue
+        cited_rows.append(si)
+        cited_markers[si] = numbers
+        cols: List[int] = []
+        for n in numbers:
+            for claim in verified_by_url.get(legend_urls.get(n, ""), []):
+                if claim not in claim_index:
+                    claim_index[claim] = len(claim_pool)
+                    claim_pool.append(claim)
+                col = claim_index[claim]
+                if col not in cols:
+                    cols.append(col)
+        sentence_claim_cols[si] = cols
+
+    support_scores: Dict[int, float] = {}
+    if cited_rows and claim_pool:
+        cited_texts = [sentences[si] for si in cited_rows]
+        matrix = cross_similarity(cited_texts, claim_pool)
+        for row, si in enumerate(cited_rows):
+            cols = sentence_claim_cols[si]
+            support_scores[si] = float(max(matrix[row, c] for c in cols)) if cols else 0.0
+
+    # ---- Sentence-level verdicts -----------------------------------------
     cited = supported = uncited = 0
     numeric_checked = numeric_ok = 0
     unsupported: List[str] = []
     numeric_failures: List[str] = []
+    sentence_details: List[Dict[str, Any]] = []
 
-    for sentence in sentences:
-        numbers = [int(n) for n in CITATION_RE.findall(sentence)]
-        if not numbers:
+    for si, sentence in enumerate(sentences):
+        numbers = cited_markers.get(si)
+        if numbers is None:
             if len(sentence.split()) >= 8:
                 uncited += 1
+                sentence_details.append({
+                    "sentence": sentence[:160], "markers": [], "status": "uncited",
+                    "support": None,
+                })
             continue
         cited += 1
 
@@ -676,9 +764,7 @@ def verify_answer_support(
         for n in numbers:
             cited_claims.extend(verified_by_url.get(legend_urls.get(n, ""), []))
 
-        hit = any(
-            _semantic_similarity(sentence, claim) >= threshold for claim in cited_claims
-        )
+        hit = support_scores.get(si, 0.0) >= threshold
 
         sentence_numbers = _significant_quantities(CITATION_RE.sub("", sentence))
         if sentence_numbers:
@@ -692,8 +778,18 @@ def verify_answer_support(
 
         if hit:
             supported += 1
-        elif sentence[:160] not in numeric_failures:
+            status = "supported"
+        elif sentence[:160] in numeric_failures:
+            status = "numeric_failure"
+        else:
             unsupported.append(sentence[:160])
+            status = "unsupported"
+        sentence_details.append({
+            "sentence": sentence[:160],
+            "markers": numbers,
+            "status": status,
+            "support": round(support_scores.get(si, 0.0), 4),
+        })
 
     return {
         "sentences": len(sentences),
@@ -704,6 +800,7 @@ def verify_answer_support(
         "rate": (supported / cited) if cited else None,
         "numeric_failures": numeric_failures,
         "numeric_rate": (numeric_ok / numeric_checked) if numeric_checked else None,
+        "sentence_details": sentence_details,
     }
 
 

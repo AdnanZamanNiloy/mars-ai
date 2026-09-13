@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
+from app.core.usage import clear_run_usage, start_run_usage
 from app.core.config import get_settings
 from app.core.degradation import clear_fallbacks, reset_fallbacks, take_fallbacks
 from app.db.sqlite import (
@@ -250,6 +251,11 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
     async def event_stream() -> AsyncGenerator[str, None]:
         bind_request_context(request_id=request_id)
         reset_fallbacks()
+        # Run ledger (Feature 12): per-run budget + usage accounting. LLM
+        # calls, searches and cache hits record here; the depth controller
+        # consults it before every expansion; the final event persists the
+        # estimated cost (previously always None).
+        usage = start_run_usage(request_id, settings, mode=str(payload.mode or "standard"))
         try:
             state = build_initial_state(
                 payload.query,
@@ -356,6 +362,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                                 "plan",
                                 items=plan_items_for_event(snapshot.get("sub_questions", [])),
                                 orchestration=snapshot.get("orchestration", {}),
+                                waves=snapshot.get("execution_waves", []) or [],
                             )
                             emitted_plan = True
                             await _persist(save_agent_tasks(
@@ -393,7 +400,8 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                             reason = critique.get("reason", "No reason provided")
                             yield event_line("critic", iteration=iteration, reason=reason,
                                              breakdown=snapshot.get("confidence_breakdown") or {},
-                                             redteam=snapshot.get("redteam") or {})
+                                             redteam=snapshot.get("redteam") or {},
+                                             budget=usage.snapshot())
                             last_iteration = iteration
                             await _persist(record_event(
                                 settings.database_url, request_id, "critic", "end",
@@ -458,7 +466,8 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
             except TimeoutError:
                 await _persist(complete_research_run(
                     settings.database_url, request_id, "timeout",
-                    confidence=0.0, estimated_cost=None,
+                    confidence=0.0,
+                    estimated_cost=round(usage.snapshot().get("spent_usd", 0.0) or 0.0, 6),
                 ))
                 yield event_line(
                     "error",
@@ -471,7 +480,8 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
             except Exception as exc:
                 await _persist(complete_research_run(
                     settings.database_url, request_id, "failed",
-                    confidence=0.0, estimated_cost=None,
+                    confidence=0.0,
+                    estimated_cost=round(usage.snapshot().get("spent_usd", 0.0) or 0.0, 6),
                 ))
                 message = str(exc)
                 if "No LLM provider configured" in message:
@@ -489,11 +499,12 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
             final_state: Dict[str, Any] = last_snapshot
             report = str(final_state.get("final_report", ""))
             confidence = float(final_state.get("confidence", 0.0))
+            budget_snapshot = usage.snapshot()
 
             await _persist(complete_research_run(
                 settings.database_url, request_id, "completed",
                 confidence=confidence,
-                estimated_cost=None,
+                estimated_cost=round(float(budget_snapshot.get("spent_usd", 0.0) or 0.0), 6),
             ))
             # Challenged flags land once contradictions are known (end of run).
             await _persist(mark_challenged_claims(
@@ -509,12 +520,15 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
             ))
 
             if report:
-                await save_report(
+                # Persistence must never kill a completed run — save_report
+                # was previously the one unwrapped call; a fresh install or
+                # unwritable DB killed the stream right before delivery.
+                await _persist(save_report(
                     database_path=settings.database_url,
                     query=payload.query,
                     report=report,
                     confidence=confidence,
-                )
+                ))
                 # Canonical per-run report row (3.8).
                 await _persist(save_final_report(
                     settings.database_url, request_id, report, confidence,
@@ -530,10 +544,13 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                     ))
                 support = last_snapshot.get("answer_support", {}) or {}
                 yield event_line("final_report", report=report, confidence=confidence, degraded=degraded,
-                                 answer_support=support.get("rate"))
+                                 answer_support=support.get("rate"),
+                                 budget=budget_snapshot,
+                                 wave_report=last_snapshot.get("wave_report") or [],
+                                 citation_health=last_snapshot.get("citation_health") or {})
             else:
                 yield event_line("final_report", report="No final report generated.", confidence=confidence,
-                                 degraded=take_fallbacks())
+                                 degraded=take_fallbacks(), budget=budget_snapshot)
 
             # Decision Layer rows (3.5): one per strategic option.
             decision_options = last_snapshot.get("decision_options") or []
@@ -545,6 +562,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 ])
         finally:
             clear_fallbacks()
+            clear_run_usage()
             unbind_request_context()
 
     return StreamingResponse(event_stream(), media_type="application/x-ndjson")

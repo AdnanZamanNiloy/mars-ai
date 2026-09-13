@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
-from typing import Any, Dict, List, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
@@ -49,10 +49,16 @@ class ResearchState(TypedDict, total=False):
     mode: str
     decision_options: List[Dict[str, Any]]
     redteam: Dict[str, Any]
+    # Wave execution (Feature 03): plan shape + per-pass wave results.
+    execution_waves: List[List[str]]
+    wave_report: List[Dict[str, Any]]
+    # Citation validation v2: live URL health of the emitted answer's legend.
+    citation_health: Dict[str, Any]
 
 
 class PlannerUpdate(TypedDict):
     sub_questions: List[str]
+    execution_waves: List[List[str]]
 
 
 class SearchUpdate(TypedDict):
@@ -61,6 +67,7 @@ class SearchUpdate(TypedDict):
 
 class SummarizerUpdate(TypedDict):
     facts: List[Dict[str, Any]]
+    wave_report: List[Dict[str, Any]]
 
 
 class VerifierUpdate(TypedDict):
@@ -81,6 +88,7 @@ class CriticUpdate(TypedDict):
 class SynthesizerUpdate(TypedDict):
     synthesized_answer: str
     answer_support: Dict[str, Any]
+    citation_health: Dict[str, Any]
 
 
 class FinalizeUpdate(TypedDict):
@@ -269,6 +277,16 @@ def build_markdown_report(state: ResearchState) -> str:
     if early_stop_note:
         limitations.append(early_stop_note)
 
+    # Citation validation v2: dead or partially-unsupported cited sources.
+    try:
+        from app.agents.citation_check import citation_health_note
+
+        health_note = citation_health_note(state.get("citation_health"))
+        if health_note:
+            limitations.append(health_note)
+    except Exception:
+        pass
+
     limitations = [
         *limitations,
         "Confidence is estimated from evidence quality and critic assessment, not formal verification.",
@@ -388,8 +406,22 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             sub_questions = [*existing, *added]
         else:
             sub_questions = sub_questions[: max(1, target)]
-        logger.info("planner_done", sub_questions=len(sub_questions), expanding=expanding)
-        return {"sub_questions": sub_questions}
+        # Wave structure (Feature 03): dependency-ordered groups the
+        # summarizer executes sequentially, passing earlier-wave findings to
+        # dependent contracts. Exposed on state so the UI can show the plan's
+        # shape and the benchmark suite can verify wave execution.
+        try:
+            from app.agents.planner import execution_waves
+            waves = execution_waves(sub_questions)
+            wave_shape = [
+                [q.get("question", "") if isinstance(q, dict) else str(q) for q in wave]
+                for wave in waves
+            ]
+        except Exception:
+            wave_shape = [[_extract_question_text(q) for q in sub_questions]]
+        logger.info("planner_done", sub_questions=len(sub_questions), expanding=expanding,
+                    waves=len(wave_shape))
+        return {"sub_questions": sub_questions, "execution_waves": wave_shape}
 
     async def search_node(state: ResearchState) -> SearchUpdate:
         previous = [r for r in state.get("search_results", []) or [] if isinstance(r, dict)]
@@ -451,12 +483,34 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             search_results=state.get("search_results", []),
         )
 
-        async def _summarize_context(ctx: AgentContext) -> List[Dict[str, Any]]:
+        # Wave execution (Feature 03): the planner already computes
+        # dependency waves — run them in order so dependent contracts
+        # ("compare X vs Y" depending on "what is X") extract with the
+        # earlier wave's findings as grounding context. Independent members
+        # of one wave still run concurrently under the LLM semaphore.
+        by_wave: Dict[int, List[AgentContext]] = {}
+        for ctx in contexts:
+            wave = int(ctx.contract.get("wave", 0) or 0) if isinstance(ctx.contract, dict) else 0
+            by_wave.setdefault(max(0, wave), []).append(ctx)
+        wave_numbers = sorted(by_wave)
+
+        async def _summarize_context(ctx: AgentContext, prior: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
             if not ctx.own_results:
                 return []
             # Specialist routing (3.1): role comes from THIS context's
             # delegation contract — each specialist sees only its own
             # scoped context, never the shared ResearchState (2.9).
+            # `prior_findings` is passed ONLY when a dependent wave has
+            # prerequisite context — wave-0 calls keep the historical
+            # signature shape so duck-typed fakes keep working.
+            if prior:
+                return await summarizer_agent(
+                    llm=llm,
+                    query=state["query"],
+                    search_results=ctx.own_results,
+                    specialist_role=ctx.specialist_role(),
+                    prior_findings=prior,
+                )
             return await summarizer_agent(
                 llm=llm,
                 query=state["query"],
@@ -464,12 +518,30 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
                 specialist_role=ctx.specialist_role(),
             )
 
-        results = await asyncio.gather(*(_summarize_context(ctx) for ctx in contexts if ctx.own_results))
+        wave_report: List[Dict[str, Any]] = []
+        accumulated: List[Dict[str, Any]] = []
+        for wave in wave_numbers:
+            wave_contexts = [c for c in by_wave[wave] if c.own_results]
+            results = await asyncio.gather(*(
+                _summarize_context(ctx, accumulated if wave > 0 else None)
+                for ctx in wave_contexts
+            ))
+            wave_facts = [fact for facts in results for fact in facts]
+            accumulated = [*accumulated, *wave_facts]
+            wave_report.append({
+                "wave": wave,
+                "contracts": len(wave_contexts),
+                "facts_extracted": len(wave_facts),
+                "with_prerequisites": bool(wave > 0 and accumulated),
+            })
+            logger.info("wave_done", wave=wave, contracts=len(wave_contexts),
+                        facts=len(wave_facts))
 
-        fresh_facts = [fact for facts in results for fact in facts]
+        fresh_facts = accumulated
         merged = dedupe_semantic_facts([*state.get("facts", []), *fresh_facts])
-        logger.info("summarizer_done", fresh_facts=len(fresh_facts), total_facts=len(merged))
-        return {"facts": merged}
+        logger.info("summarizer_done", fresh_facts=len(fresh_facts), total_facts=len(merged),
+                    waves=len(wave_report))
+        return {"facts": merged, "wave_report": wave_report}
 
     async def verifier_node(state: ResearchState) -> VerifierUpdate:
         verified = verify_facts(
@@ -549,6 +621,11 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             max_iterations=int(state.get("max_iterations", 3)),
             source_dates=source_dates,
             degraded=take_fallbacks(),
+            # v3 signal wiring: conflicts penalize, the previous synthesis's
+            # support rate blends in, and unanswered plan axes cap the score.
+            contradictions=contradictions,
+            answer_support=state.get("answer_support"),
+            sub_questions=state.get("sub_questions", []),
         )
         overall_conf = breakdown["overall"]
 
@@ -594,10 +671,31 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         # it scores honesty, it does not rewrite.
         support = verify_answer_support(answer, state.get("facts", []))
         support_rate = support["rate"]
+        # Citation validation v2: re-validate the legend URLs the answer
+        # actually cites (bounded, never fatal) and fuse with the sentence
+        # support verdicts into per-source health.
+        try:
+            from app.agents.citation_check import check_citations
+
+            citation_health = await check_citations(
+                answer,
+                support,
+                enabled=bool(getattr(llm.settings, "citation_check_enabled", True)),
+                timeout=float(getattr(llm.settings, "citation_check_timeout_sec", 5.0) or 5.0),
+                max_sources=int(getattr(llm.settings, "citation_check_max", 10) or 10),
+            )
+        except Exception as exc:
+            logger.warning("citation_health_check_failed", error=str(exc), exc_info=exc)
+            citation_health = {"checked": 0, "sources": [], "summary": {}, "enabled": False}
         logger.info("synthesizer_done", answer_chars=len(answer), usable_facts=len(usable),
                     support_rate=round(support_rate, 2) if support_rate is not None else None,
-                    unsupported=len(support["unsupported"]))
-        return {"synthesized_answer": answer, "answer_support": support}
+                    unsupported=len(support["unsupported"]),
+                    citation_summary=citation_health.get("summary", {}))
+        return {
+            "synthesized_answer": answer,
+            "answer_support": support,
+            "citation_health": citation_health,
+        }
 
     async def finalize_node(state: ResearchState) -> FinalizeUpdate:
         report = build_markdown_report(state)
