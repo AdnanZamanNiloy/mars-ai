@@ -255,6 +255,73 @@ def _verified_facts(facts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [f for f in facts if f.get("verified")]
 
 
+def _evidence_gaps_remain(state: ResearchState) -> bool:
+    """Measured evidence deficiencies that should outrank a critic's "enough".
+
+    Returns True when the fact pool still contains a single-source
+    quantitative/definitional claim that needs independent corroboration, or
+    an unresolved contradiction. Returns False (critic wins, behavior
+    unchanged) when the pool is empty/ungradeable or grading fails — the gate
+    only ever ADDS research, never blocks an otherwise-healthy finalize.
+    """
+    facts = [f for f in state.get("facts", []) or [] if isinstance(f, dict)]
+    if not facts:
+        return False
+    try:
+        from app.core.evidence_grade import grade_facts
+
+        graded = grade_facts(facts, contradictions=state.get("contradictions") or [])
+    except Exception as exc:  # a grading bug must never change routing
+        logger.warning("evidence_gate_grading_failed", error=str(exc), exc_info=exc)
+        return False
+    for g in graded:
+        ev = g.get("evidence") if isinstance(g, dict) else None
+        if not isinstance(ev, dict):
+            continue
+        if int(ev.get("contradiction_count", 0) or 0) > 0:
+            return True
+        if ev.get("needs_corroboration"):
+            return True
+    return False
+
+
+def _counter_evidence_queries(state: ResearchState, limit: int = 2) -> List[str]:
+    """Targeted disagreement searches for the weakest claims in the pool.
+
+    The brief is explicit: do not only search for support. For every
+    single-source or contradicted claim, propose a query that seeks
+    counter-evidence, limitations, or credible opposing views. These ride the
+    existing critic `improved_queries` channel, so the normal expansion loop
+    researches them — no new pipeline stage.
+    """
+    facts = [f for f in state.get("facts", []) or [] if isinstance(f, dict)]
+    if not facts:
+        return []
+    try:
+        from app.core.evidence_grade import grade_facts
+
+        graded = grade_facts(facts, contradictions=state.get("contradictions") or [])
+    except Exception as exc:
+        logger.warning("counter_evidence_grading_failed", error=str(exc), exc_info=exc)
+        return []
+    queries: List[str] = []
+    for g in graded:
+        ev = g.get("evidence") if isinstance(g, dict) else None
+        if not isinstance(ev, dict):
+            continue
+        claim = str(ev.get("claim", "")).strip()
+        if not claim:
+            continue
+        if int(ev.get("contradiction_count", 0) or 0) > 0:
+            queries.append(f"{claim[:140]} conflicting evidence OR disagreement")
+        elif ev.get("needs_corroboration"):
+            queries.append(f"{claim[:140]} independent corroboration OR verification")
+        if len(queries) >= max(1, limit):
+            break
+    return queries
+
+
+
 def build_markdown_report(
     state: ResearchState,
     decision_options: List[Dict[str, Any]] | None = None,
@@ -762,7 +829,13 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         )
         overall_conf = breakdown["overall"]
 
-        improved = critique.get("improved_queries", [])
+        improved = list(critique.get("improved_queries", []) or [])
+        # Evidence-first: when the pool has uncorroborated or contradicted
+        # claims, add disagreement-seeking queries so the expansion loop
+        # researches the weakest evidence, not just more supporting pages.
+        for q in _counter_evidence_queries(state):
+            if q not in improved:
+                improved.append(q)
         critique_feedback = critique.get("reason", "")
         if improved:
             critique_feedback = f"{critique_feedback} Improved search focus: {'; '.join(improved)}"
@@ -893,6 +966,16 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
     def route_after_critic(state: ResearchState) -> str:
         critique = state.get("critique", {})
         is_sufficient = bool(critique.get("is_sufficient", False))
+
+        # Evidence-first sufficiency (Step 3): a critic saying "enough" is an
+        # OPINION, not proof. Before trusting it, check the measured evidence
+        # base — uncovered axis gaps, uncorroborated quantitative claims, and
+        # unresolved contradictions are grounds to keep researching even when
+        # the model is satisfied. When the evidence gate is clean, the critic
+        # wins exactly as before (no extra iteration, no score change).
+        if is_sufficient and _evidence_gaps_remain(state):
+            logger.info("evidence_gate_overrides_critic", iteration=int(state.get("iteration", 0)))
+            is_sufficient = False
 
         if is_sufficient:
             return "synthesizer"
