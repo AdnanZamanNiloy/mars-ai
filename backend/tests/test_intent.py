@@ -372,3 +372,47 @@ def test_user_resolved_homonym_is_not_ambiguous():
     assert report.ambiguity is False
     assert len(report.senses) == 1
     assert report.senses[0].domain == "science"
+
+
+async def test_summarizer_shrinks_prompt_when_provider_rejects_size():
+    """The 413 ladder: a provider that rejects the full 12-source excerpt
+    prompt must be retried with a smaller excerpt budget — keeping extraction
+    LLM-written instead of degrading to heuristic fallback."""
+    from app.agents.summarizer import summarizer_agent
+    from app.core.llm import PromptTooLargeError
+
+    class SizePickyLLM:
+        """Rejects prompts over 8000 chars (stands in for the Groq 413
+        threshold relative to the summarizer's real prompt sizes)."""
+
+        def __init__(self, settings):
+            self.settings = settings
+            self.prompt_lengths = []
+
+        async def generate_json(self, system_prompt, user_prompt, retries=3, response_model=None):
+            self.prompt_lengths.append(len(user_prompt))
+            if len(user_prompt) > 8000:
+                raise PromptTooLargeError("too large")
+            return {"facts": [{
+                "claim": "Solar capacity grew 40 percent in 2024",
+                "source": "https://arxiv.org/0", "confidence": 0.9,
+            }]}
+
+    from app.core.config import Settings
+
+    llm = SizePickyLLM(Settings(groq_api_key="k", database_url="/tmp/ladder-cache-test", _env_file=None))
+    results = [{
+        "url": f"https://arxiv.org/{i}",
+        "title": f"paper {i}",
+        "content": "Solar capacity grew 40 percent in 2024, reaching 2000 GW installed worldwide. " * 30,
+        "snippet": "solar grew",
+        "sub_question": "solar statistics",
+        "search_type": "statistical",
+        "published_at": "2024-06-01",
+    } for i in range(8)]
+
+    facts = await summarizer_agent(llm, "solar statistics 2024", results)
+    assert facts, "ladder must produce facts, not fall back"
+    assert len(llm.prompt_lengths) >= 2, "at least one size retry"
+    assert llm.prompt_lengths[-1] < llm.prompt_lengths[0], "retry must shrink the prompt"
+    assert facts[0]["extraction"] == "llm"

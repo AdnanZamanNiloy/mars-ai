@@ -128,11 +128,13 @@ class Settings(BaseSettings):
 
     # Answer quality gate (final editor): every synthesized answer is scored
     # 0-100 on accuracy/relevance/evidence/clarity/reasoning from measured
-    # pipeline state (no LLM). A failing answer gets exactly ONE bounded
-    # re-synthesis with the failures fed back, then the better draft ships
-    # (always disclosed — a below-threshold answer is labeled, never silent).
+    # pipeline state (no LLM). SYNTHESIS_REVISION_ENABLED adds the LLM half:
+    # the writer ALWAYS rewrites its draft once — fed the measured failures
+    # when the gate failed, a polish mandate when it passed — and the better-
+    # scoring draft ships (never a loop).
     quality_gate_enabled: bool = True
     quality_threshold: float = 70.0
+    synthesis_revision_enabled: bool = True
 
     # Dynamic Research Depth (Phase 2.8)
     sufficiency_threshold: float = 0.75

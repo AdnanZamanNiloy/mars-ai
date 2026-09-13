@@ -45,7 +45,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Set
 
 from app.core.degradation import record_fallback
-from app.core.llm import LLMClient
+from app.core.llm import LLMClient, PromptTooLargeError
 from app.core.logging import get_logger
 from app.core.schemas import SynthesizerAnswerModel
 
@@ -319,45 +319,62 @@ async def synthesize(
     if ambiguity_block:
         length_hint = f"{length_hint}\n\n{ambiguity_block}"
 
-    top_facts = _stratified_top_facts(usable_facts, per_angle=10, cap=40)
-    numbered, cited_facts = _number_facts(top_facts)
+    # Adaptive fact-cap ladder: the writer prompt carries up to 40 facts plus
+    # the legend; on providers that cap request size (Groq 413s ~21-41KB) the
+    # first attempt can be rejected whole. Shrinking the evidence view keeps
+    # synthesis LLM-written instead of degrading to the extractive fallback.
     angles: List[str] = []
-    for fact in cited_facts:
-        sub_question = str(fact.get("sub_question", "") or "").strip()
-        if sub_question and sub_question not in angles:
-            angles.append(sub_question)
+    top_facts: List[Dict[str, Any]] = []
+    numbered: List[Dict[str, Any]] = []
+    cited_facts: List[Dict[str, Any]] = []
+    payload: Dict[str, Any] = {}
+    for fact_cap in _FACT_CAP_LADDER:
+        top_facts = _stratified_top_facts(usable_facts, per_angle=10, cap=fact_cap)
+        numbered, cited_facts = _number_facts(top_facts)
+        angles = []
+        for fact in cited_facts:
+            sub_question = str(fact.get("sub_question", "") or "").strip()
+            if sub_question and sub_question not in angles:
+                angles.append(sub_question)
 
-    user_prompt = (
-        f"Main query: {query}\n\n"
-        f"{length_hint}\n\n"
-        + (
-            "Angles to cover (one section each, in this order):\n"
-            + "\n".join(f"- {a}" for a in angles)
+        user_prompt = (
+            f"Main query: {query}\n\n"
+            f"{length_hint}\n\n"
+            + (
+                "Angles to cover (one section each, in this order):\n"
+                + "\n".join(f"- {a}" for a in angles)
+                + "\n\n"
+                if angles
+                else ""
+            )
+            + "Evidence — each line begins with the citation number you MUST use for\n"
+            "that claim:\n"
+            + _render_evidence_block(cited_facts)
             + "\n\n"
-            if angles
-            else ""
+            + _render_ranges_block(contradictions)
+            + _render_context_block(ctx)
+            + f"Sources (cite by number only):\n{_source_lines(numbered)}\n\n"
+            "Return JSON in this schema: "
+            '{"answer": "<final synthesized report with [n] citations>"}'
         )
-        + "Evidence — each line begins with the citation number you MUST use for\n"
-        "that claim:\n"
-        + _render_evidence_block(cited_facts)
-        + "\n\n"
-        + _render_ranges_block(contradictions)
-        + _render_context_block(ctx)
-        + f"Sources (cite by number only):\n{_source_lines(numbered)}\n\n"
-        "Return JSON in this schema: "
-        '{"answer": "<final synthesized report with [n] citations>"}'
-    )
-
-    try:
-        payload = await llm.generate_json(
-            SYNTHESIZER_SYSTEM_PROMPT,
-            user_prompt,
-            response_model=SynthesizerAnswerModel,
-        )
-    except Exception as exc:
-        logger.warning("[Synthesizer] LLM call failed, using deterministic fallback", exc_info=exc)
-        record_fallback("synthesizer")
-        payload = {}
+        try:
+            payload = await llm.generate_json(
+                SYNTHESIZER_SYSTEM_PROMPT,
+                user_prompt,
+                response_model=SynthesizerAnswerModel,
+            )
+            break
+        except PromptTooLargeError:
+            logger.warning(
+                "[Synthesizer] provider rejected the prompt at cap=%d facts; retrying smaller",
+                fact_cap,
+            )
+            continue
+        except Exception as exc:
+            logger.warning("[Synthesizer] LLM call failed, using deterministic fallback", exc_info=exc)
+            record_fallback("synthesizer")
+            payload = {}
+            break
 
     answer = str(payload.get("answer", "")).strip() if isinstance(payload, dict) else ""
     if not answer:
@@ -386,6 +403,10 @@ async def synthesize(
 # ---------------------------------------------------------------------------
 
 MAX_LEGEND_SOURCES = 14
+
+# See _FACT_CAP_LADDER comment inside synthesize(): caps tried in order when
+# the provider rejects the request size.
+_FACT_CAP_LADDER = (40, 24, 14)
 
 
 def _number_facts(
@@ -1066,6 +1087,15 @@ def _render_context_block(ctx: Dict[str, Any]) -> str:
     if not ctx:
         return ""
     parts = []
+    if ctx.get("revision"):
+        parts.append(
+            "REVISION PASS — rewrite your previous draft as the final answer. "
+            "Lead with the direct answer to the query in plain language; one idea "
+            "per paragraph; cut filler, repetition and tangents; remove any section "
+            "that does not serve the query; keep every [n] marker valid and attached "
+            "to the sentence it supports; preserve the disambiguation block when the "
+            "query was ambiguous."
+        )
     contradictions = ctx.get("contradictions", []) or []
     if isinstance(contradictions, list) and contradictions:
         lines = []

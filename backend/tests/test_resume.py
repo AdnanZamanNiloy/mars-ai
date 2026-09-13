@@ -134,7 +134,10 @@ def test_resume_reruns_critic_not_planner_or_search(tmp_path, monkeypatch):
 
     response = asyncio.run(_call())
     assert response.status_code == 200
-    assert visited == ["critic", "synthesizer"], visited
+    # critic, then the synthesizer draft + the always-on revision pass
+    # (the revision re-scores and ships the better draft; the fake returns
+    # the same gate-passing answer twice).
+    assert visited == ["critic", "synthesizer", "synthesizer"], visited
 
     # Run marked completed, report persisted.
     import aiosqlite

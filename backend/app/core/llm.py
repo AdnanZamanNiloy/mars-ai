@@ -65,6 +65,42 @@ class AllProvidersFailedError(RuntimeError):
     """
 
 
+class PromptTooLargeError(RuntimeError):
+    """The provider rejected the request size (HTTP 413).
+
+    Observed live: Groq 413s between ~21KB and ~41KB request payloads —
+    exactly where the summarizer's 12-source excerpt prompt lands. Retry-
+    ing the identical payload can only fail identically, so this is fail-
+    fast at every level; the CALLER (summarizer/synthesizer) retries with
+    a smaller prompt via its own ladder instead of degrading to extraction.
+    """
+
+
+# HTTP 400 bodies that mark a PERMANENT condition. Retrying them burns the
+# research budget on a guaranteed failure (live case: a provider whose
+# credits ran out 400s every call — the old code retried it 4x per LLM call).
+_PERMANENT_400_SIGNATURES = (
+    "insufficient balance", "insufficient credit", "credit insufficient",
+    "no credits", "quota exceeded", "exceeded your quota",
+    "invalid api key", "invalid_api_key", "model_not_found",
+    "model not found", "does not exist", "deprecated",
+)
+
+
+def _permanent_client_error(exc: BaseException) -> bool:
+    if not isinstance(exc, httpx.HTTPStatusError) or exc.response is None:
+        return False
+    if exc.response.status_code == 404:
+        return True
+    if exc.response.status_code != 400:
+        return False
+    try:
+        body = exc.response.text.lower()
+    except Exception:
+        return False
+    return any(sig in body for sig in _PERMANENT_400_SIGNATURES)
+
+
 class CircuitBreaker:
     """Per-provider failure counter with a cooldown window.
 
@@ -129,7 +165,7 @@ def _real_key(value: Any) -> str:
 
 
 def _is_fail_fast_error(exc: BaseException) -> bool:
-    """401/403/402 must fail fast to fallback — retrying bad credentials or
+    """401/402/403 must fail fast to fallback — retrying bad credentials or
     an empty wallet only burns time and worsens rate limiting."""
     return (
         isinstance(exc, httpx.HTTPStatusError)
@@ -139,6 +175,12 @@ def _is_fail_fast_error(exc: BaseException) -> bool:
 
 
 def _is_retryable(exc: BaseException) -> bool:
+    if isinstance(exc, PromptTooLargeError):
+        # The identical payload can only 413 again; the caller shrinks it.
+        return False
+    if _permanent_client_error(exc):
+        # Empty wallet / unknown model / bad key: deterministic failure.
+        return False
     if _is_fail_fast_error(exc):
         return False
     if isinstance(exc, httpx.TimeoutException):
@@ -331,7 +373,7 @@ class LLMClient:
                     validated = response_model.model_validate(payload)
                     return validated.model_dump()
                 return payload
-            except (httpx.TimeoutException, AllProvidersFailedError) as exc:
+            except (httpx.TimeoutException, AllProvidersFailedError, PromptTooLargeError) as exc:
                 raise
             except Exception as exc:
                 if attempt == retries - 1:
@@ -396,6 +438,7 @@ class LLMClient:
             return cached["text"]
 
         attempted = 0
+        size_failures = 0
         async with self._llm_semaphore:
             if custom and not self.custom_breaker.is_open():
                 attempted += 1
@@ -406,6 +449,7 @@ class LLMClient:
                     return result.text
                 except Exception as exc:
                     self._last_errors["custom"] = f"{type(exc).__name__}: {exc}"
+                    size_failures += 1 if isinstance(exc, PromptTooLargeError) else 0
                     self._record_provider_failure(self.custom_breaker, exc)
                     logger.warning(
                         "[LLM] Custom provider call failed (breaker failures=%d), falling back: %s",
@@ -428,6 +472,7 @@ class LLMClient:
                     return result.text
                 except Exception as exc:
                     self._last_errors["groq"] = f"{type(exc).__name__}: {exc}"
+                    size_failures += 1 if isinstance(exc, PromptTooLargeError) else 0
                     self._record_provider_failure(self.groq_breaker, exc)
                     logger.warning(
                         "[LLM] Groq call failed (breaker failures=%d), falling back: %s",
@@ -444,7 +489,16 @@ class LLMClient:
                     return result.text
                 except Exception as exc:
                     self._last_errors["huggingface"] = f"{type(exc).__name__}: {exc}"
+                    size_failures += 1 if isinstance(exc, PromptTooLargeError) else 0
                     raise
+
+        # Every attempted provider rejected the REQUEST SIZE: the providers
+        # are healthy — the payload is not. Raise the sizing signal so the
+        # caller's ladder can shrink and retry instead of degrading.
+        if attempted > 0 and size_failures == attempted:
+            raise PromptTooLargeError(
+                f"all {attempted} provider(s) rejected the request size as too large"
+            )
 
         if attempted == 0:
             # Keys existed but every provider's breaker was open — or nothing
@@ -546,7 +600,11 @@ class LLMClient:
     def _record_provider_failure(breaker: CircuitBreaker, exc: Exception) -> None:
         """Timeouts open the breaker immediately (one 25s stall is enough
         signal inside a 90s budget); fast failures use the normal
-        threshold counter."""
+        threshold counter. PromptTooLargeError records NOTHING: the provider
+        is healthy — our payload was too big — and sizing retries must not
+        trip the breaker into skipping that provider."""
+        if isinstance(exc, PromptTooLargeError):
+            return
         if isinstance(exc, httpx.TimeoutException):
             breaker.record_timeout()
         else:
@@ -598,6 +656,10 @@ class LLMClient:
                     ],
                 },
             )
+            if response.status_code == 413:
+                raise PromptTooLargeError(
+                    "provider rejected request size (custom provider)"
+                )
             response.raise_for_status()
             data = response.json()
             tin, tout = _parse_usage(data)
@@ -637,6 +699,8 @@ class LLMClient:
         # so total wait stays a small multiple of one attempt.
         async with httpx.AsyncClient(timeout=self.settings.llm_timeout_sec) as client:
             response = await client.post(url, headers=headers, json=payload)
+            if response.status_code == 413:
+                raise PromptTooLargeError("provider rejected request size (groq)")
             response.raise_for_status()
             data = response.json()
             tin, tout = _parse_usage(data)

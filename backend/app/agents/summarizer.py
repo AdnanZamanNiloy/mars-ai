@@ -35,7 +35,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from app.core.cache import cache_key, get_cache
 from app.core.degradation import record_fallback
-from app.core.llm import LLMClient, clamp_confidence
+from app.core.llm import LLMClient, PromptTooLargeError, clamp_confidence
 from app.core.logging import get_logger
 from app.core.schemas import SummarizerFactsModel
 
@@ -215,6 +215,11 @@ MAX_SOURCES_PER_CALL = 12
 MIN_EXCERPT_CHARS = 600
 MAX_EXCERPT_CHARS = 3_500
 
+# Groq rejects requests over ~21-41KB with HTTP 413 (measured live), so a
+# full 12-source budget can exceed what the provider accepts. The ladder
+# shrinks excerpts before the stage degrades to heuristic extraction.
+_EXCERPT_BUDGET_LADDER = (EXCERPT_CHAR_BUDGET, 12_000, 6_000)
+
 
 def _allocate_excerpts(
     results: Sequence[Dict[str, Any]], budget: int = EXCERPT_CHAR_BUDGET
@@ -370,7 +375,6 @@ async def summarizer_agent(
         return []
 
     system_prompt = specialist_system_prompt(specialist_role)
-    compact_results = _allocate_excerpts(quality_results)
     source_index = _build_source_index(quality_results)
     text_by_url = {
         str(item.get("url", "")): (
@@ -415,20 +419,6 @@ async def summarizer_agent(
             "about the sense above may be extracted.\n"
         )
 
-    user_prompt = (
-        f"Research query: {query}\n\n"
-        f"{sense_block}"
-        f"{prior_block}"
-        f"Sources ({len(compact_results)}):\n{compact_results}\n\n"
-        "Extract high-quality claims as JSON in this schema: "
-        '{"facts": [{"claim": "...", "source": "https://...", "confidence": 0.0, '
-        '"direct_quote": "..."}]}\n'
-        "The \"source\" value MUST be one of the url values above, copied exactly. "
-        "Prefer the full page content over the snippet when both are present. "
-        "Keep every number's unit, period and scope inside the claim text. "
-        "Ignore weak, promotional, or opinion-blog sources."
-    )
-
     cache = get_cache(llm.settings)
     key = cache_key(
         "summarize_facts",
@@ -436,7 +426,7 @@ async def summarizer_agent(
         specialist_role,          # role changes the prompt, so it must key the cache
         sense,                    # the sense constraint changes the prompt and the filters
         query,
-        tuple(sorted(item.get("url", "") for item in compact_results)),
+        tuple(sorted(item.get("url", "") for item in quality_results[:MAX_SOURCES_PER_CALL])),
         prior_digest,             # prerequisite context changes the extraction
     )
     try:
@@ -450,16 +440,46 @@ async def summarizer_agent(
         facts = cached
     else:
         logger.info("[Summarizer] cache miss (%s)", PROMPT_VERSION)
-        try:
-            payload = await llm.generate_json(
-                system_prompt,
-                user_prompt,
-                response_model=SummarizerFactsModel,
+        # Adaptive payload ladder: providers cap request size (Groq 413s
+        # between ~21KB and ~41KB — right where the full 12-source excerpt
+        # budget lands). Shrinking the excerpts keeps the extraction LLM-
+        # written instead of degrading the whole stage to heuristic
+        # extraction. Same sources every attempt — only their excerpts shrink.
+        facts = []
+        for excerpt_budget in _EXCERPT_BUDGET_LADDER:
+            compact_results = _allocate_excerpts(quality_results, excerpt_budget)
+            user_prompt = (
+                f"Research query: {query}\n\n"
+                f"{sense_block}"
+                f"{prior_block}"
+                f"Sources ({len(compact_results)}):\n{compact_results}\n\n"
+                "Extract high-quality claims as JSON in this schema: "
+                '{"facts": [{"claim": "...", "source": "https://...", "confidence": 0.0, '
+                '"direct_quote": "..."}]}\n'
+                "The \"source\" value MUST be one of the url values above, copied exactly. "
+                "Prefer the full page content over the snippet when both are present. "
+                "Keep every number's unit, period and scope inside the claim text. "
+                "Ignore weak, promotional, or opinion-blog sources."
             )
-            facts = payload.get("facts", []) if isinstance(payload, dict) else []
-        except Exception as exc:
-            logger.warning("[Summarizer] LLM call failed, using heuristic fallback", exc_info=exc)
-            facts = []
+            try:
+                payload = await llm.generate_json(
+                    system_prompt,
+                    user_prompt,
+                    response_model=SummarizerFactsModel,
+                )
+                facts = payload.get("facts", []) if isinstance(payload, dict) else []
+                break
+            except PromptTooLargeError:
+                logger.warning(
+                    "[Summarizer] provider rejected the prompt at %d excerpt chars; retrying smaller",
+                    excerpt_budget,
+                )
+                continue
+            except Exception as exc:
+                logger.warning("[Summarizer] LLM call failed, using heuristic fallback", exc_info=exc)
+                break
+        if not facts:
+            logger.warning("[Summarizer] LLM contributed nothing usable, using heuristic fallback")
         # Cache only successful, non-empty extractions: caching the empty list on
         # provider failure poisoned the key for a full TTL, so the summarizer kept
         # "recovering" from cache after the provider was healthy again.

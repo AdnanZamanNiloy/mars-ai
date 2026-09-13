@@ -429,3 +429,52 @@ async def test_all_failed_error_survives_empty_exception_messages():
         mock.post(GROQ_URL).mock(return_value=httpx.Response(402, json={"error": "payment required"}))
         with pytest.raises(AllProvidersFailedError, match="ReadTimeout"):
             await client.generate_json("sp", "up")
+
+
+async def test_413_raises_prompt_too_large_without_retries(test_settings):
+    """Groq 413s between ~21KB and ~41KB (measured live). The identical
+    payload can only fail identically: exactly ONE attempt, no tenacity
+    retries, and the breaker must stay untouched (the provider is healthy)."""
+    from app.core.llm import PromptTooLargeError
+
+    client = LLMClient(test_settings)
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post(GROQ_URL).mock(
+            return_value=httpx.Response(413, json={"error": "request too large"})
+        )
+        with pytest.raises(PromptTooLargeError):
+            await client.generate_json("sp", "up")
+        assert route.call_count == 1
+    assert client.groq_breaker._consecutive_failures == 0
+    assert client.groq_breaker._opened_at is None
+
+
+async def test_permanent_400_fails_fast_without_retries(test_settings):
+    """A provider with no credits 400s 'insufficient balance' on every call —
+    retrying it 4x per LLM call was pure waste. One attempt, then the chain
+    gives up (no other provider configured)."""
+    from app.core.llm import AllProvidersFailedError
+
+    client = LLMClient(test_settings)
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post(GROQ_URL).mock(
+            return_value=httpx.Response(
+                400, json={"error": {"message": "credit insufficient balance: balance=0 required=102"}}
+            )
+        )
+        with pytest.raises(AllProvidersFailedError):
+            await client.generate_json("sp", "up")
+        assert route.call_count == 1
+
+
+async def test_all_providers_413_aggregates_to_prompt_too_large(test_settings):
+    """When every attempted provider rejects the request size, the caller must
+    see PromptTooLargeError (not AllProvidersFailedError) so its ladder can
+    shrink the payload instead of degrading to extraction."""
+    from app.core.llm import PromptTooLargeError
+
+    client = LLMClient(test_settings)
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post(GROQ_URL).mock(return_value=httpx.Response(413, json={"error": "too large"}))
+        with pytest.raises(PromptTooLargeError):
+            await client.generate_json("sp", "up")

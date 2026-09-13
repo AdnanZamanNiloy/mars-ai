@@ -768,6 +768,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             "intent": intent,
         }
         gate_enabled = bool(getattr(llm.settings, "quality_gate_enabled", True))
+        revision_enabled = bool(getattr(llm.settings, "synthesis_revision_enabled", True))
         threshold = float(getattr(llm.settings, "quality_threshold", 70.0) or 70.0)
 
         async def _synthesize_and_score(ctx: Dict[str, Any]):
@@ -810,22 +811,23 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
 
         answer, support, citation_health, quality = await _synthesize_and_score(base_context)
 
-        # Answer quality gate (final editor): a failing draft gets exactly ONE
-        # re-synthesis with the failures fed back — never a loop — and the
-        # better draft ships either way, with its scores disclosed. Skipped
-        # when the synthesizer itself is on deterministic fallback: the
-        # extractive writer cannot act on feedback, so a retry would only
-        # re-spend nothing and return the same draft.
-        if gate_enabled and not quality.passed and "synthesizer" not in take_fallbacks():
+        # Answer revision pass (the quality optimizer's LLM half): the writer
+        # rewrites its draft ONCE — fed the measured failures when the gate
+        # failed, a polish mandate when it passed — and the better-scoring
+        # draft ships. Never a loop (budget rule). Skipped when the gate is
+        # disabled or the synthesizer itself is on deterministic fallback
+        # (extraction cannot act on feedback).
+        if gate_enabled and revision_enabled and "synthesizer" not in take_fallbacks():
             try:
                 answer2, support2, health2, quality2 = await _synthesize_and_score({
                     **base_context,
                     "quality_feedback": quality.failures,
+                    "revision": True,
                 })
             except Exception as exc:
-                logger.warning("quality_retry_failed", error=str(exc), exc_info=exc)
+                logger.warning("synthesis_revision_failed", error=str(exc), exc_info=exc)
             else:
-                if quality2.overall > quality.overall:
+                if quality2.overall >= quality.overall:
                     answer, support, citation_health, quality = (
                         answer2, support2, health2, quality2,
                     )
