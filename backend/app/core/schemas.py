@@ -59,7 +59,13 @@ class FactModel(BaseModel):
 
 
 class SummarizerFactsModel(BaseModel):
-    facts: List[FactModel] = Field(min_length=1)
+    # An EMPTY facts list is a valid model outcome (the sources genuinely had
+    # nothing extractable for this contract). It must NOT be a validation
+    # error: min_length=1 turned "found nothing" into a transient-looking
+    # failure, retried 3x, then cascaded into the heuristic fallback and a
+    # false "providers unavailable / degraded" report on every run. Malformed
+    # payloads (no list at all) still fail via _coerce_fact_lists below.
+    facts: List[FactModel] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -77,6 +83,10 @@ class SummarizerFactsModel(BaseModel):
                 value = data.get(key)
                 if isinstance(value, list):
                     return {"facts": value}
+            # A dict with NO recognized list key is genuinely malformed
+            # (e.g. {"nope": []}) — fail validation rather than silently
+            # treating it as "no facts found".
+            return {"facts": None}
         return data
 
 
