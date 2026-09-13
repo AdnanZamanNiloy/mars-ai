@@ -180,7 +180,7 @@ _ANALYSIS_LEAD_RE = re.compile(
     r"what follows|in other words|put differently|the net effect|"
     r"evidence is thin|confidence:|well-supported:|uncertain:|"
     r"conflicting evidence:|could not verify:|pipeline stages on deterministic|"
-    r"the evidence spans)",
+    r"the evidence spans|based on your question|this report focuses)",
     re.IGNORECASE,
 )
 _FACTUAL_HINT_RE = re.compile(r"\d|\b(19|20)\d{2}\b|%|\bper cent\b|\bpercent\b")
@@ -188,6 +188,15 @@ _FACTUAL_HINT_RE = re.compile(r"\d|\b(19|20)\d{2}\b|%|\bper cent\b|\bpercent\b")
 # Numbers this small are ordinary prose ("three angles", "two sources") and are
 # not worth grounding; anything with a unit, currency, percent or year is.
 _TRIVIAL_NUMBERS: Set[float] = {0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0}
+
+# The disambiguation block an ambiguous-query report MUST open with:
+# "1) **Transformer neural network architecture** — attention-based ...".
+# Numbered with a closing paren (not "1.") so sentence splitters keep the
+# line intact. These lines are definitional common knowledge (the
+# non-researched sense has no evidence by design), so the citation audit
+# exempts them rather than flagging the pipeline's own disambiguation as
+# untraceable.
+_DISAMBIG_LINE_RE = re.compile(r"^\s*\d+\)\s*\*\*[^*]{2,120}\*\*\s*[—-]")
 
 
 @dataclass
@@ -295,6 +304,20 @@ async def synthesize(
         )
     else:
         length_hint = "LENGTH: keep the report under 900 words."
+
+    intent = ctx.get("intent") or {}
+    level = str(intent.get("explanation_level", "") or "")
+    if not mode.startswith(("deep", "executive")) and level == "basic":
+        length_hint = (
+            "LENGTH: keep the report under 600 words. The user asked for a basic "
+            "explanation: open with a plain-language explanation of the concept and "
+            "include ONE simple analogy that a non-expert would immediately grasp. "
+            "Prefer explanation over statistics."
+        )
+
+    ambiguity_block = _render_ambiguity_block(intent)
+    if ambiguity_block:
+        length_hint = f"{length_hint}\n\n{ambiguity_block}"
 
     top_facts = _stratified_top_facts(usable_facts, per_angle=10, cap=40)
     numbered, cited_facts = _number_facts(top_facts)
@@ -452,7 +475,9 @@ def _render_evidence_block(cited_facts: Sequence[Dict[str, Any]], limit: int = 4
         angle = str(fact.get("sub_question", "") or "").strip()
         meta = f" ({', '.join(marks)})" if marks else ""
         angle_tag = f" [angle: {angle}]" if angle else ""
-        lines.append(f"[{fact.get('citation')}] {claim}{meta}{angle_tag}")
+        sense = str(fact.get("sense", "") or "").strip()
+        sense_tag = f" [sense: {sense}]" if sense else ""
+        lines.append(f"[{fact.get('citation')}] {claim}{meta}{angle_tag}{sense_tag}")
     return "\n".join(lines)
 
 
@@ -532,10 +557,11 @@ def audit_citations(
         if not stripped:
             continue
         markers = [int(m) for m in re.findall(r"\[(\d+)\]", stripped)]
-        if not markers and _ANALYSIS_LEAD_RE.match(stripped):
-            # Analysis/transition prose and the report's own scaffolding are
-            # not factual statements; they belong in neither the numerator
-            # nor the denominator of citation density.
+        if not markers and (_ANALYSIS_LEAD_RE.match(stripped) or _DISAMBIG_LINE_RE.match(stripped)):
+            # Analysis/transition prose, the report's own scaffolding, and the
+            # ambiguity disambiguation lines are not evidence claims; they
+            # belong in neither the numerator nor the denominator of citation
+            # density.
             continue
         audit.total_sentences += 1
         if markers:
@@ -776,7 +802,12 @@ def _deterministic_report(
     for item in diverse:
         if not str(item.get("claim", "")).strip():
             continue
-        key = str(item.get("sub_question", "") or "").strip()
+        # Sense first: an ambiguous query's fallback report must keep the
+        # meanings in separate sections, exactly like the LLM path.
+        key = (
+            str(item.get("sense", "") or "").strip()
+            or str(item.get("sub_question", "") or "").strip()
+        )
         bucket = groups.setdefault(key, [])
         if len(bucket) < 6:
             bucket.append(item)
@@ -986,6 +1017,47 @@ def _gaps_section(stats: Dict[str, Any]) -> str:
         "during synthesis and do not appear above.",
     ])
     return "\n".join(lines)
+
+
+def _render_ambiguity_block(intent: Dict[str, Any]) -> str:
+    """Mandatory disambiguation contract for an ambiguous query.
+
+    The report must open by naming the senses, state which one the research
+    focused on, and keep each sense's evidence separate — the structural fix
+    for "AI transformer limitations mixed with electrical statistics".
+    """
+    if not isinstance(intent, dict) or not intent.get("ambiguity"):
+        return ""
+    senses = [s for s in (intent.get("senses") or []) if isinstance(s, dict) and str(s.get("label", "")).strip()]
+    if not senses:
+        return ""
+    listed = "\n".join(
+        f"  {i + 1}) **{str(s.get('label')).strip()}**"
+        + (f" — {str(s.get('note', '')).strip()}" if str(s.get("note", "")).strip() else "")
+        for i, s in enumerate(senses[:3])
+    )
+    action = str(intent.get("recommended_action", "") or "")
+    focus = str((senses[0] or {}).get("label", "")).strip()
+    if action == "research_both" and len(senses) > 1:
+        structure = (
+            "Structure the report so each researched meaning gets its OWN sections "
+            "(evidence lines carry [sense: ...] tags — a section about one sense cites "
+            "only that sense's facts)."
+        )
+    else:
+        structure = (
+            f"The detailed sections focus on meaning 1 ('{focus}'). Do NOT spend "
+            "sections or citations on the other meaning(s) — their one disambiguation "
+            "line above is enough."
+        )
+    return (
+        "AMBIGUOUS QUERY — the term has distinct meanings:\n"
+        f"{listed}\n\n"
+        "The Executive Summary MUST open with a numbered disambiguation in EXACTLY "
+        "the shape above (one line per sense: number with a closing parenthesis, "
+        "bold sense name, em dash, one-clause explanation), then one sentence: "
+        f"'Based on your question, this report focuses on meaning 1.' {structure}"
+    )
 
 
 def _render_context_block(ctx: Dict[str, Any]) -> str:

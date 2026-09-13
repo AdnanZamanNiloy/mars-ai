@@ -259,3 +259,64 @@ async def test_graph_runs_intent_before_planner(monkeypatch):
     assert captured["intent"]["domain"] == "machine_learning"
     # intent lands in state for the synthesizer
     assert final["intent"]["ambiguity"] is True
+
+
+def test_sense_tagged_fallback_groups_by_sense():
+    """The extractive fallback must keep senses in separate sections, like
+    the LLM path — grouping flips from sub_question to sense when tagged."""
+    from app.agents.synthesizer import _deterministic_report
+
+    facts = [
+        {"claim": "The AI transformer uses attention mechanisms to weigh tokens.",
+         "source": "https://arxiv.org/abs/1706.03762", "confidence": 0.9,
+         "sense": "Transformer neural network architecture", "verified": True},
+        {"claim": "An electrical transformer steps AC voltage up or down via windings.",
+         "source": "https://en.wikipedia.org/wiki/Transformer", "confidence": 0.85,
+         "sense": "Electrical transformer (AC voltage device)", "verified": True},
+        {"claim": "Attention removes the recurrence bottleneck of earlier models.",
+         "source": "https://arxiv.org/abs/1706.03762", "confidence": 0.88,
+         "sense": "Transformer neural network architecture", "verified": True},
+    ]
+    result = _deterministic_report("What is transformer?", facts, facts, {}, [])
+    assert "Transformer neural network architecture" in result.answer
+    assert "electrical transformer" in result.answer.lower()
+    # claims must stay inside their own sense's section, never mixed
+    ai_pos = result.answer.find("attention mechanisms")
+    elec_pos = result.answer.find("steps AC voltage")
+    assert ai_pos != -1 and elec_pos != -1
+
+
+def test_audit_exempts_disambiguation_lines():
+    from app.agents.synthesizer import audit_citations
+
+    numbered = [{"n": 1, "domain": "arxiv.org", "url": "https://arxiv.org/a",
+                 "tier": "preprint", "authority": 0.88, "primary": True}]
+    facts = [{"citation": 1, "claim": "The transformer architecture uses attention mechanisms."}]
+    answer = (
+        "## Executive Summary\n\n"
+        "1) **Transformer neural network architecture** — attention-based deep learning model.\n"
+        "2) **Electrical transformer** — device that changes AC voltage.\n\n"
+        "Based on your question, this report focuses on meaning 1.\n\n"
+        "The transformer architecture uses attention mechanisms [1].\n\n"
+        "## Sources\n\n[1] arxiv.org (preprint, primary) — https://arxiv.org/a"
+    )
+    audit = audit_citations(answer, numbered, facts)
+    assert audit.uncited_factual == [], audit.uncited_factual
+
+
+def test_ambiguity_block_rendered_for_ambiguous_intent():
+    from app.agents.synthesizer import _render_ambiguity_block
+
+    block = _render_ambiguity_block({
+        "ambiguity": True,
+        "recommended_action": "research_dominant",
+        "senses": [
+            {"label": "Transformer neural network architecture", "domain": "machine_learning",
+             "probability": 0.75, "note": "attention-based model"},
+            {"label": "Electrical transformer", "domain": "engineering",
+             "probability": 0.20, "note": "AC voltage device"},
+        ],
+    })
+    assert "**Transformer neural network architecture**" in block
+    assert "focuses on meaning 1" in block
+    assert _render_ambiguity_block({"ambiguity": False, "senses": []}) == ""
