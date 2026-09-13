@@ -126,6 +126,20 @@ def clear_run_usage() -> None:
     _RUN_USAGE.set(None)
 
 
+def run_seconds_remaining() -> float:
+    """Wall-clock seconds left in the current research run's budget.
+
+    Ladders consult this before spending a second provider attempt: a
+    budget-aware retry is worth it, a retry that will be killed by the run
+    timeout anyway is not. Outside a run (tests, scripts) the answer is
+    'plenty' — the caller's own timeout still protects it.
+    """
+    usage = _RUN_USAGE.get()
+    if usage is None:
+        return 10_000.0
+    return usage.budget.remaining_seconds
+
+
 def set_stage_hint(stage: str) -> None:
     """Best-effort stage label so ledger entries attribute correctly
     (planner/summarizer/critic/synthesizer) even though the LLM client's

@@ -34,6 +34,7 @@ import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from app.core.cache import cache_key, get_cache
+from app.core.usage import run_seconds_remaining
 from app.core.degradation import record_fallback
 from app.core.llm import AllProvidersFailedError, LLMClient, PromptTooLargeError, clamp_confidence
 from app.core.logging import get_logger
@@ -446,7 +447,10 @@ async def summarizer_agent(
         # written instead of degrading the whole stage to heuristic
         # extraction. Same sources every attempt — only their excerpts shrink.
         facts = []
-        for excerpt_budget in _EXCERPT_BUDGET_LADDER:
+        budget_index = 0
+        timeout_second_chance = True
+        while budget_index < len(_EXCERPT_BUDGET_LADDER):
+            excerpt_budget = _EXCERPT_BUDGET_LADDER[budget_index]
             compact_results = _allocate_excerpts(quality_results, excerpt_budget)
             user_prompt = (
                 f"Research query: {query}\n\n"
@@ -474,11 +478,27 @@ async def summarizer_agent(
                     "[Summarizer] provider rejected the prompt at %d excerpt chars; retrying smaller",
                     excerpt_budget,
                 )
+                budget_index += 1
                 continue
             except AllProvidersFailedError as exc:
                 if "timeout" in str(exc).lower():
-                    # Slowness, not size or rate: shrink-retrying a slow
-                    # provider multiplies 90s stalls. Fail to fallback now.
+                    # Slowness, not size or rate. One budget-aware second
+                    # chance at the SMALLEST payload: a smaller prompt both
+                    # transmits faster and generates fewer tokens, so a
+                    # flaky provider may still complete inside the run's
+                    # remaining wall-clock. Never more than one — a slow
+                    # provider gets 2 attempts, not 3x90s stalls.
+                    if (
+                        timeout_second_chance
+                        and budget_index < len(_EXCERPT_BUDGET_LADDER) - 1
+                        and run_seconds_remaining() > 120.0
+                    ):
+                        timeout_second_chance = False
+                        budget_index = len(_EXCERPT_BUDGET_LADDER) - 1
+                        logger.warning(
+                            "[Summarizer] provider stalled; one second chance at the smallest excerpt budget"
+                        )
+                        continue
                     logger.warning("[Summarizer] provider too slow (timeout); using heuristic fallback")
                     break
                 # Rate-limited / provider wall: a smaller prompt needs fewer
@@ -488,6 +508,7 @@ async def summarizer_agent(
                     "[Summarizer] providers unavailable at %d excerpt chars (%s); retrying smaller",
                     excerpt_budget, str(exc)[:140],
                 )
+                budget_index += 1
                 continue
             except Exception as exc:
                 logger.warning("[Summarizer] LLM call failed, using heuristic fallback", exc_info=exc)

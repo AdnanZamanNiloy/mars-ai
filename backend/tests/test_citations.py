@@ -502,9 +502,12 @@ def test_fallback_report_has_sections_and_figures():
     answer = asyncio.run(synthesizer_agent(ExplodingLLM(), "What is transformer?", facts))
     assert not answer.startswith("# Final Answer"), "workflow adds the title; no double lead"
     assert "## Markets" in answer
-    assert "## Key figures" in answer
-    figures = answer.split("## Key figures")[1].split("## Sources")[0]
-    assert "USD 23 billion" in figures and "12 percent" in figures
+    # Number-bearing claims render as bullets inside their section — a
+    # separate statistics dump section is what made reports read like data
+    # cut from sources.
+    body = answer.split("## Sources")[0]
+    assert "USD 23 billion" in body and "12 percent" in body
+    assert "- " in answer.split("## Markets")[1].split("## Sources")[0]
     legend = answer.split("## Sources")[1]
     for host in ("a.com", "g.com", "h.com"):
         assert host in legend
@@ -598,7 +601,8 @@ def test_fallback_full_decision_shape():
     }
     answer = asyncio.run(synthesizer_agent(ExplodingLLM(), "What is transformer?", facts, context))
     assert "## Executive Summary" in answer
-    assert "## Key Findings" in answer
+    # Headline finding previewed in the summary, claims as grouped bullets.
+    assert "- Electrical transformers step voltage" in answer.split("## Angle one")[0]
     assert "## Angle one" in answer and "## Angle two" in answer
     assert "## Evidence & Confidence" in answer
     assert "## Limitations" in answer
@@ -630,10 +634,13 @@ def test_fallback_key_findings_are_bullets_with_score_and_ambiguity():
     ]
     answer = asyncio.run(synthesizer_agent(
         ExplodingLLM(), "What is transformer?", facts, {"confidence": 0.8}))
-    findings = answer.split("## Key Findings")[1].split("## ")[0]
-    assert "- Transformer neural models" in findings
+    exec_block = answer.split("## Executive Summary")[1].split("## ")[0]
+    assert "- Electrical transformers step voltage" in exec_block, \
+        "the single highest-confidence claim headlines the summary"
     assert "distinct angles" in answer
     assert "Confidence: High (0.80)" in answer
+    # the headline claim must not repeat inside its section
+    assert answer.count("Electrical transformers step voltage") == 1
 
 
 def test_thin_evidence_disclaimer():

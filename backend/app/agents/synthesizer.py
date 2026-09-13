@@ -47,6 +47,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set
 from app.core.degradation import record_fallback
 from app.core.llm import AllProvidersFailedError, LLMClient, PromptTooLargeError
 from app.core.logging import get_logger
+from app.core.usage import run_seconds_remaining
 from app.core.schemas import SynthesizerAnswerModel
 
 from app.agents.contradiction import numeric_ranges, summarize_contradictions
@@ -127,6 +128,14 @@ renumber, do not guess, do not cite a number you were not given.
    - SYNTHESIZE, DON'T PARAPHRASE: each section must weave together 2+ of
      the provided sources into a cause/effect or comparison narrative.
      Single-source recitation is what makes a report read like raw notes.
+   - PROSE QUALITY — this is an intelligence brief, not a note dump:
+     open every section with a 1-3 sentence synthesis paragraph in your own
+     words (weaving that section's cited facts), then bullets for genuinely
+     enumerable findings only. Every sentence must be complete and
+     self-contained — never a fragment that reads like it was cut from a
+     source. Connect related findings with comparison or causation
+     ("compared with", "because", "as a result") instead of listing them
+     side by side.
    - DISAGREEMENT IS DATA: where sources conflict, present both positions
      side by side with their numbers and sources — never average them and
      never silently pick one. Pre-computed ranges are provided; use them.
@@ -328,7 +337,10 @@ async def synthesize(
     numbered: List[Dict[str, Any]] = []
     cited_facts: List[Dict[str, Any]] = []
     payload: Dict[str, Any] = {}
-    for fact_cap in _FACT_CAP_LADDER:
+    cap_index = 0
+    timeout_second_chance = True
+    while cap_index < len(_FACT_CAP_LADDER):
+        fact_cap = _FACT_CAP_LADDER[cap_index]
         top_facts = _stratified_top_facts(usable_facts, per_angle=10, cap=fact_cap)
         numbered, cited_facts = _number_facts(top_facts)
         angles = []
@@ -369,11 +381,25 @@ async def synthesize(
                 "[Synthesizer] provider rejected the prompt at cap=%d facts; retrying smaller",
                 fact_cap,
             )
+            cap_index += 1
             continue
         except AllProvidersFailedError as exc:
             if "timeout" in str(exc).lower():
-                # Slowness, not size or rate: shrink-retrying a slow provider
-                # multiplies 90s stalls. Fail to fallback now.
+                # Slowness, not size or rate. One budget-aware second chance
+                # at the SMALLEST evidence view: a flaky provider may still
+                # complete a small prompt inside the run's remaining
+                # wall-clock. Never more than one.
+                if (
+                    timeout_second_chance
+                    and cap_index < len(_FACT_CAP_LADDER) - 1
+                    and run_seconds_remaining() > 120.0
+                ):
+                    timeout_second_chance = False
+                    cap_index = len(_FACT_CAP_LADDER) - 1
+                    logger.warning(
+                        "[Synthesizer] provider stalled; one second chance at the smallest fact cap"
+                    )
+                    continue
                 logger.warning("[Synthesizer] provider too slow (timeout); using deterministic fallback")
                 record_fallback("synthesizer")
                 payload = {}
@@ -384,6 +410,7 @@ async def synthesize(
                 "[Synthesizer] providers unavailable at cap=%d facts (%s); retrying smaller",
                 fact_cap, str(exc)[:140],
             )
+            cap_index += 1
             continue
         except Exception as exc:
             logger.warning("[Synthesizer] LLM call failed, using deterministic fallback", exc_info=exc)
@@ -825,13 +852,16 @@ def _deterministic_report(
     ctx: Dict[str, Any],
     angles: Sequence[str],
 ) -> SynthesisResult:
-    """Mirror the decision-grade shape extractively.
+    """An organized, honestly-labeled research digest — not imitation prose.
 
-    Executive Summary (lead claim + confidence line), Key Findings (one
-    representative claim per angle), angle sections from the remaining claims
-    (no claim used twice), Key figures, Evidence & Confidence, and a used-only
-    legend. MMR overlap threshold 0.35 splits observed paraphrases (0.39-0.53)
-    from cross-sense claims (0.10-0.18). No boilerplate openers.
+    The old extractive path glued source sentences into paragraphs, which
+    read exactly like chunks cut from different sources. This path leans
+    into what it is: a structured briefing. A query-framed executive
+    summary with one headline finding, then ONE BULLET PER VERIFIED CLAIM
+    grouped under its sense/angle section, the measured accounting, and a
+    used-only legend. Complete sentences, real structure, zero fake
+    narrative. MMR overlap threshold 0.35 splits observed paraphrases
+    (0.39-0.53) from cross-sense claims (0.10-0.18).
     """
     diverse = select_diverse(list(top_facts), k=40, max_similarity=0.35)
     groups: Dict[str, List[Dict[str, Any]]] = {}
@@ -845,7 +875,10 @@ def _deterministic_report(
             or str(item.get("sub_question", "") or "").strip()
         )
         bucket = groups.setdefault(key, [])
-        if len(bucket) < 6:
+        # 8 per group: large enough that number-bearing claims (the key
+        # figures) survive the cap — the old separate figures section that
+        # rescued them is gone.
+        if len(bucket) < 8:
             bucket.append(item)
         if len(groups) >= 6 and all(len(v) >= 3 for v in groups.values()):
             break
@@ -869,38 +902,32 @@ def _deterministic_report(
             seen_claims.add(claim)
             used.append(item)
 
-    finding_items = [items[0] for items in list(groups.values())[:6] if items][:5]
-    for item in finding_items:
-        _take(item)
+    # Headline finding: the single highest-confidence claim, previewed in the
+    # summary and excluded from its section (no duplicated claims anywhere).
+    headline: Optional[Dict[str, Any]] = None
+    for items in groups.values():
+        if items:
+            headline = items[0]
+            break
+    if headline is not None:
+        _take(headline)
 
     sections: List[str] = []
-    for sub_question, items in list(groups.items())[:6]:
-        rest = [i for i in items if str(i.get("claim", "")) not in seen_claims]
-        if not rest:
-            continue
-        body = _sanitize_answer_text(" ".join(_with_citation(i) for i in rest), query)
-        if not body:
-            continue
-        title = _section_title(sub_question)
-        sections.append(f"## {title}\n\n{body}" if title else body)
-        for item in rest:
+    for key, items in list(groups.items())[:6]:
+        bullets: List[str] = []
+        for item in items:
+            if str(item.get("claim", "")) in seen_claims:
+                continue
+            rendered = _with_citation(item).strip()
+            if not rendered:
+                continue
             _take(item)
+            bullets.append(f"- {rendered}")
+        if not bullets:
+            continue
+        title = _section_title(key) or "Findings"
+        sections.append(f"## {title}\n\nVerified findings:\n\n" + "\n".join(bullets))
 
-    figures = [
-        item
-        for item in diverse
-        if _FIGURE_RE.search(str(item.get("claim", "") or ""))
-        and str(item.get("claim", "")) not in seen_claims
-    ][:5]
-    if figures:
-        sections.append(
-            "## Key figures\n\n"
-            + _sanitize_answer_text(" ".join(_with_citation(i) for i in figures), query)
-        )
-        for item in figures:
-            _take(item)
-
-    summary_lead = _with_citation(finding_items[0]) if finding_items else ""
     thin_note = (
         "Evidence is thin — fewer than 3 verified facts support this report, "
         "so treat every finding below as provisional. "
@@ -913,27 +940,29 @@ def _deterministic_report(
         else ""
     )
     ambiguity_note = (
-        f" The evidence spans {len(groups)} distinct angles of this query, separated below."
+        f" The evidence spans {len(groups)} distinct angles of this query, each in its own section below."
         if len(groups) >= 3
         else ""
     )
+
+    headline_bullet = f"- {_with_citation(headline).strip()}" if headline is not None else ""
     summary = (
-        f"## Executive Summary\n\n{thin_note}{summary_lead}{ambiguity_note}\n\n"
+        "## Executive Summary\n\n"
+        f"{thin_note}Verified findings for \u201c{_normalize_query_concept(query)}\u201d — "
+        f"{gap_stats['verified']} verified claim(s) from {n_sources} source(s)."
+        f"{ambiguity_note}"
+        + (f"\n\n{headline_bullet}" if headline_bullet else "")
+        + "\n\n"
         f"Confidence: {_confidence_statement(ctx, gap_stats['verified'])} — "
         f"{gap_stats['verified']} verified facts across {n_sources} sources.{degraded_note}"
     )
     sections.insert(0, summary)
-    rest_findings = finding_items[1:]
-    if rest_findings:
-        bullets = "\n\n".join("- " + _with_citation(i).strip() for i in rest_findings)
-        sections.insert(1, "## Key Findings\n\n" + _sanitize_answer_text(bullets, query))
 
     sections.append(_gaps_section(gap_stats))
 
     # The extractive path knows exactly which source each claim came from, so
-    # it cites perfectly — the old fallback emitted an uncited wall of claims
-    # with a legend nobody could map to them. Claims were rendered with an
-    # identity token; now that the used set is final, tokens become numbers.
+    # it cites perfectly — claims were rendered with an identity token; now
+    # that the used set is final, tokens become numbers.
     numbered, pairs = _assign_numbers(used[:40], max_sources=40)
     answer = "\n\n".join(sections) + "\n\n" + _legend_block(numbered)
     for fact, index in pairs:

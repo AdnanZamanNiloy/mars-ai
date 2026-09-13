@@ -419,8 +419,9 @@ async def test_summarizer_shrinks_prompt_when_provider_rejects_size(tmp_path):
 
 
 async def test_summarizer_does_not_shrink_on_timeouts(tmp_path):
-    """A slow provider (timeout wall) must not get three 90s shrink-retries —
-    one stall per stage, then the heuristic fallback."""
+    """A slow provider (timeout wall) gets exactly TWO attempts — the initial
+    payload and one budget-aware second chance at the smallest size — then
+    the heuristic fallback. Never the old 3x90s stall pattern."""
     from app.agents.summarizer import summarizer_agent
     from app.core.llm import AllProvidersFailedError
     from app.core.config import Settings
@@ -444,5 +445,47 @@ async def test_summarizer_does_not_shrink_on_timeouts(tmp_path):
         "snippet": "solar", "sub_question": "solar statistics",
     }]
     facts = await summarizer_agent(llm, "solar statistics", results)
-    assert llm.calls == 1, "no shrink-retry on a timeout wall"
+    assert llm.calls == 2, "one stall + one smallest-payload second chance, then stop"
     assert facts and facts[0]["extraction"] == "heuristic"
+
+
+async def test_summarizer_timeout_gets_one_budgeted_second_chance(tmp_path):
+    """A stalled provider gets exactly ONE more attempt at the smallest
+    payload when the run's wall-clock budget allows it — bounded, not a
+    3x90s stall pattern."""
+    from app.agents.summarizer import summarizer_agent
+    from app.core.config import Settings
+    from app.core.llm import AllProvidersFailedError
+    from app.core.usage import start_run_usage
+
+    class StalledThenHealthyLLM:
+        def __init__(self, settings):
+            self.settings = settings
+            self.calls = []
+
+        async def generate_json(self, system_prompt, user_prompt, retries=3, response_model=None):
+            self.calls.append(len(user_prompt))
+            if len(self.calls) == 1:
+                raise AllProvidersFailedError("Active provider failed: ReadTimeout.")
+            return {"facts": [{
+                "claim": "Solar capacity grew 40 percent in 2024",
+                "source": "https://arxiv.org/0", "confidence": 0.9,
+            }]}
+
+    settings = Settings(groq_api_key="k", database_url=str(tmp_path / "s2c.db"), _env_file=None)
+    llm = StalledThenHealthyLLM(settings)
+    usage = start_run_usage("test-run", settings)  # fresh budget: seconds remaining is large
+    usage.budget.started_at -= 1  # barely any time spent
+    results = [{
+        "url": f"https://arxiv.org/{i}", "title": f"paper {i}",
+        "content": "Solar capacity grew 40 percent in 2024, reaching 2000 GW installed worldwide. " * 30,
+        "snippet": "solar", "sub_question": "solar statistics",
+    } for i in range(8)]
+    # Distinct query string: the process-global cache singleton would serve
+    # the other ladder test's identical key and skip the LLM entirely.
+    facts = await summarizer_agent(llm, "solar statistics outlook 2024", results)
+    assert len(llm.calls) == 2, "exactly one second chance"
+    assert llm.calls[1] < llm.calls[0], "second chance uses the smallest payload"
+    assert facts and facts[0]["extraction"] == "llm"
+    from app.core.usage import clear_run_usage
+    clear_run_usage()
