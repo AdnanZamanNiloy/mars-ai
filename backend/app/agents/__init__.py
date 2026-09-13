@@ -5,9 +5,11 @@ in only the module that defines it. That matters in the host application,
 where `app.agents.search` drags in httpx and provider SDKs that a worker
 running only synthesis should not pay for.
 
-Public surface (stable names, additive-only evolution):
+Public surface (stable names, additive-only evolution). Every name here
+MUST resolve to a real module — a name pointing at a module that was never
+built (or was removed) is a silent trap for any consumer, so the mapping is
+guarded by `tests/test_agents_facade.py::test_every_lazy_export_resolves`.
 
-    run_mission, MissionResult, BudgetedLLM      — the composition layer
     orchestrate, OrchestrationPlan, ...          — adaptive orchestration
     planner_agent, execution_waves, ...          — planning contracts
     SearchClient, contract_queries, ...          — multi-provider search
@@ -16,19 +18,16 @@ Public surface (stable names, additive-only evolution):
     detect_contradictions, compute_confidence    — conflicts + scoring
     DepthController, StopDecision               — dynamic depth
     ResearchBudget, retry/breaker helpers        — cost + reliability
-    ResearchTrace, merge_traces                  — traceability
-    decision_briefing, DecisionBrief             — executive decision layer
-    evaluate_mission, run_benchmark              — evaluation lab
+
+Executive decision (`app.core.decision`), scenarios (`app.core.scenarios`),
+self-diagnosis (`app.core.diagnose`) and the benchmark suite (`bench/`) live
+outside this package; this facade re-exports agent modules only.
 """
 from __future__ import annotations
 
 from typing import Any
 
 _LAZY: dict[str, str] = {
-    # mission layer
-    "run_mission": "app.agents.mission",
-    "MissionResult": "app.agents.mission",
-    "BudgetedLLM": "app.agents.mission",
     # orchestration
     "orchestrate": "app.agents.orchestrator",
     "OrchestrationPlan": "app.agents.orchestrator",
@@ -75,9 +74,6 @@ _LAZY: dict[str, str] = {
     "CircuitBreaker": "app.agents.reliability",
     "gather_bounded": "app.agents.reliability",
     "ok_results": "app.agents.reliability",
-    # traceability
-    "ResearchTrace": "app.agents.trace",
-    "merge_traces": "app.agents.trace",
     # sources / evidence
     "classify_source": "app.agents.sources",
     "authority_score": "app.agents.sources",
@@ -87,15 +83,6 @@ _LAZY: dict[str, str] = {
     "evidence_stats": "app.agents.evidence_utils",
     "verify_answer_support": "app.agents.evidence_utils",
     "numbers_grounded": "app.agents.evidence_utils",
-    # decision layer
-    "decision_briefing": "app.agents.decision",
-    "DecisionBrief": "app.agents.decision",
-    "DecisionOption": "app.agents.decision",
-    # evaluation lab
-    "evaluate_mission": "app.agents.evaluation",
-    "run_benchmark": "app.agents.evaluation",
-    "EvaluationReport": "app.agents.evaluation",
-    "BenchmarkReport": "app.agents.evaluation",
 }
 
 
