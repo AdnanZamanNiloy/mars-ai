@@ -27,6 +27,9 @@ from difflib import SequenceMatcher
 from typing import Any, Dict, List
 
 from app.agents.evidence_utils import extract_domain, source_reliability_score
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 # Corroboration band: similar enough to be about the same thing, below the
 # dedupe merge threshold (0.86) so identical claims were already collapsed.
@@ -221,6 +224,35 @@ def _axis_coverage(sub_questions: List[Dict[str, Any]] | None, facts: List[Dict[
     return min(1.0, len(covered) / len(set(axis_by_question.values())))
 
 
+def _grade_records(facts: List[Dict[str, Any]], contradictions: List[Dict[str, Any]] | None) -> float | None:
+    """Evidence-grade quality of the fact pool, or None when ungradeable.
+
+    Grades come from measured per-claim signals (independent corroboration,
+    verification, numeric support, contradiction) — never an LLM opinion.
+    Returns None (so the confidence weights stay historical) when there is no
+    usable pool or grading fails; grading must never break confidence.
+    """
+    pool = [f for f in (facts or []) if isinstance(f, dict) and str(f.get("claim", "")).strip()]
+    if not pool:
+        return None
+    try:
+        from app.core.evidence_grade import grade_facts
+
+        graded = grade_facts(pool, contradictions=contradictions)
+        records = [g["evidence"] for g in graded if isinstance(g.get("evidence"), dict)]
+        if not records:
+            return None
+        # grade_facts already emitted serialized records; score them directly
+        # (EvidenceRecord reconstruction from partial dicts is fragile).
+        weights = {  # same scale as evidence_grade.evidence_quality_score
+            "A": 1.0, "B": 0.75, "C": 0.4, "D": 0.1,
+        }
+        return round(sum(weights.get(str(r.get("grade", "D")), 0.1) for r in records) / len(records), 3)
+    except Exception as exc:  # grading must never break confidence
+        logger.warning("evidence grading failed, skipping signal: %s", exc)
+        return None
+
+
 def _contradiction_penalty(
     contradictions: List[Dict[str, Any]] | None,
     fact_count: int = 0,
@@ -301,6 +333,17 @@ def compute_confidence(
         weights["source_diversity"] = round(weights.get("source_diversity", 0.15) - 0.05, 4)
         weights["axis_coverage"] = 0.05
         signals["axis_coverage"] = round(_axis_coverage(sub_questions, facts), 3)
+
+    # --- evidence-grade signal (Step 2): how good is the evidence itself? ---
+    # Grades are computed from measured, per-claim signals (independence,
+    # verification, numeric support, contradiction) — never from an LLM's
+    # opinion. Carved 0.05 from source_quality so the historical weights
+    # stay intact when grades are absent (older callers/tests).
+    grade_records = _grade_records(facts, contradictions)
+    if grade_records is not None:
+        weights["source_quality"] = round(weights.get("source_quality", 0.20) - 0.05, 4)
+        weights["claim_evidence_quality"] = 0.05
+        signals["claim_evidence_quality"] = round(grade_records, 3)
 
     overall = sum(weights.get(name, 0.0) * value for name, value in signals.items())
     overall = round(max(0.0, min(1.0, overall)), 3)

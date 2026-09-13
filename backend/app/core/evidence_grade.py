@@ -30,7 +30,7 @@ from app.agents.evidence_utils import (
     extract_domain,
     extract_numbers,
 )
-from app.agents.sources import TIER_PREPRINT, classify_source
+from app.agents.sources import classify_source
 
 # --- Grade vocabulary -------------------------------------------------------
 # A: primary/peer-reviewed, verified, independently corroborated, numerically
