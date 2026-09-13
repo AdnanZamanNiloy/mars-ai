@@ -35,6 +35,24 @@ architectural stages, not prompt hopes.
 - New `intent` NDJSON event (+ frontend case) and an Intent row in the
   intelligence panel.
 
+### Provider resilience: LLM-written answers on flaky free tiers
+
+- **Payload ladders**: Groq rejects requests over ~21-41KB (HTTP 413, measured
+  live) — exactly where the summarizer prompt lands. Both writer stages now
+  shrink their evidence view (22k→12k→6k excerpt budgets; 40→24→14 fact caps)
+  and stay LLM-written instead of degrading to extraction. Rate-limit walls
+  (429/TPM exhaustion) shrink too; timeouts never do (slowness isn't a size
+  signal — shrink-retrying a slow provider multiplies 90s stalls).
+- **Permanent-400 fail-fast**: a provider with no credits 400s every call;
+  400s with balance/credit/key/model signatures and 404s fail fast instead of
+  burning 4 retries per LLM call.
+- **Patient Retry-After**: the first retry of a call honors the provider's
+  own wait hint up to 20s (one patient wait clears a rolling TPM window);
+  later retries cap at 3s. Body-style hints ('try again in X.XXs') parsed.
+- **ACTIVE_PROVIDER_FALLBACK** (default false): a FAILING UI-selected active
+  provider falls through to the env chain instead of degrading the run —
+  built for flaky free proxies; strict exclusivity stays available.
+
 ### New pre-delivery stage: Answer Quality Optimizer (`agents/answer_quality.py`)
 
 - Every synthesized answer is scored 0-100 on Accuracy / Relevance /
