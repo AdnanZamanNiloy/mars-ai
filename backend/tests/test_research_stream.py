@@ -246,3 +246,64 @@ async def test_preflight_passes_when_a_provider_responds(tmp_path):
             response = await _post_stream(client, "valid research query here")
     events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
     assert any(e["type"] == "final_report" for e in events), events
+
+
+class StubExpansionWorkflow:
+    """Pass 1 verifies two facts; pass 2 adds a third, annotated only at its
+    own verifier snapshot. Exercises both expansion bugs: the new claim must
+    stream a verified_update containing ONLY the new item (the old code
+    re-emitted once per run, leaving pass-2 claims stuck at null), and must
+    be persisted with its real verified flag (the old code saved it at the
+    summarizer snapshot with verified=0 and never re-saved — the length
+    never changes at the verifier snapshot)."""
+
+    async def astream(self, state, stream_mode=None):
+        f1 = {"claim": "Claim one", "source": "https://a.com", "confidence": 0.8}
+        f2 = {"claim": "Claim two", "source": "https://b.com", "confidence": 0.8}
+        f1v = {**f1, "verified": True, "verification_score": 0.9}
+        f2v = {**f2, "verified": False, "verification_score": 0.2}
+        f3 = {"claim": "Claim three", "source": "https://c.com", "confidence": 0.8}
+        f3v = {**f3, "verified": True, "verification_score": 0.85}
+        yield {"facts": [f1, f2], "iteration": 0}
+        yield {"facts": [f1v, f2v], "iteration": 0}
+        yield {"facts": [f1v, f2v], "iteration": 1,
+               "critique": {"is_sufficient": False, "reason": "gap", "improved_queries": ["more"]}}
+        yield {"facts": [f1v, f2v, f3], "iteration": 1,
+               "critique": {"is_sufficient": False, "reason": "gap", "improved_queries": ["more"]}}
+        yield {"facts": [f1v, f2v, f3v], "iteration": 1,
+               "critique": {"is_sufficient": False, "reason": "gap", "improved_queries": ["more"]}}
+        yield {"facts": [f1v, f2v, f3v], "iteration": 2,
+               "critique": {"is_sufficient": True, "reason": "ok"}}
+        yield {"final_report": "# Final Answer\nok", "confidence": 0.8}
+
+
+async def test_expansion_pass_findings_stream_and_persist_with_flags(tmp_path):
+    import aiosqlite
+
+    from app.db.sqlite import init_db
+
+    db_path = str(tmp_path / "expansion.db")
+    await init_db(db_path)
+    settings = Settings(groq_api_key="test-key", database_url=db_path, _env_file=None)
+    app = _build_app(StubExpansionWorkflow(), settings)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await _post_stream(client, "valid research query here")
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+
+    updates = [e for e in events if e.get("type") == "findings" and e.get("verified_update")]
+    assert len(updates) == 2, events
+    assert len(updates[0]["items"]) == 2
+    assert len(updates[1]["items"]) == 1, updates
+    assert updates[1]["items"][0]["claim"] == "Claim three"
+    assert updates[1]["items"][0]["verified"] is True
+
+    async with aiosqlite.connect(db_path) as db:
+        cur = await db.execute("SELECT claim, verified FROM claims ORDER BY id")
+        rows = await cur.fetchall()
+    assert len(rows) == 3, rows
+    by_claim = {claim: verified for claim, verified in rows}
+    assert by_claim["Claim one"] == 1
+    assert by_claim["Claim two"] == 0
+    assert by_claim["Claim three"] == 1, "pass-2 claim must persist with its real verified flag"

@@ -215,3 +215,95 @@ def test_resume_restores_run_max_iterations(tmp_path):
     state = asyncio.run(load_state_for_resume(db_path, "run-deep"))
     assert state is not None
     assert state["max_iterations"] == 5
+
+
+def test_resume_reemits_loaded_findings(tmp_path, monkeypatch):
+    """The frontend clears findings before resuming — the resume stream must
+    re-emit the persisted claims, or the resumed run card shows zero
+    evidence against its own report."""
+    import json
+
+    import httpx
+    from fastapi import FastAPI
+
+    db_path = str(tmp_path / "resume-findings.db")
+    _seed(db_path)
+
+    import app.graph.workflow as wf
+
+    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3,
+                          contradictions=None, **kwargs):
+        return {"is_sufficient": True, "reason": "ok", "improved_queries": [], "confidence": 0.7}
+
+    async def fake_synthesizer(llm, query, facts=None, context=None):
+        return "resumed answer"
+
+    monkeypatch.setattr(wf, "critic_agent", fake_critic)
+    monkeypatch.setattr(wf, "synthesizer_agent", fake_synthesizer)
+
+    from app.api.routes import limiter, router as api_router
+
+    app = FastAPI()
+    app.state.settings = Settings(groq_api_key="k", database_url=db_path, _env_file=None)
+    app.include_router(api_router, prefix="/api")
+    limiter.reset()
+
+    async def _call():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.post("/api/research/run-fail-1/resume")
+
+    response = asyncio.run(_call())
+    limiter.reset()
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    findings = [e for e in events if e.get("type") == "findings"]
+    assert findings, events
+    items = [i for e in findings for i in e["items"]]
+    assert "RAG retrieves documents before generation" in [i["claim"] for i in items]
+    loaded = next(i for i in items if i["claim"] == "RAG retrieves documents before generation")
+    assert loaded["verified"] is True
+
+
+def test_resume_does_not_duplicate_persisted_claims(tmp_path, monkeypatch):
+    """The findings re-emission must not re-insert claims already saved by
+    the first attempt — saved_facts starts at the loaded count."""
+    import aiosqlite
+
+    db_path = str(tmp_path / "resume-nodup.db")
+    _seed(db_path)
+
+    import app.graph.workflow as wf
+
+    async def fake_critic(llm, query, facts=None, iteration=1, max_iterations=3,
+                          contradictions=None, **kwargs):
+        return {"is_sufficient": True, "reason": "ok", "improved_queries": [], "confidence": 0.7}
+
+    async def fake_synthesizer(llm, query, facts=None, context=None):
+        return "resumed answer"
+
+    monkeypatch.setattr(wf, "critic_agent", fake_critic)
+    monkeypatch.setattr(wf, "synthesizer_agent", fake_synthesizer)
+
+    from app.api.routes import limiter, router as api_router
+
+    app = FastAPI()
+    app.state.settings = Settings(groq_api_key="k", database_url=db_path, _env_file=None)
+    app.include_router(api_router, prefix="/api")
+    limiter.reset()
+
+    async def _call():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.post("/api/research/run-fail-1/resume")
+
+    response = asyncio.run(_call())
+    limiter.reset()
+    assert response.status_code == 200
+
+    async def _count():
+        async with aiosqlite.connect(db_path) as db:
+            cur = await db.execute("SELECT COUNT(*) FROM claims WHERE run_id = 'run-fail-1'")
+            return (await cur.fetchone())[0]
+
+    assert asyncio.run(_count()) == 1

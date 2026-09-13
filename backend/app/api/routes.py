@@ -44,6 +44,21 @@ logger = get_logger(__name__)
 limiter = Limiter(key_func=get_remote_address)
 
 
+def _finding_item(fact: Dict[str, Any]) -> Dict[str, Any]:
+    """Wire shape of one findings item — shared by the stream, the verified
+    re-emission and the resume path. Claim Inspector (3.6) detail fields are
+    harmless when absent pre-verification."""
+    return {
+        "claim": fact.get("claim", ""),
+        "source": fact.get("source", ""),
+        "verified": fact.get("verified"),
+        "verification_score": fact.get("verification_score"),
+        "verification_reason": fact.get("verification_reason"),
+        "agent": fact.get("agent", ""),
+        "confidence": fact.get("confidence"),
+    }
+
+
 class ResearchRequest(BaseModel):
     query: str = Field(..., min_length=5, max_length=500)
     deep_research: bool = False
@@ -267,7 +282,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
             last_iteration = -1
             emitted_plan = False
             emitted_findings = 0
-            emitted_verified = False
+            emitted_annotated = 0
             saved_facts = 0
             saved_source_urls: set = set()
 
@@ -414,55 +429,43 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                                 breakdown=snapshot.get("confidence_breakdown") or {},
                             ))
 
-                        facts = snapshot.get("facts", [])
-                        has_verified = any("verified" in f for f in facts)
+                        facts = [f for f in snapshot.get("facts", []) if isinstance(f, dict)]
                         if len(facts) > emitted_findings:
                             # Emit EVERY new fact. The old `+3` slice emitted
                             # three but marked the whole batch consumed, so
                             # facts 4..N of a large batch never streamed.
-                            new_facts = facts[emitted_findings:]
-                            findings = [
-                                {
-                                    "claim": f.get("claim", ""),
-                                    "source": f.get("source", ""),
-                                    # Claim Inspector (3.6) detail fields —
-                                    # harmless when absent pre-verification.
-                                    "verified": f.get("verified"),
-                                    "verification_score": f.get("verification_score"),
-                                    "verification_reason": f.get("verification_reason"),
-                                    "agent": f.get("agent", ""),
-                                    "confidence": f.get("confidence"),
-                                }
-                                for f in new_facts
-                            ]
+                            findings = [_finding_item(f) for f in facts[emitted_findings:]]
                             yield event_line("findings", items=findings)
                             emitted_findings = len(facts)
-                        if has_verified and not emitted_verified:
-                            # Verifier annotates in place (same list length), so the
-                            # length check above never fires for it — re-emit the
-                            # annotated facts once so live verification is real.
-                            emitted_verified = True
-                            yield event_line("findings", verified_update=True, items=[
-                                {
-                                    "claim": f.get("claim", ""),
-                                    "source": f.get("source", ""),
-                                    "verified": f.get("verified"),
-                                    "verification_score": f.get("verification_score"),
-                                    "verification_reason": f.get("verification_reason"),
-                                    "agent": f.get("agent", ""),
-                                    "confidence": f.get("confidence"),
-                                }
-                                for f in facts
-                            ])
+                        # The verifier annotates in place (same list length), so the
+                        # length check above never fires for it. Re-emit the newly
+                        # annotated facts whenever the annotated count grows — the
+                        # old once-per-run re-emission left every expansion-pass
+                        # claim stuck at "verification pending" in the UI.
+                        annotated = sum(1 for f in facts if "verified" in f)
+                        if annotated > emitted_annotated:
+                            verified_items = [
+                                _finding_item(f) for f in facts if "verified" in f
+                            ][emitted_annotated:]
+                            yield event_line("findings", verified_update=True, items=verified_items)
+                            emitted_annotated = annotated
 
                         if len(facts) > saved_facts and iteration > 0:
-                            # Persist new claims incrementally (post-verifier snapshots only).
-                            await _persist(save_claims(
-                                settings.database_url,
-                                request_id,
-                                facts[saved_facts:],
-                            ))
-                            saved_facts = len(facts)
+                            # Persist new claims incrementally — but only when the
+                            # appended facts carry verification flags (post-verifier
+                            # snapshots). The summarizer snapshot grows the list
+                            # BEFORE verification, and saving there stored
+                            # expansion-pass claims with verified=0 even when they
+                            # later verified; the length never changes at the
+                            # verifier snapshot, so the flags were never re-saved.
+                            new_facts = facts[saved_facts:]
+                            if new_facts and all("verified" in f for f in new_facts):
+                                await _persist(save_claims(
+                                    settings.database_url,
+                                    request_id,
+                                    new_facts,
+                                ))
+                                saved_facts = len(facts)
             except TimeoutError:
                 await _persist(complete_research_run(
                     settings.database_url, request_id, "timeout",
@@ -613,6 +616,8 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
         reset_fallbacks()
         last_iteration = int(state.get("iteration", 0))
         emitted_findings = 0
+        emitted_annotated = 0
+        saved_facts = 0
 
         async def _persist(coro):
             """Memory persistence must never kill a resumed run either."""
@@ -652,6 +657,17 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
                 )
                 await _persist_save(settings.database_url, request_id, state.get("facts", []))
 
+            # The frontend clears findings when resuming — re-emit the loaded
+            # claims so the run card shows its evidence, not zeros.
+            loaded_facts = [f for f in state.get("facts", []) if isinstance(f, dict)]
+            if loaded_facts:
+                yield event_line("findings", items=[_finding_item(f) for f in loaded_facts])
+                emitted_findings = len(loaded_facts)
+                emitted_annotated = sum(1 for f in loaded_facts if "verified" in f)
+                # Loaded claims are already in the claims table from the first
+                # attempt — only expansion-pass additions may be saved below.
+                saved_facts = len(loaded_facts)
+
             last_snapshot: Dict[str, Any] = {}
             try:
                 async with asyncio.timeout(settings.research_timeout_sec):
@@ -659,9 +675,27 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
                         last_snapshot = snapshot
                         iteration = int(snapshot.get("iteration", 0))
 
-                        facts = snapshot.get("facts", [])
+                        facts = [f for f in snapshot.get("facts", []) if isinstance(f, dict)]
                         if len(facts) > emitted_findings:
+                            yield event_line(
+                                "findings",
+                                items=[_finding_item(f) for f in facts[emitted_findings:]],
+                            )
                             emitted_findings = len(facts)
+                        annotated = sum(1 for f in facts if "verified" in f)
+                        if annotated > emitted_annotated:
+                            verified_items = [
+                                _finding_item(f) for f in facts if "verified" in f
+                            ][emitted_annotated:]
+                            yield event_line("findings", verified_update=True, items=verified_items)
+                            emitted_annotated = annotated
+                        # Expansion on resume can add claims — persist them with the
+                        # same post-verifier guard as a fresh stream.
+                        if len(facts) > saved_facts:
+                            new_facts = facts[saved_facts:]
+                            if new_facts and all("verified" in f for f in new_facts):
+                                await _persist(save_claims(settings.database_url, request_id, new_facts))
+                                saved_facts = len(facts)
 
                         if iteration != last_iteration and iteration > last_iteration:
                             critique = snapshot.get("critique", {})
