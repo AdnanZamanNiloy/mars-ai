@@ -5,11 +5,11 @@ from app.core.confidence import compute_confidence
 
 GOOD_FACTS = [
     {"claim": "Solar capacity grew 40% in 2024", "source": "https://iea.org/x",
-     "verified": True, "verification_score": 0.8},
+     "verified": True, "verification_score": 0.8, "sub_question": "how much did solar grow"},
     {"claim": "Solar capacity expanded by 40 percent during 2024", "source": "https://irena.org/y",
-     "verified": True, "verification_score": 0.75},
+     "verified": True, "verification_score": 0.75, "sub_question": "how much did solar grow"},
     {"claim": "Wind additions slowed last year", "source": "https://ember-energy.org/z",
-     "verified": True, "verification_score": 0.7},
+     "verified": True, "verification_score": 0.7, "sub_question": "how much did wind grow"},
 ]
 CRITIC_PASS = {"is_sufficient": True, "reason": "ok"}
 SUB_QUESTIONS = [
@@ -93,6 +93,36 @@ def test_axis_coverage_penalizes_uncovered_plan():
         {"question": "regulatory outlook", "axis": "policy"},
     ])
     assert partial["signals"]["axis_coverage"] <= covered["signals"]["axis_coverage"]
+
+
+def test_axis_coverage_full_coverage_scores_one():
+    # Regression: the signal was structurally 0.0 (URL attribution against an
+    # empty search_results list) even when verified facts covered every axis.
+    result = _base(sub_questions=SUB_QUESTIONS)
+    assert result["signals"]["axis_coverage"] == 1.0
+
+
+def test_axis_coverage_partial_coverage_scores_fraction():
+    result = _base(sub_questions=SUB_QUESTIONS[:1] + [
+        {"question": "regulatory outlook", "axis": "policy"},
+    ])
+    assert result["signals"]["axis_coverage"] == 0.5
+
+
+def test_axis_coverage_unverified_facts_do_not_count():
+    unverified = [
+        {**f, "verified": False} for f in GOOD_FACTS
+    ]
+    result = _base(facts=unverified, sub_questions=SUB_QUESTIONS)
+    assert result["signals"]["axis_coverage"] == 0.0
+
+
+def test_axis_coverage_counts_all_facts_when_verification_never_ran():
+    no_flags = [
+        {k: v for k, v in f.items() if k != "verified"} for f in GOOD_FACTS
+    ]
+    result = _base(facts=no_flags, sub_questions=SUB_QUESTIONS)
+    assert result["signals"]["axis_coverage"] == 1.0
 
 
 def test_penalty_note_recorded():

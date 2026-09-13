@@ -174,18 +174,35 @@ EXTRACTIVE_FALLBACK_AGENTS = frozenset({"summarizer", "synthesizer"})
 
 
 def _axis_coverage(sub_questions: List[Dict[str, Any]] | None, facts: List[Dict[str, Any]]) -> float:
-    """Covered research axes / planned axes, attributed via source URL.
+    """Covered research axes / planned axes.
 
-    Uses the same URL->axis attribution as the depth controller so the
-    stopping rule and the confidence signal never disagree."""
-    from app.core.depth_controller import _axes_covered, _planned_axes, _url_to_axis
-
-    state = {"sub_questions": sub_questions or [], "search_results": [], "facts": facts}
-    planned = _planned_axes(state)
-    if not planned:
+    Facts attribute to a contract's axis via the fact's own `sub_question`
+    (stamped by the summarizer from the source record and preserved by dedup).
+    Only verified facts count — unless verification never ran, in which case
+    the pool is judged as-is. The previous implementation delegated to the
+    depth controller's URL-based attribution against a synthetic state with an
+    empty search_results list, so the signal was structurally always 0.0.
+    """
+    axis_by_question: Dict[str, str] = {}
+    for q in sub_questions or []:
+        if isinstance(q, dict):
+            question = str(q.get("question", "")).strip()
+            axis = str(q.get("axis", "")).strip()
+            if question and axis:
+                axis_by_question[question] = axis
+    if not axis_by_question:
         return 0.0
-    covered = _axes_covered(state, 1)  # any verified fact counts an axis covered
-    return min(1.0, len(covered) / len(planned))
+
+    pool = [f for f in facts or [] if isinstance(f, dict)]
+    if any("verified" in f for f in pool):
+        pool = [f for f in pool if f.get("verified")]
+
+    covered = {
+        axis_by_question[str(f.get("sub_question", "")).strip()]
+        for f in pool
+        if str(f.get("sub_question", "")).strip() in axis_by_question
+    }
+    return min(1.0, len(covered) / len(set(axis_by_question.values())))
 
 
 def _contradiction_penalty(
