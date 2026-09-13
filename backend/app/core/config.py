@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     max_queries_per_contract: int = 3
     # top results kept per provider search before dedup/rank
     search_max_results: int = 10
+    # Hard cap on accumulated search results across expansion passes. Raw page
+    # content is blanked after verification, but the result list still grows
+    # with every pass on a long deep run; the oldest entries are dropped once
+    # this ceiling is crossed. Never set below a single pass's output.
+    search_max_results_retained: int = 80
     # Tavily search depth ("basic" or "advanced")
     tavily_search_depth: str = "basic"
 

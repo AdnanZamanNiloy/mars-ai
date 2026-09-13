@@ -503,8 +503,8 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         # Per-axis expansion: search only questions with no results yet.
         # Each unanswered parent fans out to its alternate phrasings
         # (variants ride the parent contract, so nothing orphans).
-        # Accumulated results stay bounded (passes × ~10 snippets) and the
-        # verifier still releases raw content after each pass.
+        # Accumulation is explicitly capped (SEARCH_MAX_RESULTS_RETAINED) and
+        # the verifier blanks raw content after each pass.
         fresh: List[Any] = []
         answered = {
             normalize_text(str(r.get("sub_question", ""))) for r in previous
@@ -546,6 +546,20 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         results = await search_client.run_search(fresh)
         seen_urls = {r.get("url") for r in previous if r.get("url")}
         merged = [*previous, *(r for r in results if r.get("url") not in seen_urls)]
+        # Hard memory bound: expansion passes append results forever, so a
+        # long deep run could otherwise accumulate hundreds of result dicts
+        # in state (raw content is blanked after verification, but the list
+        # and its metadata still grow). Keep the NEWEST results — the ones
+        # the current pass's summarizer needs — and drop the oldest beyond
+        # the cap. Verification already ran on older passes, so nothing
+        # downstream loses content it still needs.
+        cap_results = max(10, int(getattr(
+            getattr(search_client, "settings", None),
+            "search_max_results_retained", 80) or 80))
+        if len(merged) > cap_results:
+            dropped = len(merged) - cap_results
+            merged = merged[dropped:]
+            logger.info("search_results_capped", dropped=dropped, retained=len(merged))
         logger.info("search_done", results=len(merged), fresh=len(fresh))
         return {"search_results": merged}
 
