@@ -5,8 +5,10 @@ functions receive — never the full ResearchState, never another
 sub-question's raw content. Cross-agent information enters only through
 the structured facts list after summarization + verification.
 
-Raw fetched content (SearchResult.content) is dropped from the context
-once that sub-question's summarization is complete (see release_raw_content).
+Raw fetched content (SearchResult.content) is blanked by the verifier
+node after each pass (workflow.verifier_node) — verification is the last
+consumer of full page text, and verify_facts keeps recorded verdicts, so
+nothing downstream needs it.
 """
 from __future__ import annotations
 
@@ -57,16 +59,6 @@ class AgentContext:
     tool_permissions: frozenset = ALLOWED_TOOL_PERMISSIONS
     # Optional domain allowlist enforced for the specialist (3.1 hook).
     allowed_source_domains: Optional[Tuple[str, ...]] = None
-
-    def release_raw_content(self) -> None:
-        """Drop raw fetched content once summarization for this context is done.
-
-        The snippet stays (small, useful for transparency); the full page
-        text must not persist in shared state past summarization.
-        """
-        for item in self.own_results:
-            if isinstance(item, dict) and "content" in item:
-                item["content"] = ""
 
     def question(self) -> str:
         return str(self.contract.get("question", "")).strip()

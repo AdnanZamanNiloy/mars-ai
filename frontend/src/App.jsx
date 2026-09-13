@@ -243,7 +243,7 @@ export default function App() {
             if (msg) {
               saveMissions(upsertMission({
                 runId: evt.request_id, query: msg.run.query, mode: msg.run.mode,
-                status: msg.run.resuming ? "running" : "running", confidence: null, cost: null,
+                status: "running", confidence: null, cost: null,
                 parentRunId: parentRef.current,
               }));
             }

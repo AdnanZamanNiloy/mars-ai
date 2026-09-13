@@ -238,7 +238,10 @@ def _verified_facts(facts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [f for f in facts if f.get("verified")]
 
 
-def build_markdown_report(state: ResearchState) -> str:
+def build_markdown_report(
+    state: ResearchState,
+    decision_options: List[Dict[str, Any]] | None = None,
+) -> str:
     facts = _prepare_supporting_evidence(state.get("facts", []))
     critique = state.get("critique", {})
     confidence = float(state.get("confidence", 0.0))
@@ -284,8 +287,8 @@ def build_markdown_report(state: ResearchState) -> str:
         health_note = citation_health_note(state.get("citation_health"))
         if health_note:
             limitations.append(health_note)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("citation_health_note_failed", error=str(exc), exc_info=exc)
 
     limitations = [
         *limitations,
@@ -317,7 +320,8 @@ def build_markdown_report(state: ResearchState) -> str:
     # Decision Intelligence Layer (3.5, Feature 18): options → recommendation
     # → rationale, structurally SEPARATE from the findings above. Factual
     # queries produce no options — no section rather than a placeholder.
-    decision_options = build_decision_layer(state)
+    if decision_options is None:
+        decision_options = build_decision_layer(state)
     if decision_options:
         decision_lines = []
         for o in decision_options:
@@ -717,11 +721,13 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         }
 
     async def finalize_node(state: ResearchState) -> FinalizeUpdate:
-        report = build_markdown_report(state)
+        # Decision options computed once and shared with the report builder.
+        options = build_decision_layer(state)
+        report = build_markdown_report(state, decision_options=options)
         # Decision options ride in state so the route can persist them (3.5).
         return {
             "final_report": report,
-            "decision_options": build_decision_layer(state),
+            "decision_options": options,
         }
 
     def route_after_critic(state: ResearchState) -> str:
