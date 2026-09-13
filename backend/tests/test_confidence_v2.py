@@ -134,3 +134,31 @@ def test_historical_weights_untouched_by_absent_signals():
     result = _base()
     assert result["weights"]["citation_coverage"] == 0.25
     assert result["weights"]["source_diversity"] == 0.15
+
+
+def test_cross_source_agreement_prefilter_preserves_corroboration():
+    """The cheap prefilter in _similarity must be score-preserving: pairs
+    inside the corroboration band keep their exact SequenceMatcher score,
+    unrelated pairs are skipped (they can never reach the 0.55 band)."""
+    from difflib import SequenceMatcher
+
+    from app.core.confidence import _similarity
+
+    def old_similarity(a, b):
+        a_norm = " ".join(sorted(a.lower().split()))
+        b_norm = " ".join(sorted(b.lower().split()))
+        if not a_norm or not b_norm:
+            return 0.0
+        return SequenceMatcher(None, a_norm, b_norm).ratio()
+
+    corroborating = [
+        ("Solar capacity grew 40% in 2024", "Solar capacity expanded by 40 percent during 2024"),
+        ("RAG retrieves documents before generation", "RAG retrieves external documents first"),
+    ]
+    for a, b in corroborating:
+        assert _similarity(a, b) == old_similarity(a, b)
+
+    unrelated = ("Solar capacity grew 40% in 2024",
+                 "The chef prepared pasta with tomato sauce and basil tonight")
+    assert _similarity(*unrelated) == 0.0
+    assert old_similarity(*unrelated) < 0.55, "prefilter assumes this pair is out of band"

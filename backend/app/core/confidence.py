@@ -101,6 +101,22 @@ def _similarity(a: str, b: str) -> float:
     b_norm = " ".join(sorted(b.lower().split()))
     if not a_norm or not b_norm:
         return 0.0
+    # Cheap prefilter before the O(n*m) char diff (this is the hot path of
+    # _cross_source_agreement's O(n^2) pair loop). Pairs whose word sets
+    # barely overlap and share no rare/numeric anchors cannot reach the
+    # corroboration band (0.55) on the char ratio: the matched characters
+    # are bounded by the shared tokens' length. Short claims skip the gate —
+    # their diffs are cheap anyway.
+    a_tokens = set(a_norm.split())
+    b_tokens = set(b_norm.split())
+    if len(a_tokens) >= 4 and len(b_tokens) >= 4:
+        inter = a_tokens & b_tokens
+        union = a_tokens | b_tokens
+        rare_shared = sum(
+            1 for t in inter if len(t) >= 7 or any(c.isdigit() for c in t)
+        )
+        if len(inter) / len(union) < 0.10 and rare_shared < 2:
+            return 0.0
     return SequenceMatcher(None, a_norm, b_norm).ratio()
 
 
