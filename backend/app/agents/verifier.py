@@ -178,6 +178,15 @@ def verify_facts(
     for fact in facts or []:
         if not isinstance(fact, dict):
             continue
+        # Idempotent re-runs: expansion passes re-enter verification with the
+        # whole accumulated pool, but raw page content was blanked after the
+        # first pass — re-judging old claims against snippet-only text would
+        # flip verified facts to unverified (numeric grounding fails on the
+        # snippet). A recorded verdict is authoritative; only unflagged facts
+        # (new this pass) are checked.
+        if "verified" in fact:
+            verified.append(dict(fact))
+            continue
         claim = str(fact.get("claim", ""))
         # Last-chance fragment guard: no truncated claim may persist or be
         # synthesized, regardless of which upstream path (or cache) let it in.

@@ -114,3 +114,44 @@ def test_stale_evidence_flagged_not_dropped():
     (out,) = verify_facts(facts, results)
     assert out["verified"] is True
     assert out["is_stale"] is True  # discounted downstream, never dropped
+
+
+def test_recorded_verdicts_survive_content_blanking():
+    """Expansion passes re-enter verification with content blanked (workflow
+    releases raw page text after the first pass). A recorded verdict must be
+    authoritative — re-judging old claims against snippet-only text flipped
+    verified facts to unverified (numeric grounding fails on the snippet)."""
+    facts = [
+        {"claim": "Solar capacity grew 40 percent in 2024 reaching 2000 GW globally",
+         "source": "https://example.com/solar", "confidence": 0.9, "search_type": "news"},
+    ]
+    full = [{"url": "https://example.com/solar",
+             "content": "Global solar capacity grew 40 percent in 2024, reaching 2000 GW "
+                        "installed worldwide according to the industry association report.",
+             "snippet": "Global solar capacity grew in 2024, industry report finds."}]
+    blanked = [{"url": "https://example.com/solar", "content": "",
+                "snippet": "Global solar capacity grew in 2024, industry report finds."}]
+
+    first = verify_facts(facts, full)
+    assert first[0]["verified"] is True
+
+    second = verify_facts(first, blanked)
+    assert second[0]["verified"] is True, "recorded verdict must survive a re-run"
+    assert second[0]["verification_score"] == first[0]["verification_score"]
+
+
+def test_unflagged_new_facts_still_verified_on_re_run():
+    """Idempotence applies only to facts carrying a verdict; fresh pass-2
+    facts (no verified key) are checked normally against their own sources."""
+    old = [{"claim": "Solar capacity grew 40 percent in 2024", "source": "https://example.com/solar",
+            "confidence": 0.9, "verified": True, "verification_score": 0.9}]
+    new = [{"claim": "Wind additions reached 120 GW in 2025", "source": "https://example.com/wind",
+            "confidence": 0.9}]
+    results = [
+        {"url": "https://example.com/solar", "content": "", "snippet": "solar grew"},
+        {"url": "https://example.com/wind",
+         "content": "Wind additions reached 120 GW in 2025 across major markets."},
+    ]
+    out = verify_facts([*old, *new], results)
+    assert out[0]["verified"] is True   # verdict carried through untouched
+    assert out[1]["verified"] is True   # new fact verified against its source
