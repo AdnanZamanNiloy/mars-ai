@@ -35,7 +35,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from app.core.cache import cache_key, get_cache
 from app.core.degradation import record_fallback
-from app.core.llm import LLMClient, PromptTooLargeError, clamp_confidence
+from app.core.llm import AllProvidersFailedError, LLMClient, PromptTooLargeError, clamp_confidence
 from app.core.logging import get_logger
 from app.core.schemas import SummarizerFactsModel
 
@@ -473,6 +473,20 @@ async def summarizer_agent(
                 logger.warning(
                     "[Summarizer] provider rejected the prompt at %d excerpt chars; retrying smaller",
                     excerpt_budget,
+                )
+                continue
+            except AllProvidersFailedError as exc:
+                if "timeout" in str(exc).lower():
+                    # Slowness, not size or rate: shrink-retrying a slow
+                    # provider multiplies 90s stalls. Fail to fallback now.
+                    logger.warning("[Summarizer] provider too slow (timeout); using heuristic fallback")
+                    break
+                # Rate-limited / provider wall: a smaller prompt needs fewer
+                # tokens — exactly what a TPM-starved window can still serve.
+                # Shrink before degrading the stage to heuristic extraction.
+                logger.warning(
+                    "[Summarizer] providers unavailable at %d excerpt chars (%s); retrying smaller",
+                    excerpt_budget, str(exc)[:140],
                 )
                 continue
             except Exception as exc:

@@ -374,7 +374,7 @@ def test_user_resolved_homonym_is_not_ambiguous():
     assert report.senses[0].domain == "science"
 
 
-async def test_summarizer_shrinks_prompt_when_provider_rejects_size():
+async def test_summarizer_shrinks_prompt_when_provider_rejects_size(tmp_path):
     """The 413 ladder: a provider that rejects the full 12-source excerpt
     prompt must be retried with a smaller excerpt budget — keeping extraction
     LLM-written instead of degrading to heuristic fallback."""
@@ -400,7 +400,7 @@ async def test_summarizer_shrinks_prompt_when_provider_rejects_size():
 
     from app.core.config import Settings
 
-    llm = SizePickyLLM(Settings(groq_api_key="k", database_url="/tmp/ladder-cache-test", _env_file=None))
+    llm = SizePickyLLM(Settings(groq_api_key="k", database_url=str(tmp_path / "ladder.db"), _env_file=None))
     results = [{
         "url": f"https://arxiv.org/{i}",
         "title": f"paper {i}",
@@ -416,3 +416,33 @@ async def test_summarizer_shrinks_prompt_when_provider_rejects_size():
     assert len(llm.prompt_lengths) >= 2, "at least one size retry"
     assert llm.prompt_lengths[-1] < llm.prompt_lengths[0], "retry must shrink the prompt"
     assert facts[0]["extraction"] == "llm"
+
+
+async def test_summarizer_does_not_shrink_on_timeouts(tmp_path):
+    """A slow provider (timeout wall) must not get three 90s shrink-retries —
+    one stall per stage, then the heuristic fallback."""
+    from app.agents.summarizer import summarizer_agent
+    from app.core.llm import AllProvidersFailedError
+    from app.core.config import Settings
+
+    class SlowProviderLLM:
+        def __init__(self, settings):
+            self.settings = settings
+            self.calls = 0
+
+        async def generate_json(self, system_prompt, user_prompt, retries=3, response_model=None):
+            self.calls += 1
+            raise AllProvidersFailedError(
+                "Active provider 'sleepy' failed: ReadTimeout. No fallback providers run."
+            )
+
+    llm = SlowProviderLLM(Settings(groq_api_key="k", database_url=str(tmp_path / "timeout.db"), _env_file=None))
+    results = [{
+        "url": "https://arxiv.org/0", "title": "paper",
+        "content": ("Solar capacity grew 40 percent in 2024, reaching 2000 GW of installed "
+                    "capacity worldwide according to the industry association's annual report. " * 20),
+        "snippet": "solar", "sub_question": "solar statistics",
+    }]
+    facts = await summarizer_agent(llm, "solar statistics", results)
+    assert llm.calls == 1, "no shrink-retry on a timeout wall"
+    assert facts and facts[0]["extraction"] == "heuristic"

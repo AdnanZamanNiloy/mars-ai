@@ -45,7 +45,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Set
 
 from app.core.degradation import record_fallback
-from app.core.llm import LLMClient, PromptTooLargeError
+from app.core.llm import AllProvidersFailedError, LLMClient, PromptTooLargeError
 from app.core.logging import get_logger
 from app.core.schemas import SynthesizerAnswerModel
 
@@ -368,6 +368,21 @@ async def synthesize(
             logger.warning(
                 "[Synthesizer] provider rejected the prompt at cap=%d facts; retrying smaller",
                 fact_cap,
+            )
+            continue
+        except AllProvidersFailedError as exc:
+            if "timeout" in str(exc).lower():
+                # Slowness, not size or rate: shrink-retrying a slow provider
+                # multiplies 90s stalls. Fail to fallback now.
+                logger.warning("[Synthesizer] provider too slow (timeout); using deterministic fallback")
+                record_fallback("synthesizer")
+                payload = {}
+                break
+            # Rate-limited wall: shrink the evidence view — a smaller prompt
+            # needs fewer tokens and can still fit a TPM-starved window.
+            logger.warning(
+                "[Synthesizer] providers unavailable at cap=%d facts (%s); retrying smaller",
+                fact_cap, str(exc)[:140],
             )
             continue
         except Exception as exc:
