@@ -500,6 +500,19 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                     ),
                 )
                 return
+            except asyncio.CancelledError:
+                # Client disconnected mid-stream: Starlette cancels this
+                # generator. A cancelled scope cannot await, so the run is
+                # marked via a DETACHED task — otherwise the row sits in
+                # 'running' forever and the trace lies about the run.
+                cost = round(usage.snapshot().get("spent_usd", 0.0) or 0.0, 6)
+                asyncio.get_running_loop().create_task(
+                    complete_research_run(
+                        settings.database_url, request_id, "timeout",
+                        confidence=0.0, estimated_cost=cost,
+                    )
+                )
+                raise
             except Exception as exc:
                 await _persist(complete_research_run(
                     settings.database_url, request_id, "failed",
@@ -731,6 +744,11 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
                 await _persist_complete(settings.database_url, request_id, "timeout", 0.0, None)
                 yield event_line("error", message="Resumed run timed out. Try again or raise RESEARCH_TIMEOUT_SEC.")
                 return
+            except asyncio.CancelledError:
+                asyncio.get_running_loop().create_task(
+                    _persist_complete(settings.database_url, request_id, "timeout", 0.0, None)
+                )
+                raise
             except Exception as exc:
                 await _persist_complete(settings.database_url, request_id, "failed", 0.0, None)
                 yield event_line("error", message=f"Resumed run failed: {exc}")

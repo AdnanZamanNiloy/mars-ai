@@ -307,3 +307,46 @@ async def test_expansion_pass_findings_stream_and_persist_with_flags(tmp_path):
     assert by_claim["Claim one"] == 1
     assert by_claim["Claim two"] == 0
     assert by_claim["Claim three"] == 1, "pass-2 claim must persist with its real verified flag"
+
+
+async def test_client_disconnect_marks_run_timeout(tmp_path):
+    """When the stream is cancelled (client disconnect), the run must be
+    marked 'timeout' via a detached task instead of sitting in 'running'
+    forever — abandoned runs previously made the trace lie."""
+    import asyncio
+
+    import aiosqlite
+    import httpx
+
+    from app.db.sqlite import init_db
+
+    class StubCancelledWorkflow:
+        """Yields one snapshot, then the stream gets cancelled — the same
+        shape a real client disconnect produces inside the generator."""
+
+        async def astream(self, state, stream_mode=None):
+            yield {"sub_questions": [{"question": "q1"}]}
+            raise asyncio.CancelledError()
+
+    db_path = str(tmp_path / "disconnect.db")
+    await init_db(db_path)
+    settings = Settings(groq_api_key="test-key", database_url=db_path, _env_file=None)
+    app = _build_app(StubCancelledWorkflow(), settings)
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        try:
+            await client.post("/api/research/stream", json={"query": "valid research query here"})
+        except Exception:
+            pass  # the re-raised cancellation may abort the response transport
+
+    # the detached completion task runs after the generator unwinds
+    row = None
+    for _ in range(20):
+        await asyncio.sleep(0.05)
+        async with aiosqlite.connect(db_path) as db:
+            cur = await db.execute("SELECT status FROM research_runs")
+            row = await cur.fetchone()
+        if row and row[0] == "timeout":
+            break
+    assert row and row[0] == "timeout", f"run stuck in status {row}"

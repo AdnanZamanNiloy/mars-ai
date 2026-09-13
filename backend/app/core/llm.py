@@ -4,7 +4,7 @@ from app.core.logging import get_logger
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple, Type
+from typing import Any, Awaitable, Callable, Dict, List, Tuple, Type
 
 import httpx
 from pydantic import BaseModel
@@ -155,6 +155,24 @@ class CircuitBreaker:
         self._opened_at = None
 
 
+def _attempt_timeout(base: float) -> httpx.Timeout:
+    """Per-attempt read-gap timeout (httpx 0.28 has no total cap)."""
+    return httpx.Timeout(base)
+
+
+async def _with_total_cap(coro_factory: Callable[[], Awaitable[Any]], base: float) -> Any:
+    """Run one provider attempt under a HARD total wall-clock cap.
+
+    read=base bounds the inter-chunk gap only. Without a total, a
+    drip-feeding proxy (bytes every few seconds, never a 60s gap) holds a
+    call open far past the intended budget — measured live: a 16-MINUTE
+    planner call against a stalled proxy whose read gaps never tripped the
+    read timeout. The wall-clock cap is base * 1.5 at asyncio level; the
+    raised TimeoutError is classified as a timeout everywhere (fail-fast,
+    breaker-recorded as a timeout)."""
+    return await asyncio.wait_for(coro_factory(), timeout=base * 1.5)
+
+
 def _real_key(value: Any) -> str:
     """Settings may carry example placeholders (your_...); treat those as
     unset so we skip the provider instead of burning calls on 401s."""
@@ -183,7 +201,7 @@ def _is_retryable(exc: BaseException) -> bool:
         return False
     if _is_fail_fast_error(exc):
         return False
-    if isinstance(exc, httpx.TimeoutException):
+    if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
         # A per-attempt timeout means this provider cannot serve the prompt
         # inside llm_timeout_sec; retrying the same slow call would burn the
         # 90s research budget before the fallback chain is ever reached.
@@ -390,7 +408,7 @@ class LLMClient:
                     validated = response_model.model_validate(payload)
                     return validated.model_dump()
                 return payload
-            except (httpx.TimeoutException, AllProvidersFailedError, PromptTooLargeError) as exc:
+            except (httpx.TimeoutException, TimeoutError, AllProvidersFailedError, PromptTooLargeError) as exc:
                 raise
             except Exception as exc:
                 if attempt == retries - 1:
@@ -628,7 +646,7 @@ class LLMClient:
         trip the breaker into skipping that provider."""
         if isinstance(exc, PromptTooLargeError):
             return
-        if isinstance(exc, httpx.TimeoutException):
+        if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
             breaker.record_timeout()
         else:
             breaker.record_failure()
@@ -658,9 +676,19 @@ class LLMClient:
         Uses custom_llm_timeout_sec (not the shared llm_timeout_sec):
         slower third-party providers routinely need 30-60s on planner-sized
         prompts, and a premature ReadTimeout opens the breaker and degrades
-        the whole run.
+        the whole run. The whole attempt sits under a hard wall-clock cap
+        (_with_total_cap) so a drip-feeding server cannot hang the stage.
         """
-        async with httpx.AsyncClient(timeout=self.settings.custom_llm_timeout_sec) as client:
+        timeout_base = self.settings.custom_llm_timeout_sec
+
+        async def _do() -> CompletionResult:
+            return await self._post_custom(system_prompt, user_prompt, custom, timeout_base)
+
+        return await _with_total_cap(_do, timeout_base)
+
+    async def _post_custom(self, system_prompt: str, user_prompt: str,
+                           custom: Dict[str, str], timeout_base: float) -> CompletionResult:
+        async with httpx.AsyncClient(timeout=_attempt_timeout(timeout_base)) as client:
             response = await client.post(
                 custom["endpoint"],
                 headers={
@@ -702,6 +730,12 @@ class LLMClient:
         retry=retry_if_exception(_is_retryable),
     )
     async def _call_groq(self, system_prompt: str, user_prompt: str) -> CompletionResult:
+        return await _with_total_cap(
+            lambda: self._post_groq(system_prompt, user_prompt),
+            self.settings.llm_timeout_sec,
+        )
+
+    async def _post_groq(self, system_prompt: str, user_prompt: str) -> CompletionResult:
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.settings.groq_api_key}",
@@ -720,7 +754,9 @@ class LLMClient:
         }
         # Per-attempt timeout is llm_timeout_sec; the decorator bounds retries
         # so total wait stays a small multiple of one attempt.
-        async with httpx.AsyncClient(timeout=self.settings.llm_timeout_sec) as client:
+        async with httpx.AsyncClient(
+            timeout=_attempt_timeout(self.settings.llm_timeout_sec)
+        ) as client:
             response = await client.post(url, headers=headers, json=payload)
             if response.status_code == 413:
                 raise PromptTooLargeError("provider rejected request size (groq)")
@@ -743,6 +779,12 @@ class LLMClient:
         retry=retry_if_exception(_is_retryable),
     )
     async def _call_huggingface(self, system_prompt: str, user_prompt: str) -> CompletionResult:
+        return await _with_total_cap(
+            lambda: self._post_huggingface(system_prompt, user_prompt),
+            self.settings.llm_timeout_sec,
+        )
+
+    async def _post_huggingface(self, system_prompt: str, user_prompt: str) -> CompletionResult:
         headers = {
             "Authorization": f"Bearer {self.settings.huggingface_api_key}",
             "Content-Type": "application/json",
@@ -764,7 +806,9 @@ class LLMClient:
         model_candidates = [self.settings.huggingface_model, *[m for m in HF_FALLBACK_MODELS if m != self.settings.huggingface_model]]
         not_available_errors: List[str] = []
 
-        async with httpx.AsyncClient(timeout=self.settings.llm_timeout_sec) as client:
+        async with httpx.AsyncClient(
+            timeout=_attempt_timeout(self.settings.llm_timeout_sec)
+        ) as client:
             for model_name in model_candidates:
                 url = f"https://api-inference.huggingface.co/models/{model_name}"
                 response = await client.post(url, headers=headers, json=payload)
