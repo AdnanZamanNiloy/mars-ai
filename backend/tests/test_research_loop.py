@@ -398,3 +398,73 @@ async def test_deep_run_terminates_without_graph_recursion_error():
 
     assert int(final.get("iteration", 0)) <= state["max_iterations"]
     assert final.get("final_report")
+
+
+# ---------------------------------------------------------------------------
+# 8. Depth scaling + expansion wall (Fix B)
+# ---------------------------------------------------------------------------
+
+def test_deep_mode_iteration_budget_scales_for_large_map():
+    """Deep mode must get more passes for a large contract map (the live run
+    hit A=0 at the 5-pass ceiling), but stay strictly bounded."""
+    import math
+
+    import app.graph.workflow as wfmod
+    from app.agents.orchestrator import scaled_max_iterations
+
+    state = wfmod.build_initial_state(
+        "What is the current trend of AI?", max_iterations=5, mode="deep"
+    )
+    target_agents = int(state["orchestration"]["target_agents"])
+    assert state["max_iterations"] == scaled_max_iterations("deep", target_agents)
+    assert state["max_iterations"] >= 5
+    # One pass per two contracts is the scaling floor; nothing unbounded.
+    assert state["max_iterations"] <= max(5, math.ceil(target_agents / 2))
+    # The LangGraph budget accommodates every scaled pass.
+    assert wfmod.graph_recursion_limit(state) >= 8 + 5 * state["max_iterations"]
+
+
+def test_quick_and_standard_ceilings_are_modest():
+    from app.agents.orchestrator import MODE_PRESETS
+
+    assert MODE_PRESETS["quick"]["max_iterations"] == 1
+    assert MODE_PRESETS["standard"]["max_iterations"] == 3
+
+
+async def test_deep_run_terminates_within_scaled_limit():
+    """A full mocked deep run whose critic NEVER passes must terminate at or
+    below the (scaled) max_iterations, never via GraphRecursionError."""
+    from bench.mock_pipeline import FakeLLM, FakeSearch
+    from app.core import llm_cache as _lc
+    from app.core.usage import clear_run_usage, start_run_usage
+    from app.graph.workflow import (
+        build_initial_state,
+        create_workflow,
+        graph_recursion_limit,
+    )
+
+    _lc._force_disabled = True
+
+    settings = _settings()
+    llm = FakeLLM(settings, critic_pass_on_iteration=10_000)
+    search = FakeSearch(settings)
+    workflow = create_workflow(llm, search_client=search)
+
+    state = build_initial_state("What is the current trend of AI?", max_iterations=5, mode="deep")
+    limit = state["max_iterations"]
+    assert limit >= 5
+
+    usage = start_run_usage("test-deep-scaled", settings, mode="deep")
+    try:
+        final = dict(state)
+        async for snapshot in workflow.astream(
+            state,
+            stream_mode="values",
+            config={"recursion_limit": graph_recursion_limit(state)},
+        ):
+            final = {**final, **{k: v for k, v in snapshot.items() if v}}
+    finally:
+        clear_run_usage()
+
+    assert 0 < int(final.get("iteration", 0)) <= limit
+    assert final.get("final_report")

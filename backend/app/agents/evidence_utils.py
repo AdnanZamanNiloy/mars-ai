@@ -514,6 +514,12 @@ def dedupe_semantic_facts(
     of SequenceMatcher work to milliseconds.
     """
     # Pass 1: normalize/sanitize candidates, keep original order.
+    # Independent corroboration is measured per PUBLISHER (registrable domain),
+    # never per URL — two pages on one domain are one source. The helper lives
+    # in evidence_grade; a lazy import keeps this module's import graph acyclic
+    # (evidence_grade imports names from this module).
+    from app.core.evidence_grade import distinct_publisher_count
+
     candidates: List[Dict[str, Any]] = []
     for item in facts or []:
         if not isinstance(item, dict):
@@ -548,7 +554,11 @@ def dedupe_semantic_facts(
             except (TypeError, ValueError):
                 prior_count = 1
             candidate["corroborating_sources"] = prior_sources
-            candidate["corroboration_count"] = max(len(prior_sources), prior_count, 1)
+            # Independence is per PUBLISHER, never per URL (AGENTS.md bug class:
+            # two pages on one domain are not corroboration).
+            candidate["corroboration_count"] = max(
+                distinct_publisher_count(prior_sources), prior_count, 1
+            )
         return candidates
 
     # Pass 2: one vectorized similarity matrix over all claims.
@@ -587,7 +597,9 @@ def dedupe_semantic_facts(
             except (TypeError, ValueError):
                 prior_count = 1
             candidate["corroborating_sources"] = prior_sources
-            candidate["corroboration_count"] = max(len(prior_sources), prior_count, 1)
+            candidate["corroboration_count"] = max(
+                distinct_publisher_count(prior_sources), prior_count, 1
+            )
             deduped.append(candidate)
             kept_idx.append(i)
             continue
@@ -614,7 +626,7 @@ def dedupe_semantic_facts(
         winner = candidate if candidate["confidence"] > float(kept.get("confidence", 0.0) or 0.0) else kept
         merged = dict(winner)
         merged["corroborating_sources"] = corroborating
-        merged["corroboration_count"] = len(corroborating)
+        merged["corroboration_count"] = max(1, distinct_publisher_count(corroborating))
         if variants:
             merged["merged_claims"] = variants[:5]
 

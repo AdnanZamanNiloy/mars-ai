@@ -150,6 +150,12 @@ def independent_corroboration(
     Returns (domains, count). The primary/own source is always included; a
     URL that adds no new publisher does not raise the count — that is the
     whole point of independence.
+
+    Independence here is a HARD invariant, not a convention: a second URL on
+    the same registrable domain (a deep article and a homepage, or the same
+    publisher republished) can never raise the count. Every source string
+    flows through `registrable_domain`, so there is no path that counts two
+    URLs from one publisher twice.
     """
     domains: List[str] = []
     seen: Set[str] = set()
@@ -165,6 +171,39 @@ def independent_corroboration(
     for url in sources or ():
         _add(str(url))
     return domains, len(domains)
+
+
+def is_new_publisher(url: str, existing_urls: Iterable[str]) -> bool:
+    """True when `url`'s registrable domain is absent from `existing_urls`.
+
+    The procurement side of independence: before treating a search result as
+    corroboration, callers ask whether it comes from a publisher the claim
+    already has. It reuses `registrable_domain`, so it agrees with
+    `independent_corroboration` by construction. Empty/unparseable URLs are
+    never new publishers (nothing to corroborate with).
+    """
+    domain = registrable_domain(url or "")
+    if not domain:
+        return False
+    for existing in existing_urls or ():
+        if registrable_domain(str(existing or "")) == domain:
+            return False
+    return True
+
+
+def distinct_publisher_count(sources: Iterable[str]) -> int:
+    """Number of DISTINCT registrable domains among source URLs.
+
+    The one true corroboration count. Any module that reports a numeric
+    corroboration figure (dedupe, synthesis badges) must derive it here, not
+    from `len(urls)`: two URLs from one publisher are one source.
+    """
+    seen: Set[str] = set()
+    for url in sources or ():
+        d = registrable_domain(str(url or ""))
+        if d:
+            seen.add(d)
+    return len(seen)
 
 
 def grade_claim(
@@ -209,8 +248,13 @@ def grade_claim(
     )
 
     # --- contradictions ---
+    # Fix C: only UNRESOLVED contradictions disqualify a claim. A conflict the
+    # resolution pass explained (different period/scope/metric) is a recorded
+    # spread, not a disagreement, and must not cap the grade or flag the claim.
     contradictions = contradictions or []
     for c in contradictions:
+        if not isinstance(c, dict) or c.get("resolved"):
+            continue
         a = str(c.get("claim_a", "") or "")
         b = str(c.get("claim_b", "") or "")
         if a == claim or b == claim:

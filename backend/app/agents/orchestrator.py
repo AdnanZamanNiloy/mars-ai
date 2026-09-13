@@ -363,6 +363,34 @@ MODE_PRESETS: Dict[str, Dict[str, Any]] = {
 }
 VALID_MODES = tuple(MODE_PRESETS.keys())
 
+# Fix B.1 — depth scales with the research map, but stays strictly bounded.
+# A live deep run hit the 5-iteration ceiling with a 12-contract map and
+# graded A=0: five passes cannot corroborate twelve angles. Deep and
+# executive therefore raise their iteration budget to at least one pass per
+# TWO contracts (ceil(target_agents / 2)); quick/standard/audit/redteam keep
+# their modest ceilings. The cap is the anti-infinite-loop guarantee, not a
+# target — the evidence-first stopping rules still finalize as soon as the
+# gaps close.
+DEEP_MODE_ITERATION_FLOOR = 5
+SCALED_MODE_MIN_CONTRACTS_PER_PASS = 2
+
+
+def scaled_max_iterations(mode: str, target_agents: int) -> int:
+    """Iteration ceiling for a mode given how many contracts the plan holds.
+
+    Deterministic and total: unknown modes and non-positive targets return
+    the preset's own ceiling unchanged. Only deep/executive scale, and only
+    upward — a large map gets more passes, never fewer than the preset.
+    """
+    preset = MODE_PRESETS.get(str(mode or "").lower())
+    base = int(preset["max_iterations"]) if preset else 3
+    if str(mode or "").lower() not in ("deep", "executive"):
+        return base
+    agents = max(1, int(target_agents or 1))
+    per_pass = max(1, int(SCALED_MODE_MIN_CONTRACTS_PER_PASS))
+    needed = -(-agents // per_pass)  # ceil division, integer math
+    return max(base, DEEP_MODE_ITERATION_FLOOR, needed)
+
 
 def recommend_mode(complexity: ComplexityScore) -> str:
     """Mode MARS would pick if the user did not.
@@ -419,7 +447,6 @@ def plan_targets(
     planning (see planner.enforce_axis_coverage).
     """
     mode = mode if mode in MODE_PRESETS else "standard"
-    preset = MODE_PRESETS[mode]
 
     required: List[str] = []
     if mode != "quick":
@@ -446,7 +473,7 @@ def plan_targets(
     if complexity.needs_quantitative:
         min_sources = max(min_sources, 3)
 
-    max_iterations = int(preset["max_iterations"])
+    max_iterations = scaled_max_iterations(mode, max(1, int(target_agents)))
     min_iterations = 1
     if mode in ("deep", "audit"):
         min_iterations = 2

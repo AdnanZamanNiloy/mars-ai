@@ -59,9 +59,14 @@ def _verified_supporting_claims(
 
 
 def _contradiction_penalty(option_label: str, contradictions: List[Dict[str, Any]]) -> int:
-    # MVP: each detected contradiction raises the risk of every substantive
+    # MVP: each UNRESOLVED contradiction raises the risk of every substantive
     # option equally (we can't yet attribute a contradiction to one option).
-    return len(contradictions)
+    # Fix C: resolved conflicts (period/scope/metric) are explained spreads,
+    # not sources of decision uncertainty.
+    return sum(
+        1 for c in (contradictions or [])
+        if isinstance(c, dict) and not c.get("resolved")
+    )
 
 
 def build_decision_layer(

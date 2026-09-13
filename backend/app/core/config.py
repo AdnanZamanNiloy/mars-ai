@@ -84,6 +84,14 @@ class Settings(BaseSettings):
     # with every pass on a long deep run; the oldest entries are dropped once
     # this ceiling is crossed. Never set below a single pass's output.
     search_max_results_retained: int = 80
+    # Fix B: hard per-run budget on the expansion loop, a wall alongside the
+    # iteration ceiling and the money/time budget. `max_expansion_passes`
+    # counts expansion passes actually issued (the first research pass is not
+    # an expansion); `max_expansion_searches` counts every extra search query
+    # issued by those passes. A broad deep query cannot run unbounded even if
+    # every other soft stop is disabled.
+    max_expansion_passes: int = 12
+    max_expansion_searches: int = 48
     # Tavily search depth ("basic" or "advanced")
     tavily_search_depth: str = "basic"
 

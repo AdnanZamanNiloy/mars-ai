@@ -125,10 +125,17 @@ def _uncovered_axes(state: Dict[str, Any]) -> List[str]:
 
 
 def _severe_contradictions(state: Dict[str, Any]) -> int:
-    """Unresolved contradictions strong enough to block a confident finish."""
+    """Unresolved contradictions strong enough to block a confident finish.
+
+    A contradiction resolved by the Fix C pass (different period/scope/metric)
+    is an EXPLAINED spread, not a disagreement — it must not keep driving
+    expansion or blocking a stop.
+    """
     total = 0
     for c in state.get("contradictions", []) or []:
         if not isinstance(c, dict):
+            continue
+        if c.get("resolved"):
             continue
         kind = str(c.get("kind", "") or "")
         try:

@@ -182,19 +182,28 @@ def _finalize(found: List[Contradiction], limit: int) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 def summarize_contradictions(contradictions: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
-    """Aggregate view the report and the confidence engine both need."""
+    """Aggregate view the report and the confidence engine both need.
+
+    Fix C: a contradiction whose `resolved` flag is set (different
+    period/scope/metric explains the spread) is recorded but never counted as
+    a cross-source or severe conflict — it must not make the red-team or the
+    confidence engine treat an explained spread as a live disagreement.
+    """
     items = [c for c in (contradictions or []) if isinstance(c, dict)]
-    cross = [c for c in items if not c.get("intra_source")]
+    unresolved = [c for c in items if not c.get("resolved")]
+    cross = [c for c in unresolved if not c.get("intra_source")]
     severe = [c for c in cross if float(c.get("severity", 0.0) or 0.0) >= SEVERE_DIVERGENCE]
     by_kind: Dict[str, int] = {}
     for c in items:
         by_kind[str(c.get("kind", "unknown"))] = by_kind.get(str(c.get("kind", "unknown")), 0) + 1
     return {
         "total": len(items),
+        "resolved": len(items) - len(unresolved),
+        "unresolved": len(unresolved),
         "cross_source": len(cross),
         "severe": len(severe),
         "by_kind": by_kind,
-        "max_severity": round(max((float(c.get("severity", 0.0) or 0.0) for c in items), default=0.0), 3),
+        "max_severity": round(max((float(c.get("severity", 0.0) or 0.0) for c in unresolved), default=0.0), 3),
     }
 
 
@@ -207,7 +216,7 @@ def numeric_ranges(contradictions: Sequence[Dict[str, Any]]) -> List[Dict[str, A
     """
     grouped: Dict[str, List[Dict[str, Any]]] = {}
     for c in contradictions or []:
-        if c.get("kind") != "numeric":
+        if c.get("kind") != "numeric" or c.get("resolved"):
             continue
         values = c.get("values") or {}
         unit = str(values.get("unit", "") or "dimensionless")

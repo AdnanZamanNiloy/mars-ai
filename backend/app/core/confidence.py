@@ -157,10 +157,20 @@ def _claim_verification_strength(facts: List[Dict[str, Any]]) -> float:
 
 
 def _cross_source_agreement(facts: List[Dict[str, Any]]) -> float:
-    """Fraction of claims corroborated by a similar claim from a DIFFERENT domain."""
+    """Fraction of claims corroborated by a similar claim from a DIFFERENT publisher.
+
+    Independence is measured at the registrable-domain level (blog.example.com
+    and www.example.com are one publisher), matching the evidence spine — a
+    raw host comparison would count a site's own pages as corroboration.
+    """
     if len(facts) < 2:
         return 0.0
-    domains = [extract_domain(str(f.get("source", ""))) for f in facts]
+    from app.core.evidence_grade import registrable_domain
+
+    domains = [
+        registrable_domain(str(f.get("source", ""))) or extract_domain(str(f.get("source", "")))
+        for f in facts
+    ]
     claims = [str(f.get("claim", "")) for f in facts]
     corroborated = 0
     for i, claim in enumerate(claims):
@@ -270,6 +280,12 @@ def _contradiction_penalty(
     for c in contradictions or []:
         if not isinstance(c, dict) or c.get("intra_source"):
             continue
+        # Fix C: a contradiction explained by a different period/scope/metric
+        # is resolved — recorded for the report, but it must not penalize an
+        # otherwise-sound run. Only genuine same-unit/scope/period conflicts
+        # subtract.
+        if c.get("resolved"):
+            continue
         severity = _safe_conf(c.get("severity", 0.5))
         if severity >= SEVERE_CONTRADICTION_SEVERITY:
             penalty += CONTRADICTION_PENALTY_SEVERE * scale
@@ -355,9 +371,13 @@ def compute_confidence(
     penalty = _contradiction_penalty(contradictions, fact_count=len(facts or []))
     if penalty > 0:
         overall = round(max(0.0, overall - penalty), 3)
+        unresolved = sum(
+            1 for c in (contradictions or [])
+            if isinstance(c, dict) and not c.get("resolved") and not c.get("intra_source")
+        )
         notes.append(
-            f"confidence penalized {penalty:.2f} for {len(contradictions or [])} "
-            "cross-source contradiction(s)"
+            f"confidence penalized {penalty:.2f} for {unresolved} "
+            "unresolved cross-source contradiction(s)"
         )
 
     degraded_agents = {str(a) for a in (degraded or []) if a}

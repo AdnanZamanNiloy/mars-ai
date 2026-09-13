@@ -67,6 +67,12 @@ class ResearchState(TypedDict, total=False):
     evidence_distribution: Dict[str, int]
     # Research-loop: whether a counter-evidence query has actually been issued.
     counter_evidence_attempted: bool
+    # Fix A: claim-specific queries that seek a NEW publisher for uncorroborated
+    # claims. Computed in critic_node, executed directly in search_node (they
+    # do not depend on the planner model rephrasing them).
+    corroboration_queries: List[str]
+    # Fix B: hard per-run cap on expansion search passes actually issued.
+    expansion_passes: int
 
 
 class PlannerUpdate(TypedDict):
@@ -82,6 +88,7 @@ class IntentUpdate(TypedDict):
 class SearchUpdate(TypedDict):
     search_results: List[Dict[str, str]]
     counter_evidence_attempted: bool
+    expansion_passes: int
 
 
 class SummarizerUpdate(TypedDict):
@@ -206,7 +213,7 @@ def build_initial_state(
     When `mode` is a valid preset (3.7), it overrides the raw parameters
     with its (max_agents, max_iterations, deep_research) tuple.
     """
-    from app.agents.orchestrator import MODE_PRESETS
+    from app.agents.orchestrator import MODE_PRESETS, scaled_max_iterations
 
     preset = MODE_PRESETS.get(mode)
     if preset is not None:
@@ -223,6 +230,13 @@ def build_initial_state(
         effective_max_iterations = max(3, int(max_iterations))
     plan = orchestrate(query, max_parallel_agents=max_parallel_agents,
                        deep_research=deep_research, mode=mode)
+    # Fix B.1 — scale the deep/executive iteration budget to the map size now
+    # that `orchestrate` has set target_agents. Bounded by scaled_max_iterations
+    # (one pass per ~2 contracts, floored at 5); quick/standard unchanged.
+    if preset is not None:
+        effective_max_iterations = scaled_max_iterations(
+            mode, plan.target_agents
+        )
     targets = plan.targets.to_dict() if plan.targets is not None else {}
     return {
         "query": query,
@@ -316,6 +330,94 @@ def _evidence_gaps_remain(state: ResearchState) -> bool:
         if ev.get("needs_corroboration"):
             return True
     return False
+
+
+def _claim_terms(claim: str, limit: int = 8) -> str:
+    """Content tokens from a claim, most informative first — the subject the
+    corroboration query should target. Deterministic and LLM-free."""
+    import re
+
+    stop = {
+        "the", "a", "an", "of", "and", "or", "to", "in", "on", "for", "with",
+        "is", "are", "was", "were", "be", "by", "at", "from", "that", "this",
+        "it", "its", "as", "than", "about", "over", "per", "will", "has",
+        "have", "had", "as", "which", "there", "their", "they", "been",
+    }
+    tokens = re.findall(r"[A-Za-z0-9%$][A-Za-z0-9%$.\-]*", claim or "")
+    out: List[str] = []
+    for tok in tokens:
+        low = tok.lower()
+        if low in stop or len(low) < 3:
+            continue
+        if tok not in out:
+            out.append(tok)
+        if len(out) >= limit:
+            break
+    return " ".join(out)
+
+
+def _corroboration_queries(state: ResearchState, limit: int = 3) -> List[str]:
+    """CLAIM-SPECIFIC procurement queries that seek a DIFFERENT publisher.
+
+    The live deep run measured corroboration perfectly and then never went
+    looking for it: 0 claims reached two independent registrable domains while
+    121 needed corroboration. Measurement without procurement is a dead end.
+
+    For each important single-publisher claim this builds a query that
+    (a) targets the claim's own terms, (b) explicitly EXCLUDES the current
+    publisher with `-site:<registrable-domain>`, and (c) for quantitative
+    claims leans on primary/official vocabulary where the corroborating
+    figure is most likely to live (official reports, government data,
+    peer-reviewed studies, datasets). Deterministic fallback: if grading
+    fails, returns [] (never invent queries).
+    """
+    facts = [f for f in state.get("facts", []) or [] if isinstance(f, dict)]
+    if not facts:
+        return []
+    try:
+        from app.core.evidence_grade import grade_facts, registrable_domain
+    except Exception as exc:
+        logger.warning("corroboration_grading_failed", error=str(exc), exc_info=exc)
+        return []
+
+    try:
+        graded = grade_facts(facts, contradictions=state.get("contradictions") or [])
+    except Exception as exc:
+        logger.warning("corroboration_grading_failed", error=str(exc), exc_info=exc)
+        return []
+
+    # Existing publishers across the pool, so we never re-query a domain we
+    # already hold — the whole point is to reach a NEW one.
+    seen_domains = {
+        registrable_domain(str(f.get("source", "") or ""))
+        for f in facts
+    } - {""}
+
+    queries: List[str] = []
+    for g in graded:
+        ev = g.get("evidence") if isinstance(g, dict) else None
+        if not isinstance(ev, dict) or not ev.get("needs_corroboration"):
+            continue
+        claim = str(ev.get("claim", "")).strip()
+        if not claim:
+            continue
+        domain = registrable_domain(str(ev.get("domain", "") or ev.get("source", "")))
+        terms = _claim_terms(claim)
+        if not terms:
+            continue
+        if ev.get("has_numbers"):
+            base = f"{terms} official report government data dataset peer-reviewed study"
+        else:
+            base = f"{terms} independent source"
+        if domain:
+            query = f"{base} -site:{domain}"
+        else:
+            query = f"{base} independent publisher"
+        if query not in queries:
+            queries.append(query)
+        if len(queries) >= max(1, limit):
+            break
+    return queries
 
 
 def _counter_evidence_queries(state: ResearchState, limit: int = 2) -> List[str]:
@@ -467,7 +569,10 @@ def build_markdown_report(
         "",
     ]
 
-    # Contradiction Engine (3.2): surface source conflicts explicitly.
+    # Contradiction Engine (3.2): surface source conflicts explicitly. Fix C:
+    # a resolved conflict (period/scope/metric difference) is recorded with its
+    # explanation so the report is honest about the spread, while only
+    # unresolved conflicts read as open disagreements.
     contradictions = state.get("contradictions", [])
     if contradictions:
         contradiction_lines = []
@@ -478,6 +583,10 @@ def build_markdown_report(
             contradiction_lines.append(
                 f"  conflicts with \"{c.get('claim_b', '')[:140]}\" ({c.get('source_b', '')})"
             )
+            if c.get("resolved"):
+                contradiction_lines.append(
+                    f"  RESOLVED: {c.get('resolution', '')}"
+                )
         lines.extend(["# Contradictions", *contradiction_lines, ""])
 
     # Decision Intelligence Layer (3.5, Feature 18): options → recommendation
@@ -651,6 +760,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         # (variants ride the parent contract, so nothing orphans).
         # Accumulation is explicitly capped (SEARCH_MAX_RESULTS_RETAINED) and
         # the verifier blanks raw content after each pass.
+        settings = getattr(search_client, "settings", None)
         fresh: List[Any] = []
         answered = {
             normalize_text(str(r.get("sub_question", ""))) for r in previous
@@ -679,9 +789,30 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
                     vs = str(v or "").strip()
                     if vs and normalize_text(vs) not in answered:
                         fresh.append((vs, parent_type))
-        cap = max(1, int(getattr(getattr(search_client, "settings", None),
-                               "search_max_queries_per_pass", 8) or 8))
-        fresh = fresh[:cap]
+
+        # Fix A.3 — corroboration procurement must actually be EXECUTED, not
+        # merely stored on the critique. These claim-specific, publisher-
+        # excluding queries are injected straight into this pass's search set on
+        # expansion passes, independent of whether the planner model chose to
+        # turn critique feedback into a contract. Deduped against everything
+        # already searched.
+        corroboration_to_run: List[str] = []
+        if int(state.get("iteration", 0)) > 0:
+            for q in state.get("corroboration_queries", []) or []:
+                text = str(q or "").strip()
+                key = normalize_text(text)
+                if not text or not key or key in answered:
+                    continue
+                corroboration_to_run.append(text)
+                answered.add(key)
+
+        cap = max(1, int(getattr(settings, "search_max_queries_per_pass", 8) or 8))
+        # Corroboration queries get priority within the per-pass query cap:
+        # they are the pass's reason for existing when a claim needs a new
+        # publisher, so an oversized plan cannot crowd them out.
+        room = max(0, cap - len(corroboration_to_run))
+        fresh = fresh[:room]
+        fresh.extend((q, "general") for q in corroboration_to_run)
         if not fresh:
             if previous:
                 return {"search_results": previous}
@@ -689,6 +820,29 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             if not fallback:
                 return {"search_results": previous}
             fresh = [(fallback, "")]
+        # Fix B.3 — hard per-run expansion wall. Count the expansion passes and
+        # the extra searches they issue; once either cap is hit, stop issuing
+        # NEW expansion searches (the evidence already gathered still flows on).
+        prior_passes = int(state.get("expansion_passes", 0) or 0)
+        is_expansion = int(state.get("iteration", 0)) > 0
+        max_passes = max(1, int(getattr(settings, "max_expansion_passes", 12) or 12))
+        max_searches = max(1, int(getattr(settings, "max_expansion_searches", 48) or 48))
+        expansion_passes = prior_passes + (1 if is_expansion else 0)
+        budget_stop = is_expansion and (
+            expansion_passes > max_passes
+            or prior_passes * cap + len(fresh) > max_searches
+        )
+        if budget_stop:
+            logger.info(
+                "expansion_wall_reached",
+                expansion_passes=expansion_passes,
+                max_expansion_passes=max_passes,
+                iteration=int(state.get("iteration", 0)),
+            )
+            return {
+                "search_results": previous,
+                "expansion_passes": prior_passes,
+            }
         results = await search_client.run_search(fresh)
         # Track whether a disagreement-seeking/corroboration query was actually
         # issued — the stopping redesign requires counter-evidence to have been
@@ -696,6 +850,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         counter_markers = (
             "conflicting evidence", "disagreement", "independent corroboration",
             "counter-evidence", "counter evidence", "verification",
+            "independent source", "official report", "-site:",
         )
         issued_counter = any(
             any(marker in str(text).lower() for marker in counter_markers)
@@ -710,9 +865,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         # the current pass's summarizer needs — and drop the oldest beyond
         # the cap. Verification already ran on older passes, so nothing
         # downstream loses content it still needs.
-        cap_results = max(10, int(getattr(
-            getattr(search_client, "settings", None),
-            "search_max_results_retained", 80) or 80))
+        cap_results = max(10, int(getattr(settings, "search_max_results_retained", 80) or 80))
         if len(merged) > cap_results:
             dropped = len(merged) - cap_results
             merged = merged[dropped:]
@@ -723,6 +876,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             "counter_evidence_attempted": bool(
                 state.get("counter_evidence_attempted") or issued_counter
             ),
+            "expansion_passes": expansion_passes,
         }
 
     async def summarizer_node(state: ResearchState) -> SummarizerUpdate:
@@ -843,8 +997,23 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         # resume path — which re-enters at critic with persisted facts —
         # still feeds contradictions to the critic and the report.
         contradictions = find_contradictions(state.get("facts", []))
+        # Fix C — resolution pass. A temporal or scope difference is an
+        # EXPLAINED spread, not a disagreement; it is recorded for the report
+        # but must not penalize confidence or drive further expansion. Only
+        # genuinely conflicting (same unit/scope/period/metric, different
+        # values) entries stay `resolved: false`.
+        try:
+            from app.core.contradiction_resolution import resolve_contradictions
+
+            contradictions = resolve_contradictions(contradictions)
+        except Exception as exc:  # resolution must never break a run
+            logger.warning("contradiction_resolution_failed", error=str(exc), exc_info=exc)
         if contradictions:
-            logger.info("contradictions_found", count=len(contradictions))
+            logger.info(
+                "contradictions_found",
+                count=len(contradictions),
+                unresolved=sum(1 for c in contradictions if not c.get("resolved")),
+            )
 
         # Red-team review (v3, heuristics only: deterministic, zero LLM
         # cost). Attacks the evidence base every pass; the survival score
@@ -931,6 +1100,15 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         for q in _counter_evidence_queries(state):
             if q not in improved:
                 improved.append(q)
+        # Fix A — corroboration PROCUREMENT. Independent corroboration was
+        # measured but never sought; these claim-specific, publisher-excluding
+        # queries are executed directly by search_node (not left to the planner
+        # model to rephrase). They also ride improved_queries so the stopping
+        # policy can see them.
+        corroboration_queries = _corroboration_queries(state)
+        for q in corroboration_queries:
+            if q not in improved:
+                improved.append(q)
         # Freeze the augmented follow-ups on the critique so the depth
         # controller's novel-query check sees the counter-evidence queries too;
         # previously they existed only in critique_feedback and were invisible
@@ -955,6 +1133,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             "contradictions": contradictions,
             "redteam": redteam_state,
             "facts": enriched_facts,
+            "corroboration_queries": corroboration_queries,
         }
 
     async def synthesizer_node(state: ResearchState) -> SynthesizerUpdate:
