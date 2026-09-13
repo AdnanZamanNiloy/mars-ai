@@ -735,6 +735,8 @@ def run_all(quick: bool = False, out_dir: str | None = None) -> Dict[str, Any]:
         ("contradictions", lambda: bench_contradictions(settings)),
         ("confidence_calibration", lambda: bench_confidence(settings)),
         ("semantic_engine", lambda: bench_semantic(settings)),
+        ("intent_classification", lambda: bench_intent(settings)),
+        ("answer_quality", lambda: bench_quality(settings)),
         ("llm_cache", lambda: asyncio.run(_bench_cache(settings))),
         ("latency", lambda: bench_latency(settings)),
         ("memory", lambda: bench_memory(settings)),
@@ -762,6 +764,113 @@ def run_all(quick: bool = False, out_dir: str | None = None) -> Dict[str, Any]:
         print(f"report generation failed: {exc}")
     print(f"results written: {json_path}")
     return report
+
+
+# ---------------------------------------------------------------------------
+# Benchmark 11: intent classification + answer quality gate
+# ---------------------------------------------------------------------------
+
+INTENT_CASES = [
+    # (query, expected_ambiguous, expected_dominant_domain)
+    ("What is transformer?", True, "machine_learning"),
+    ("python snake feeding habits", False, "science"),
+    # fallback is deliberately crude on unmarked domains: general (the LLM
+    # path classifies economics)
+    ("compare nuclear vs solar economics in Bangladesh", False, "general"),
+    ("What is apple?", True, "general"),
+]
+
+
+def bench_intent(settings: Settings) -> Dict[str, Any]:
+    """The deterministic intent fallback: ambiguity detection and dominant
+    domain on labeled queries (the LLM path is measured by live runs)."""
+    from app.agents.intent import heuristic_intent
+
+    rows: List[Dict[str, Any]] = []
+    hits = 0
+    for query, want_ambiguous, want_domain in INTENT_CASES:
+        report = heuristic_intent(query)
+        got_domain = report.senses[0].domain if report.senses else report.domain
+        ok = (report.ambiguity == want_ambiguous) and (got_domain == want_domain)
+        hits += 1 if ok else 0
+        rows.append({
+            "query": query,
+            "ambiguity": report.ambiguity,
+            "action": report.recommended_action,
+            "domain": got_domain,
+            "expected_domain": want_domain,
+            "ok": ok,
+        })
+    return {
+        "accuracy": round(hits / len(INTENT_CASES), 4),
+        "cases": rows,
+    }
+
+
+GOOD_QUALITY_ANSWER = (
+    "## Executive Summary\n\n"
+    "The transformer is a neural network architecture built on attention: every "
+    "token attends to every other, replacing recurrence entirely. [1]\n\n"
+    "## Key Findings\n\n"
+    "- Attention weighs every input token against every other [1].\n"
+    "- Self-attention removes the recurrence bottleneck of earlier models [2].\n\n"
+    "## Limitations\n\n"
+    "Could not verify: claims without a traceable source were discarded.\n\n"
+    "## Sources\n\n"
+    "[1] arxiv.org (preprint, primary) — https://arxiv.org/abs/1706.03762\n\n"
+    "[2] aclanthology.org (peer_reviewed, primary) — https://aclanthology.org/x"
+)
+
+BAD_QUALITY_ANSWER = (
+    "# Final Answer\n\n"
+    "Some statistics were found.\n\n"
+    "- 40% 2024 2000 GW\n"
+    "- 1.2 billion usd\n\n"
+    "## Sources\n\n[1] arxiv.org (preprint, primary) — https://arxiv.org/abs/1706.03762"
+)
+
+QUALITY_FACTS = [
+    {"claim": "The transformer architecture uses attention mechanisms.",
+     "source": "https://arxiv.org/abs/1706.03762", "verified": True,
+     "sub_question": "what is the transformer architecture"},
+    {"claim": "Attention weighs every input token against every other.",
+     "source": "https://aclanthology.org/x", "verified": True,
+     "sub_question": "transformer mechanism components"},
+]
+
+QUALITY_SUPPORT = {
+    "rate": 1.0, "cited": 2, "supported": 2, "uncited": 0, "numeric_rate": None,
+    "sentences": 4,
+    "sentence_details": [
+        {"sentence": "The transformer is a neural network architecture built on attention [1].",
+         "markers": [1], "status": "supported", "support": 0.8},
+        {"sentence": "Attention weighs every input token against every other [1].",
+         "markers": [1], "status": "supported", "support": 0.7},
+    ],
+}
+
+
+def bench_quality(settings: Settings) -> Dict[str, Any]:
+    """The answer-quality gate on labeled good/bad drafts: the good draft must
+    pass at the default threshold; the statistics dump must fail."""
+    from app.agents.answer_quality import evaluate_answer
+
+    intent = {"ambiguity": False, "senses": [], "explanation_level": "practical",
+              "recommended_action": "research_dominant", "domain": "machine_learning"}
+    good = evaluate_answer("What is the transformer architecture?", intent=intent,
+                           answer=GOOD_QUALITY_ANSWER, facts=QUALITY_FACTS,
+                           answer_support=QUALITY_SUPPORT, mode="quick")
+    bad = evaluate_answer("What is the transformer architecture?", intent=intent,
+                          answer=BAD_QUALITY_ANSWER, facts=QUALITY_FACTS,
+                          answer_support=QUALITY_SUPPORT, mode="standard")
+    return {
+        "good_overall": good.overall,
+        "good_passed": good.passed,
+        "bad_overall": bad.overall,
+        "bad_passed": bad.passed,
+        "ordering_ok": good.overall > bad.overall,
+    }
+
 
 
 def main() -> int:

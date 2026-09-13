@@ -286,6 +286,24 @@ class IntentReport:
         }
 
 
+# Words that appear in a sense's label/note and RESOLVE the homonym when the
+# user actually used them ("python snake feeding habits" is not ambiguous).
+_SENSE_DISTINCTIVE_STOP = {
+    "python", "transformer", "apple", "amazon", "jaguar", "eclipse", "windows",
+    "shell", "inc", "company", "device",
+}
+
+
+def _sense_distinctive_words(sense: Dict[str, Any]) -> List[str]:
+    text = " ".join([str(sense.get("label", "")), str(sense.get("note", ""))]).lower()
+    words = [
+        w for w in re.findall(r"[a-z]{4,}", text)
+        if w not in _SENSE_DISTINCTIVE_STOP
+    ]
+    # de-duplicate, keep order
+    return list(dict.fromkeys(words))
+
+
 def heuristic_intent(query: str) -> IntentReport:
     """Deterministic intent for when the LLM call fails or is disabled.
 
@@ -309,22 +327,33 @@ def heuristic_intent(query: str) -> IntentReport:
             ]
             break
 
-    from app.agents.orchestrator import detect_dimensions
+    ambiguity = bool(senses)
+    domain = "general"
+    if senses:
+        # The user may have resolved the homonym themselves ("python snake
+        # feeding habits"): when exactly one sense's distinctive words appear
+        # in the query, that sense IS the meaning — no ambiguity.
+        matched = [
+            s for s in senses
+            if any(w in lowered for w in _sense_distinctive_words(s.to_dict()))
+        ]
+        if len(matched) == 1:
+            senses = matched
+            ambiguity = False
+        if senses[0].domain != "general":
+            domain = senses[0].domain
+    if not ambiguity and domain == "general":
+        from app.agents.orchestrator import detect_dimensions
 
-    dimensions = detect_dimensions(query, limit=1)
-    domain = _normalize_llm_domain(dimensions[0]) if dimensions else "general"
-    # When the homonym table fired, the dominant sense IS the research
-    # target — its domain outranks the generic lexical classification
-    # ("What is transformer?" carries no dimension signal on its own).
-    if senses and senses[0].domain != "general":
-        domain = senses[0].domain
+        dimensions = detect_dimensions(query, limit=1)
+        domain = _normalize_llm_domain(dimensions[0]) if dimensions else "general"
 
     return IntentReport(
         query=str(query or ""),
         query_type=classify_query_type(query),
         domain=domain,
         explanation_level=_heuristic_level(query),
-        ambiguity=bool(senses),
+        ambiguity=ambiguity,
         senses=senses,
         reasoning="Classified lexically (deterministic fallback; LLM intent unavailable).",
         origin="heuristic",

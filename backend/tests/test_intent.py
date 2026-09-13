@@ -320,3 +320,12 @@ def test_ambiguity_block_rendered_for_ambiguous_intent():
     assert "**Transformer neural network architecture**" in block
     assert "focuses on meaning 1" in block
     assert _render_ambiguity_block({"ambiguity": False, "senses": []}) == ""
+
+
+def test_user_resolved_homonym_is_not_ambiguous():
+    """'python snake feeding habits' names the sense — ambiguity resolved,
+    domain follows the named sense, not the more common meaning."""
+    report = heuristic_intent("python snake feeding habits")
+    assert report.ambiguity is False
+    assert len(report.senses) == 1
+    assert report.senses[0].domain == "science"
