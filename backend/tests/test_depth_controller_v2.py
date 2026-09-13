@@ -2,8 +2,7 @@
 
 from app.core import depth_controller
 from app.core.config import Settings
-from app.core.usage import RunUsage, clear_run_usage, start_run_usage
-from app.agents.budget import ResearchBudget
+from app.core.usage import clear_run_usage, start_run_usage
 
 
 def _state(**kw):
@@ -42,7 +41,7 @@ def test_budget_exhaustion_forces_finalize():
         usage = start_run_usage("t-1", _settings(max_llm_calls=1))
         usage.budget.llm_calls = 60  # simulate spend past ceiling
         assert depth_controller.decide(state, _settings()) == "finalize"
-        checks = depth_controller.last_decision()
+        checks = depth_controller.last_decision(state, _settings())
         assert checks["budget_stop"] is True
     finally:
         clear_run_usage()
@@ -62,7 +61,7 @@ def test_no_budget_outside_run():
     # No ledger active: budget checks inert, decision unchanged.
     state = _state()
     assert depth_controller.decide(state, _settings()) in ("expand", "finalize")
-    checks = depth_controller.last_decision()
+    checks = depth_controller.last_decision(state, _settings())
     assert checks["budget"]["active"] is False
     assert checks["budget_stop"] is False
 
@@ -75,7 +74,7 @@ def test_no_novel_queries_stops():
         {"url": "https://c.com/z", "sub_question": "compare transformer efficiency against recurrent models"},
     ])
     assert depth_controller.decide(state, _settings()) == "finalize"
-    checks = depth_controller.last_decision()
+    checks = depth_controller.last_decision(state, _settings())
     assert checks["no_novel_queries"] is True
 
 
@@ -124,3 +123,24 @@ def test_stop_reason_mentions_no_novel_queries():
     ])
     reason = depth_controller.stop_reason(state, _settings())
     assert reason and "duplicated" in reason.lower()
+
+
+def test_checks_are_per_call_not_global():
+    """Two different states must yield their own checks, in any order.
+
+    Regression for the removed module-level `_last_decision` cache: reading
+    state A after evaluating state B used to return B's checks, so a
+    concurrent run could see another run's decision.
+    """
+    state_a = _state(search_results=[
+        {"url": "https://a.com/x", "sub_question": "what exactly defines transformer architecture"},
+        {"url": "https://b.com/y", "sub_question": "how strong is the benchmark evidence for transformers"},
+        {"url": "https://c.com/z", "sub_question": "compare transformer efficiency against recurrent models"},
+    ])  # no novel queries
+    state_b = _state()  # novel query pending
+    checks_a = depth_controller.last_decision(state_a, _settings())
+    checks_b = depth_controller.last_decision(state_b, _settings())
+    assert checks_a["no_novel_queries"] is True
+    assert checks_b["no_novel_queries"] is False
+    # Re-reading A after B still returns A's result.
+    assert depth_controller.last_decision(state_a, _settings())["no_novel_queries"] is True

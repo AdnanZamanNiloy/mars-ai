@@ -45,8 +45,6 @@ MIN_AXES_COVERED = 2
 # Modes that must complete at least this many passes before early stops.
 MODE_MIN_ITERATIONS = {"quick": 1, "audit": 2, "redteam": 1}
 
-_last_decision: Dict[str, Any] = {}
-
 
 def _planned_axes(state: Dict[str, Any]) -> List[str]:
     return sorted({
@@ -289,45 +287,65 @@ def evaluate(state: Dict[str, Any], settings: Settings | None = None) -> Dict[st
 
 
 def decide(state: Dict[str, Any], settings: Settings | None = None) -> DECISION:
-    global _last_decision
+    """Route decision only. For the checks behind it, use
+    `decide_with_checks` — there is deliberately no module-level cache, so
+    two concurrent runs can never read each other's decision."""
+    decision, _ = decide_with_checks(state, settings)
+    return decision
+
+
+def decide_with_checks(
+    state: Dict[str, Any], settings: Settings | None = None
+) -> tuple[DECISION, Dict[str, Any]]:
+    """Return (decision, checks) for a single evaluation.
+
+    The checks live only for this call. Earlier versions stashed them in a
+    module-level dict, which concurrent runs clobbered and which forced
+    tests to call `decide()` then read global state out of band; callers
+    now get an explicit value they own.
+    """
     checks = evaluate(state, settings)
-    _last_decision = dict(checks)
 
     # Stop conditions, in priority order.
     if checks["sufficiency_stop"] and not checks["min_iterations_not_reached"]:
-        return "finalize"
+        return "finalize", checks
     if checks["budget_stop"]:
         # Budget is a hard wall: never expand into a pass we cannot pay for.
-        return "finalize"
+        return "finalize", checks
     if checks["marginal_gain_stop"] and not checks["min_iterations_not_reached"]:
-        return "finalize"
+        return "finalize", checks
     if checks["ceiling_reached"]:
-        return "finalize"
+        return "finalize", checks
     if checks["no_novel_queries"]:
         # Every proposed follow-up duplicates a search we already ran —
         # expanding would burn a pass to re-find the same pages.
-        return "finalize"
+        return "finalize", checks
 
     # Mode demands a minimum depth (audit re-scopes even a sufficient-looking
     # pass 1): the only stops that may preempt this are the hard walls above.
     if checks["min_iterations_not_reached"]:
-        return "expand"
+        return "expand", checks
 
     # Expansion trigger: critic sees a specific gap AND axis coverage is poor.
     if checks["coverage_gap"]:
-        return "expand"
+        return "expand", checks
 
     # Default: trust the critic's loop decision (it returned insufficient
     # with improved_queries even if axis data couldn't confirm a gap).
     if state.get("critique", {}).get("improved_queries"):
-        return "expand"
+        return "expand", checks
 
-    return "finalize"
+    return "finalize", checks
 
 
-def last_decision() -> Dict[str, Any]:
-    """The checks behind the most recent decide() call (trace/UI/benchmarks)."""
-    return dict(_last_decision)
+def last_decision(state: Dict[str, Any], settings: Settings | None = None) -> Dict[str, Any]:
+    """The checks behind a decision for `state` (trace/UI/benchmarks).
+
+    Pure and stateless: re-evaluates rather than reading a global, so it is
+    safe under concurrent runs and cannot return another run's checks.
+    """
+    return decide_with_checks(state, settings)[1]
+
 
 
 def stop_reason(state: Dict[str, Any], settings: Settings | None = None) -> str | None:
