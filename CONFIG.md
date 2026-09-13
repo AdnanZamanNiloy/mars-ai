@@ -18,6 +18,8 @@ variables override `.env` values, which override `.env.example`.
 | `CUSTOM_LLM_TIMEOUT_SEC` | `90` | Per-call timeout for the custom provider only (slow hosts need 30-60s on planner-sized prompts). |
 | `MARS_SECRET_KEY` | auto | Fernet key material for encrypting UI-added provider keys at rest. Unset falls back to an auto-created `backend/.mars_secret` file. |
 
+| `ACTIVE_PROVIDER_FALLBACK` | `false` | When the UI-selected active provider fails (timeout/rate limit/outage), fall through to the env chain instead of degrading the run. `false` keeps strict exclusivity. |
+
 Provider chain order: UI-selected active provider (exclusive) →
 `CUSTOM_LLM_*` trio → Groq → HuggingFace, with per-provider circuit
 breakers (timeouts open immediately; fast failures trip after 3; 60s cooldown).

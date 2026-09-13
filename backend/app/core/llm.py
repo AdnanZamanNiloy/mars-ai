@@ -193,8 +193,30 @@ def _is_retryable(exc: BaseException) -> bool:
     return isinstance(exc, (httpx.HTTPError, RuntimeError))
 
 
+def _retry_after_hint(exc: BaseException | None) -> float:
+    """The provider's own retry hint, in seconds, or 0 when none given.
+
+    Groq puts a numeric header OR a 'Please try again in X.XXs' body line
+    on TPM-limit 429s; honoring the provider's number beats guessing."""
+    if not isinstance(exc, httpx.HTTPStatusError) or exc.response is None:
+        return 0.0
+    raw = exc.response.headers.get("retry-after") or ""
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        pass
+    match = re.search(r"try again in ([0-9.]+)s", exc.response.text.lower())
+    return float(match.group(1)) if match else 0.0
+
+
 def _wait_with_retry_after(retry_state) -> float:
-    """Honor the provider's Retry-After on 429s; exponential jitter otherwise."""
+    """Honor the provider's Retry-After on 429s; exponential jitter otherwise.
+
+    The first retry of a call may wait up to 20s when the provider says so:
+    free-tier TPM windows are the difference between an LLM-written report
+    and an extractive fallback, and a rolling per-minute window usually
+    clears within one patient wait. Later retries cap at 3s so a sustained
+    wall fails fast to the next provider instead of stalling the run."""
     outcome = getattr(retry_state, "outcome", None)
     exc = outcome.exception() if outcome is not None else None
     if (
@@ -202,16 +224,10 @@ def _wait_with_retry_after(retry_state) -> float:
         and exc.response is not None
         and exc.response.status_code == 429
     ):
-        try:
-            delay = float(exc.response.headers.get("retry-after", ""))
-            # Capped far below the research timeout: honoring a 10s+
-            # Retry-After per attempt (up to ~30s per call) would convert
-            # every rate-limit burst into a run timeout. Short blips are
-            # still honored; long walls fail fast to the next provider or
-            # the deterministic fallback instead of stalling the run.
-            return min(max(delay, 1.0), 3.0)
-        except (TypeError, ValueError):
-            pass
+        delay = _retry_after_hint(exc)
+        if delay:
+            cap = 20.0 if getattr(retry_state, "attempt_number", 1) <= 1 else 3.0
+            return min(max(delay, 1.0), cap)
     return wait_exponential_jitter(initial=0.4, max=3)(retry_state)
 
 
@@ -249,6 +265,7 @@ class LLMClient:
         """Providers a pre-flight probe should ping. Exclusive active
         provider → that one only; otherwise the full env chain."""
         custom, exclusive = await self._resolve_custom()
+        fallback_ok = bool(getattr(self.settings, "active_provider_fallback", False))
         targets: List[Dict[str, str]] = []
         if custom:
             targets.append({
@@ -258,7 +275,7 @@ class LLMClient:
                 "model": custom["model"],
                 "style": "openai",
             })
-        if not exclusive:
+        if not exclusive or fallback_ok:
             groq_key = _real_key(self.settings.groq_api_key)
             if groq_key:
                 targets.append({
@@ -412,7 +429,13 @@ class LLMClient:
         groq_key = _real_key(self.settings.groq_api_key)
         hf_key = _real_key(self.settings.huggingface_api_key)
         custom, exclusive = await self._resolve_custom()
-        if exclusive:
+        # Strict exclusivity (default) zeroes the env keys: a failing active
+        # provider degrades the run instead of silently spending another
+        # provider's key. active_provider_fallback relaxes exactly that —
+        # built for flaky free proxies: primary when healthy, rescued by
+        # Groq/HF when it stalls.
+        fallback_ok = exclusive and bool(getattr(self.settings, "active_provider_fallback", False))
+        if exclusive and not fallback_ok:
             groq_key = ""
             hf_key = ""
         # Identity-keyed breaker reset (see __init__): switching to a
@@ -457,7 +480,7 @@ class LLMClient:
                         exc,
                         exc_info=exc,
                     )
-                    if exclusive:
+                    if exclusive and not fallback_ok:
                         raise AllProvidersFailedError(
                             f"Active provider '{custom.get('name', 'custom')}' failed: "
                             f"{type(exc).__name__}. No fallback providers run while "
@@ -510,7 +533,7 @@ class LLMClient:
             configured = [name for name, ok in (
                 ("custom", bool(custom)), ("groq", bool(groq_key)), ("huggingface", bool(hf_key)),
             ) if ok]
-            if exclusive and custom:
+            if exclusive and custom and not fallback_ok:
                 configured = [f"active provider '{custom.get('name', 'custom')}' (exclusive, no fallbacks)"]
             raise AllProvidersFailedError(
                 "All LLM providers skipped this attempt — circuit breakers open "

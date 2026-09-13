@@ -290,3 +290,62 @@ async def test_exclusive_probe_pings_active_only(db_path):
     assert ok is True
     assert route.call_count == 1
     assert groq_route.call_count == 0, "exclusive selection must not ping the env chain"
+
+
+async def test_active_provider_fallback_rescues_the_run(db_path, monkeypatch):
+    """ACTIVE_PROVIDER_FALLBACK=true: the UI-selected provider stays primary,
+    but when it fails the env chain (Groq) serves the call instead of the run
+    degrading to deterministic extraction."""
+    import httpx
+    import respx
+
+    from app.core import providers as store
+    from app.core.config import Settings
+    from app.core.llm import LLMClient
+
+    await _seed(db_path)
+    providers = await store.list_providers(db_path)
+    await store.set_active_provider(db_path, providers[0]["id"])
+    settings = Settings(groq_api_key="test-key", database_url=db_path,
+                        active_provider_fallback=True, _env_file=None)
+    client = LLMClient(settings)
+
+    with respx.mock(assert_all_called=False) as mock:
+        custom_route = mock.post("https://llm.example.com/v1/chat/completions").mock(
+            return_value=httpx.Response(500, json={"error": "down"}))
+        groq_route = mock.post("https://api.groq.com/openai/v1/chat/completions").mock(
+            return_value=httpx.Response(200, json={"choices": [{"message": {"content": '{"ok": true}'}}]}))
+        result = await client.generate_json("sp", "up")
+        assert result == {"ok": True}
+        assert custom_route.call_count >= 1
+        assert groq_route.call_count == 1
+
+
+async def test_exclusive_probe_covers_env_fallbacks_when_enabled(db_path):
+    """With active_provider_fallback on, the pre-flight probe must ping the
+    active provider AND the env fallbacks — the probe's job is to detect a
+    doomed chain, and the chain now includes Groq/HF."""
+    import httpx
+    import respx
+
+    from app.core.config import Settings
+    from app.core import providers as store
+    from app.core.llm import LLMClient
+
+    row = await store.save_provider(
+        db_path, name="only2", base_url="https://only2.example.com/v1",
+        model="m", api_key="key",
+    )
+    await store.set_active_provider(db_path, row["id"])
+    settings = Settings(
+        groq_api_key="k", huggingface_api_key="hf",
+        active_provider_fallback=True, database_url=db_path, _env_file=None,
+    )
+    client = LLMClient(settings)
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post("https://only2.example.com/v1/chat/completions").mock(
+            return_value=httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]}))
+        mock.post("https://api.groq.com/openai/v1/chat/completions").mock(
+            return_value=httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]}))
+        ok, _ = await client.probe_all(timeout=5.0)
+    assert ok is True

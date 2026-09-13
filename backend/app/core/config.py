@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     # At-rest encryption for user-added provider keys (Providers tab).
     # Any string works (hashed into key shape); unset falls back to a
     # backend/.mars_secret file created once with 0600 permissions.
+    # Whether a FAILING UI-selected active provider falls through to the
+    # env chain (Groq/HF) instead of degrading the run. Strict exclusivity
+    # (False) never spends another provider's key without your say-so.
+    active_provider_fallback: bool = False
+
     mars_secret_key: str = ""
 
     # Persistence
