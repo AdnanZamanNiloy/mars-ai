@@ -90,10 +90,11 @@ class IntentUpdate(TypedDict):
     context_snippets: List[str]
 
 
-class SearchUpdate(TypedDict):
+class SearchUpdate(TypedDict, total=False):
     search_results: List[Dict[str, str]]
     counter_evidence_attempted: bool
     expansion_passes: int
+    facts: List[Dict[str, Any]]
 
 
 class SummarizerUpdate(TypedDict):
@@ -987,13 +988,96 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             merged = merged[dropped:]
             logger.info("search_results_capped", dropped=dropped, retained=len(merged))
         logger.info("search_done", results=len(merged), fresh=len(fresh))
-        return {
+        # Corroboration LINKING: fresh expansion results are matched back to
+        # pending needs_corroboration facts HERE, at the moment the new pages
+        # exist. Previously the results were merely merged into state (and the
+        # measurement primitives existed) but nothing ever matched a fresh
+        # result to the claim that needed it, so corroborating_sources stayed
+        # at one publisher and corroborated_ge2 was always 0. Annotate copies
+        # of the facts so no fact is dropped and no same-publisher URL can
+        # raise the count (find_corroborating_sources/apply_corroboration
+        # enforce registrable-domain independence).
+        updated_facts: List[Dict[str, Any]] = [
+            f for f in (state.get("facts", []) or []) if isinstance(f, dict)
+        ]
+        matched_corroboration = 0
+        try:
+            from app.core.evidence_grade import (
+                apply_corroboration,
+                find_corroborating_sources,
+                grade_claim,
+                registrable_domain,
+            )
+
+            existing_domains = {
+                registrable_domain(str(f.get("source", "") or ""))
+                for f in updated_facts
+            }
+            new_publishers = sum(
+                1
+                for r in results
+                if isinstance(r, dict)
+                and registrable_domain(str(r.get("url", "") or ""))
+                and registrable_domain(str(r.get("url", "") or ""))
+                not in existing_domains
+            )
+            settings = getattr(search_client, "settings", None)
+            threshold = float(getattr(settings, "corroboration_similarity", 0.55) or 0.55)
+            annotated: List[Dict[str, Any]] = []
+            for fact in updated_facts:
+                claim = str(fact.get("claim", "") or "").strip()
+                source = str(fact.get("source", "") or "").strip()
+                if not claim or not source:
+                    annotated.append(fact)
+                    continue
+                record = grade_claim(fact)
+                if not (record.needs_corroboration or record.corroboration_count < 2):
+                    annotated.append(fact)
+                    continue
+                existing_urls = [
+                    str(u) for u in (fact.get("corroborating_sources") or [])
+                    if str(u).strip()
+                ]
+                existing_urls.append(source)
+                matches = find_corroborating_sources(
+                    claim, results, existing_urls, threshold=threshold
+                )
+                gained = 0
+                copy = dict(fact)
+                for url in matches:
+                    if apply_corroboration(copy, url):
+                        gained += 1
+                if gained:
+                    matched_corroboration += 1
+                    annotated.append(copy)
+                else:
+                    annotated.append(fact)
+            updated_facts = annotated
+            logger.info(
+                "corroboration_funnel",
+                queries_issued=len(fresh),
+                results_returned=len(results),
+                new_publishers=new_publishers,
+                matched_corroboration=matched_corroboration,
+            )
+        except Exception as exc:
+            logger.warning(
+                "corroboration_linking_failed", error=str(exc), exc_info=exc
+            )
+            updated_facts = [
+                f for f in (state.get("facts", []) or []) if isinstance(f, dict)
+            ]
+
+        update: SearchUpdate = {
             "search_results": merged,
             "counter_evidence_attempted": bool(
                 state.get("counter_evidence_attempted") or issued_counter
             ),
             "expansion_passes": expansion_passes,
         }
+        if matched_corroboration:
+            update["facts"] = updated_facts
+        return update
 
     async def summarizer_node(state: ResearchState) -> SummarizerUpdate:
         # Agent Context Isolation (2.9): each sub-question worker sees only
