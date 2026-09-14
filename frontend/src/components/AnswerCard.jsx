@@ -45,14 +45,20 @@ function renderRichText(body) {
     .split(/\n{2,}/)
     .map((b) => b.trim())
     .filter(Boolean);
+  // Line-oriented parser. A numbered/bulleted block is a SINGLE list whose
+  // items each start on their own line; continuation lines (indented or
+  // wrapped) append to the current item instead of being merged into one
+  // paragraph. This fixes "1. a 2. b 3. c" collapsing into a single line when
+  // the items are not separated by blank lines.
   const out = [];
   let list = [];
   let ordered = false;
-  const flushList = (key) => {
+  let key = 0;
+  const flushList = () => {
     if (!list.length) return;
     const Tag = ordered ? "ol" : "ul";
     out.push(
-      <Tag key={key} className="answer-list">
+      <Tag key={`list-${key++}`} className="answer-list">
         {list.map((item, j) => (
           <li key={j}>{renderInline(item)}</li>
         ))}
@@ -61,57 +67,62 @@ function renderRichText(body) {
     list = [];
     ordered = false;
   };
-  blocks.forEach((block, i) => {
-    const bulletLines = block.split("\n").map((l) => l.trim()).filter(Boolean);
-    const isBullets = bulletLines.length > 0 && bulletLines.every((l) => /^[-*]\s+/.test(l));
-    const isNumbered = bulletLines.length > 0 && bulletLines.every((l) => /^\d+[.)]\s+/.test(l));
 
-    if (block.startsWith("### ")) {
-      flushList(`list-${i}`);
-      out.push(
-        <h5 key={i} className="answer-subh">
-          {renderInline(block.slice(4).trim())}
-        </h5>
-      );
-    } else if (block.startsWith("## ")) {
-      flushList(`list-${i}`);
-      out.push(
-        <h4 key={i} className="answer-h">
-          {renderInline(block.slice(3).trim())}
-        </h4>
-      );
-    } else if (block.startsWith("# ")) {
-      flushList(`list-${i}`);
-      out.push(
-        <h4 key={i} className="answer-h">
-          {renderInline(block.slice(2).trim())}
-        </h4>
-      );
-    } else if (isBullets || isNumbered) {
-      // A whole block of "- "/"* "/"1." lines is one list; a mixed line
-      // (e.g. "- **Label** — text") still renders as a single item.
-      flushList(`mix-${i}`);
-      ordered = isNumbered;
-      for (const line of bulletLines) {
-        list.push(line.replace(/^(?:[-*]|\d+[.)])\s+/, ""));
+  const BULLET_RE = /^\s*[-*+]\s+(.*)$/;
+  const NUMBER_RE = /^\s*\d+[.)]\s+(.*)$/;
+
+  blocks.forEach((block) => {
+    // A blank-line-separated block may itself contain several lines (list
+    // items and/or plain wrapped text). Walk them in order.
+    const lines = block.split("\n");
+    // Whole-block headings/paragraphs (single logical block).
+    const first = block.trim();
+    if (list.length === 0) {
+      if (first.startsWith("### ")) {
+        out.push(<h5 key={`h-${key++}`} className="answer-subh">{renderInline(first.slice(4).trim())}</h5>);
+        return;
       }
-    } else if (/^\[\d+\]\s/.test(block)) {
-      flushList(`list-${i}`);
-      out.push(
-        <p key={i} className="source-line">
-          {renderInline(block)}
-        </p>
-      );
-    } else {
-      flushList(`list-${i}`);
-      out.push(
-        <p key={i} className="answer-para">
-          {renderInline(block)}
-        </p>
-      );
+      if (first.startsWith("## ")) {
+        out.push(<h4 key={`h-${key++}`} className="answer-h">{renderInline(first.slice(3).trim())}</h4>);
+        return;
+      }
+      if (first.startsWith("# ")) {
+        out.push(<h4 key={`h-${key++}`} className="answer-h">{renderInline(first.slice(2).trim())}</h4>);
+        return;
+      }
     }
+    if (/^\s*\[\d+\]\s/.test(block)) {
+      flushList();
+      out.push(<p key={`src-${key++}`} className="source-line">{renderInline(block)}</p>);
+      return;
+    }
+
+    let sawListLine = false;
+    for (const raw of lines) {
+      const line = raw.replace(/\s+$/, "");
+      const num = line.match(NUMBER_RE);
+      const bul = line.match(BULLET_RE);
+      if (num || bul) {
+        // New item. If the current list type changes, close and start fresh.
+        const lineOrdered = Boolean(num);
+        if (list.length && lineOrdered !== ordered) flushList();
+        if (!list.length) ordered = lineOrdered;
+        list.push((num ? num[1] : bul[1]).trim());
+        sawListLine = true;
+      } else if (list.length && line.trim() && /^\s+/.test(line)) {
+        // Indented continuation of the current item.
+        list[list.length - 1] = `${list[list.length - 1]} ${line.trim()}`;
+      } else {
+        // Plain text line: close any open list, then emit a paragraph.
+        flushList();
+        if (line.trim()) {
+          out.push(<p key={`p-${key++}`} className="answer-para">{renderInline(line.trim())}</p>);
+        }
+      }
+    }
+    if (sawListLine) flushList();
   });
-  flushList("list-end");
+  flushList();
   return out;
 }
 
