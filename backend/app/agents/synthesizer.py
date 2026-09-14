@@ -57,6 +57,7 @@ from app.agents.outline import (
     group_facts_by_section,
     render_outline,
 )
+from app.agents.answer_quality import length_band
 from app.agents.evidence_utils import (
     dedupe_semantic_facts,
     extract_domain,
@@ -88,7 +89,15 @@ intelligence report. You do not dump search results; you present knowledge.
    sentences.
 6. Never write "the research found", "the agents discovered", or "according
    to the research". Present the knowledge directly.
-7. LENGTH: default under 900 words. When the input carries an explicit
+7. NEVER expose the pipeline's own internal metrics in the report prose. Do
+   not write the confidence score, the relevance/quality score, the count of
+   verified facts, the number of facts in the pool, "below the threshold",
+   "relevance N/100", "pipeline confidence", or any number describing the
+   research system rather than the subject. Those figures belong only in the
+   machine-appended Evidence & Confidence appendix. Describe the strength of
+   the EVIDENCE in words ("well-established", "single-source") and let the
+   appendix carry the numbers.
+8. LENGTH: default under 900 words. When the input carries an explicit
    length hint (deep-research modes), follow the hint instead. Slow
    providers cannot serve unbounded generation, and a timed-out synthesis
    degrades to extraction.
@@ -349,16 +358,19 @@ async def synthesize(
     # Mode-aware depth: deep/executive runs are allowed a longer, more
     # analytical report — that depth is the product. Quick/standard stay tight
     # for latency, because providers degrade to extraction on unbounded
-    # generation.
+    # generation. The upper bound comes from the SAME band the quality gate
+    # enforces (answer_quality.length_band), so the writer is never told to
+    # exceed what the gate will fail.
     mode = str(ctx.get("mode", "standard") or "standard")
+    band_lo, band_hi = length_band(mode)
     if mode in ("deep", "executive"):
         length_hint = (
-            "LENGTH: this is a deep-research brief — up to 1400 words. "
-            "Go deeper per angle: mechanisms, numbers with context, and "
-            "explicit treatment of conflicting evidence."
+            f"LENGTH: this is a deep-research brief — aim for {band_lo}-{band_hi} "
+            "words in TOTAL. Go deeper per angle: mechanisms, numbers with "
+            "context, and explicit treatment of conflicting evidence."
         )
     else:
-        length_hint = "LENGTH: keep the report under 900 words."
+        length_hint = f"LENGTH: keep the report under {band_hi} words."
 
     intent = ctx.get("intent") or {}
     level = str(intent.get("explanation_level", "") or "")
@@ -494,6 +506,8 @@ async def synthesize(
         return _deterministic_report(query, usable_facts, top_facts, ctx, angles)
 
     answer = _sanitize_answer_text(answer, query)
+    answer = _scrub_pipeline_telemetry(answer)
+    answer = _ensure_disambiguation(answer, ctx)
     audit = audit_citations(answer, numbered, cited_facts)
 
     # Out-of-range markers are removed (they resolve to nothing), but unlike the
@@ -508,6 +522,41 @@ async def synthesize(
     answer = _append_evidence_appendix(answer, ctx, usable_facts, contradictions)
     answer = _append_source_legend(answer, numbered)
     return SynthesisResult(answer=answer, sources=numbered, audit=audit, angles=angles)
+
+
+def _normalize_heading(text: str) -> str:
+    """Comparison key for headings: casefolded, punctuation/space-insensitive."""
+    return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+
+
+def _strip_duplicate_section_heading(body: str, title: str) -> str:
+    """Remove a leading heading the section writer emitted for itself.
+
+    The section-wise assembler prepends `## <title>` to every section body.
+    When the writer also opens with `## <title>` (or `# / ### <title>`), the
+    heading appears twice in the shipped report. Drop the writer's copy only
+    when it names this section; keep any *different* heading so genuine
+    sub-structure is never destroyed. Deterministic, no LLM.
+    """
+    if not body:
+        return body
+    lines = body.splitlines()
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i >= len(lines):
+        return body
+    first = lines[i].strip()
+    match = re.match(r"^#{1,6}\s+(.*\S)\s*$", first)
+    if not match:
+        return body
+    if _normalize_heading(match.group(1)) != _normalize_heading(title):
+        return body
+    remaining = lines[i + 1:]
+    # Drop a single blank line that separated the writer's heading from prose.
+    if remaining and not remaining[0].strip():
+        remaining = remaining[1:]
+    return "\n".join(remaining).strip() if remaining else ""
 
 
 async def _synthesize_sectioned(
@@ -564,8 +613,79 @@ async def _synthesize_sectioned(
     source_lines = _source_lines(numbered)
     ranges_block = _render_ranges_block(contradictions)
     context_block = _render_context_block(ctx)
+    # Per-section word budget so the assembled report lands inside the mode's
+    # band. The old prompt gave each section "2-4 tight paragraphs" with only a
+    # whole-report hint, and the sections summed to 3809 words against a 1500
+    # cap. Reserve ~200 words for the Executive Summary and divide the rest.
+    mode = str(ctx.get("mode", "standard") or "standard")
+    band_lo, band_hi = length_band(mode)
+    per_section_hi = max(120, (band_hi - 200) // max(1, len(groups)))
+    section_length_hint = (
+        f"LENGTH: {per_section_hi} words maximum for THIS section — the report "
+        f"assembles to at most {band_hi} words total across "
+        f"{len(groups)} sections plus the Executive Summary. Be concise."
+    )
+
+    # Executive Summary first. The single-pass prompt mandates this heading and
+    # the quality gate hard-fails clarity without it, but the section-wise path
+    # previously assembled only outline sections — every sectioned report
+    # shipped without its Executive Summary. One dedicated writer call over the
+    # highest-confidence facts; when it fails we drop the heading rather than
+    # ship an empty section (the gate's clarity note is honest, a blank
+    # "## Executive Summary" is not).
+    exec_body = ""
+    opening_facts = _stratified_top_facts(all_section_facts, per_angle=3, cap=10)
+    opening_cited: List[Dict[str, Any]] = []
+    for fact in opening_facts:
+        index = marker_by_id.get(id(fact))
+        if index is None:
+            continue
+        item = dict(fact)
+        item["citation"] = index
+        opening_cited.append(item)
+    if opening_cited:
+        exec_prompt = (
+            f"Main query: {query}\n\n"
+            f"{length_hint}\n\n"
+            "Write ONLY the Executive Summary of a larger report. 4-6 sentences "
+            "maximum, in your own words, answering the main query directly. If the "
+            "query term has multiple distinct meanings, name them in the first "
+            "sentence and keep them strictly separate. End with the overall "
+            "confidence level and numeric score from the honesty baseline below. "
+            "Do NOT emit a markdown heading — the assembler adds it. Cite with "
+            "these exact [n] markers.\n\n"
+            "Evidence:\n"
+            + _render_evidence_block(opening_cited)
+            + "\n\n"
+            + ranges_block
+            + context_block
+            + f"Sources (cite by number only):\n{source_lines}\n\n"
+            "Return JSON in this schema: "
+            '{"answer": "<Executive Summary prose with [n] citations>"}'
+        )
+        try:
+            exec_payload = await llm.generate_json(
+                SYNTHESIZER_SYSTEM_PROMPT,
+                exec_prompt,
+                response_model=SynthesizerAnswerModel,
+            )
+            exec_body = (
+                str(exec_payload.get("answer", "")).strip()
+                if isinstance(exec_payload, dict) else ""
+            )
+        except Exception as exc:
+            logger.warning(
+                "[Synthesizer] executive summary call failed (%s); continuing without it",
+                str(exc)[:120],
+                exc_info=exc,
+            )
+            exec_body = ""
+        exec_body = _strip_duplicate_section_heading(exec_body, "Executive Summary")
 
     section_bodies: List[str] = []
+    written_sections = 0
+    if exec_body:
+        section_bodies.append(f"## Executive Summary\n\n{exec_body}")
     for (section, _), section_cited in zip(groups, facts_by_section):
         if not section_cited:
             continue
@@ -573,11 +693,13 @@ async def _synthesize_sectioned(
         # own citation marker, so section prompts cannot renumber the legend.
         prompt = (
             f"Main query: {query}\n\n"
-            f"{length_hint}\n\n"
+            f"{section_length_hint}\n\n"
             f"You are writing ONE section of a larger report, the section titled "
             f"\"{section.title}\" (dimension: {section.axis}).\n"
             + (f"Section goal: {section.coverage_goal}\n" if section.coverage_goal else "")
-            + "Write 2-4 tight paragraphs of synthesis for THIS section only. "
+            + "Write 2-3 tight paragraphs of synthesis for THIS section only. "
+            "Do NOT emit a markdown heading for this section — the assembler adds "
+            f"the \"## {section.title}\" heading itself. Start directly with prose. "
             "Do not write an Executive Summary, a Sources list, or other sections — "
             "they are added separately. Use these exact [n] markers.\n\n"
             "Evidence:\n"
@@ -606,13 +728,22 @@ async def _synthesize_sectioned(
         if not body:
             logger.warning("[Synthesizer] section '%s' empty; abandoning section-wise path", section.title)
             return None
+        # The assembler adds the section heading. Models routinely lead the
+        # body with their own `## <title>` anyway, which duplicated every H2
+        # in the shipped report ("## What It Is\n\n## What It Is"). Strip a
+        # single leading ATX heading (H1-H6) when it matches the section
+        # title; a differing heading is kept so real sub-structure survives.
+        body = _strip_duplicate_section_heading(body, section.title)
+        written_sections += 1
         section_bodies.append(f"## {section.title}\n\n{body}")
 
-    if len(section_bodies) < 2:
+    if written_sections < 2:
         return None
 
     assembled = "\n\n".join(section_bodies)
     answer = _sanitize_answer_text(assembled, query)
+    answer = _scrub_pipeline_telemetry(answer)
+    answer = _ensure_disambiguation(answer, ctx)
     audit = audit_citations(answer, numbered, cited_facts)
     if audit.invalid_markers:
         answer = _drop_invalid_markers(answer, len(numbered))
@@ -1289,6 +1420,58 @@ def _gaps_section(stats: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _deterministic_disambiguation(intent: Dict[str, Any]) -> str:
+    """The numbered 'n) **Sense** — explanation' block the gate requires.
+
+    The disambiguation lines are definitional common knowledge for the
+    non-researched sense, so they can be emitted deterministically from the
+    intent instead of hoping the writer complies. Returns "" for a
+    non-ambiguous query or one with fewer than two labelled senses.
+    """
+    if not isinstance(intent, dict) or not intent.get("ambiguity"):
+        return ""
+    senses = [
+        s for s in (intent.get("senses") or [])
+        if isinstance(s, dict) and str(s.get("label", "")).strip()
+    ]
+    if len(senses) < 2:
+        return ""
+    lines = []
+    for i, sense in enumerate(senses[:3], 1):
+        label = str(sense.get("label", "")).strip()
+        note = str(sense.get("note", "") or "").strip()
+        if not note:
+            note = str(sense.get("domain", "") or "distinct meaning").strip()
+        lines.append(f"{i}) **{label}** — {note}")
+    return "\n".join(lines)
+
+
+def _ensure_disambiguation(answer: str, ctx: Dict[str, Any]) -> str:
+    """Guarantee the ambiguity contract is in the shipped body.
+
+    If the writer already opened with numbered sense lines, leave it alone;
+    otherwise prepend the deterministic block so an ambiguous query never
+    silently picks one meaning (the hard relevance failure this gate exists
+    for). Deterministic, no LLM.
+    """
+    intent = ctx.get("intent") or {}
+    if not isinstance(intent, dict) or not intent.get("ambiguity"):
+        return answer
+    if re.search(r"^\s*\d+\)\s*\*\*[^*]{2,120}\*\*", answer or "", re.M):
+        return answer
+    block = _deterministic_disambiguation(intent)
+    if not block:
+        return answer
+    heading = re.search(r"^##\s+Executive Summary\s*$", answer or "", re.M)
+    if heading:
+        # Put the lines at the top of the Executive Summary, where the
+        # contract says they belong, rather than above the heading.
+        head = answer[: heading.end()]
+        tail = answer[heading.end():].lstrip()
+        return f"{head}\n\n{block}\n\n{tail}"
+    return f"{block}\n\n{answer.lstrip()}"
+
+
 def _render_ambiguity_block(intent: Dict[str, Any]) -> str:
     """Mandatory disambiguation contract for an ambiguous query.
 
@@ -1369,6 +1552,11 @@ def _render_context_block(ctx: Dict[str, Any]) -> str:
     verified = ctx.get("verified_count", 0) or 0
     if total:
         parts.append(f"Evidence pool: {verified}/{total} facts verified; unverified claims were excluded.")
+    parts.append(
+        "The figures above are INTERNAL METADATA for your judgement only. "
+        "Never quote them verbatim in the report body — the appendix states "
+        "them, and the body describes evidence strength in words."
+    )
 
     # Evidence grades (Step 4): the measured quality distribution, so the
     # writer can separate what is established from what is merely asserted
@@ -1534,6 +1722,55 @@ def _legend_block(numbered: Sequence[Dict[str, Any]]) -> str:
 
 
 _FIGURE_RE = re.compile(r"\d")
+
+
+# Sentences that expose the pipeline's own internals rather than the subject.
+# The model is told not to write these (SYNTHESIZER_SYSTEM_PROMPT rule 7), but
+# live runs proved it copies the metadata block verbatim ("pipeline confidence
+# is 0.55, below the 0.75 threshold", "the pipeline itself reports only 80 of
+# 96 facts verified"). The machine-appended appendix states these numbers
+# correctly; the body must not narrate the research system.
+_PIPELINE_TELEMETRY_RE = re.compile(
+    r"(?i)\b("
+    r"pipeline confidence|pipeline reports|the pipeline itself|"
+    r"relevance \d{1,3}/\d{1,3}|quality (?:score|review)|"
+    r"below the \d{1,3}/\d{1,3} floor|below the \d\.\d+ threshold|"
+    r"confidence is \d\.\d+|fact(?:s)? (?:in the pool|verified)|"
+    r"of \d+ facts|evidence pool|verified facts|"
+    r"self-?verif|pipeline stages?|deterministic fallback|degraded run"
+    r")\b"
+)
+
+
+def _scrub_pipeline_telemetry(text: str) -> str:
+    """Drop sentences that narrate the pipeline's own metrics.
+
+    Applied to the report body only, BEFORE the measured appendix is
+    appended, so the correct figures in the appendix are never touched.
+    Sentence-granular and deterministic: a sentence mentioning internal
+    telemetry is removed whole (it is meta-commentary, not subject matter);
+    paragraphs that become empty collapse away.
+    """
+    if not text:
+        return text
+    kept_paras: List[str] = []
+    for para in text.split("\n\n"):
+        stripped = para.strip()
+        # Headings are structural — leave them alone. Everything else is
+        # scrubbed line by line so one telemetry bullet does not erase a list.
+        if not stripped or stripped.startswith("#"):
+            kept_paras.append(para)
+            continue
+        kept_lines: List[str] = []
+        for line in para.split("\n"):
+            if not line.strip():
+                continue
+            if _PIPELINE_TELEMETRY_RE.search(line):
+                continue
+            kept_lines.append(line)
+        if kept_lines:
+            kept_paras.append("\n".join(kept_lines))
+    return "\n\n".join(kept_paras).strip()
 
 
 def _normalize_query_concept(query: str) -> str:

@@ -47,10 +47,25 @@ _QUERY_STOP = {
     "define", "between", "from", "that", "this", "how", "why", "their", "there",
 }
 
-_DISAMBIG_LINE_RE = re.compile(r"^\s*\d+\)\s*\*\*[^*]{2,120}\*\*")
+_DISAMBIG_LINE_RE = re.compile(r"^\s*\d+\)\s*\*\*[^*]{2,120}\*\*", re.M)
 _FOCUS_LINE_RE = re.compile(
     r"^\s*(based on your question|this report focuses)", re.IGNORECASE
 )
+
+
+def _label_core(label: str) -> str:
+    """Normalized sense-label key for matching against report prose.
+
+    Intent labels often carry a parenthetical gloss ("Electrical transformer
+    (AC voltage device)") while a writer naturally renders only the core
+    ("Electrical transformer"). Comparing the full string verbatim made the
+    gate reject a report that DID disambiguate correctly. Strip parentheticals
+    and trailing qualifiers, casefold, and match on the core.
+    """
+    text = str(label or "").strip()
+    text = re.sub(r"\s*\([^)]*\)", "", text)
+    text = re.split(r"\s+[—–-]\s+", text)[0]
+    return text.strip().lower()
 
 
 def _concept_terms(text: str) -> List[str]:
@@ -73,16 +88,29 @@ def _word_count(text: str) -> int:
     return len(re.findall(r"[A-Za-z0-9']+", text or ""))
 
 
+_LENGTH_BANDS = {
+    "quick": (120, 650),
+    "standard": (200, 950),
+    "audit": (200, 950),
+    "redteam": (200, 950),
+    "deep": (350, 1500),
+    "executive": (350, 1500),
+}
+
+
+def length_band(mode: str) -> tuple[int, int]:
+    """The (min, max) word band the clarity score enforces for a mode.
+
+    Public so the synthesizer's length hint and the quality gate can never
+    drift apart — a deep report told "up to 1400 words" while the gate caps
+    at 1500 is fine, but a section-wise writer with no per-section budget
+    overshot to 3809 words. One band, used by both.
+    """
+    return _LENGTH_BANDS.get(str(mode or "standard").lower(), _LENGTH_BANDS["standard"])
+
+
 def _length_band_score(words: int, mode: str) -> float:
-    bands = {
-        "quick": (120, 650),
-        "standard": (200, 950),
-        "audit": (200, 950),
-        "redteam": (200, 950),
-        "deep": (350, 1500),
-        "executive": (350, 1500),
-    }
-    lo, hi = bands.get(str(mode or "standard").lower(), bands["standard"])
+    lo, hi = length_band(mode)
     if words < lo:
         return words / lo
     if words > hi:
@@ -235,9 +263,9 @@ def evaluate_answer(
         sense_alignment = 0.0
         if disambig_lines >= min(2, len(senses)):
             sense_alignment = 0.6
-            labels = [str(s["label"]).strip() for s in senses[:2]]
+            cores = [c for c in (_label_core(s["label"]) for s in senses[:2]) if c]
             if intent.get("recommended_action") == "research_both":
-                if all(label.lower() in lowered for label in labels):
+                if cores and all(core in lowered for core in cores):
                     sense_alignment = 1.0
             else:
                 sense_alignment = 1.0
