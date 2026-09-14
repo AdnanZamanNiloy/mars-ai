@@ -152,3 +152,84 @@ def test_compression_preserves_order_and_identity():
              for i in range(5)]
     compressed = _compress_to_themes(facts, similarity_threshold=0.9)
     assert [f["claim"] for f in compressed] == [f["claim"] for f in facts]
+
+
+def test_reasoning_depth_contract_reaches_every_writer_prompt():
+    """Every writing prompt must demand WHY/mechanism and trade-offs.
+
+    Live evidence: the deep AI report scored reasoning=65 with the quality
+    gate noting it stated no limitations — it recounted WHAT per dimension but
+    never explained causes or weighed trade-offs. The instruction must reach
+    the section writer AND the single-pass writer, never one or the other.
+    """
+    from app.agents.synthesizer import SYNTHESIZER_SYSTEM_PROMPT
+
+    outline = build_outline("What is the current trend of AI?", _facts(), _sub_questions())
+
+    prompts: list[str] = []
+
+    class _RecordingLLM:
+        async def generate_json(self, system_prompt, user_prompt, **kwargs):
+            prompts.append(user_prompt)
+            return {"answer": "A synthesized section body with a cited claim [1]."}
+
+    # Section-wise path: exec summary + per-section calls.
+    asyncio.run(
+        synthesize(_RecordingLLM(), "What is the current trend of AI?", _facts(),
+                   {"intent": {}, "sub_questions": _sub_questions()},
+                   outline=outline, section_wise=True, compress_context=False)
+    )
+    section_prompts = [p for p in prompts if "ONE section of a larger report" in p]
+    assert section_prompts, "no section-writing prompt captured"
+    assert all("REASONING DEPTH" in p for p in section_prompts)
+
+    # Single-pass path.
+    prompts.clear()
+    asyncio.run(
+        synthesize(_RecordingLLM(), "What is the current trend of AI?", _facts(),
+                   {"intent": {}, "sub_questions": _sub_questions()},
+                   outline=outline, section_wise=False, compress_context=False)
+    )
+    assert prompts and all("REASONING DEPTH" in p for p in prompts)
+
+    # And the system prompt states the same contract.
+    assert "EXPLAIN, DON'T JUST REPORT" in SYNTHESIZER_SYSTEM_PROMPT
+
+
+def test_trim_to_band_brings_overlong_draft_inside_the_band():
+    """A draft over the mode's word cap must be trimmed deterministically to
+    fit, without dropping any section or the Executive Summary.
+
+    Regression: the section-wise writers overshot the per-section budget (1715
+    words against a 1500 deep cap) and the revision pass re-ran the same writer
+    and overshot again, so the length contract was never enforced."""
+    from app.agents.synthesizer import _count_words, _trim_to_band
+    from app.agents.answer_quality import length_band
+
+    para = " ".join(["word"] * 200)
+    body = "\n\n".join([
+        "## Executive Summary",
+        para,
+        "## What It Is",
+        para, para, para,
+        "## Evidence & Data",
+        para, para, para,
+        "## Limitations & Critique",
+        para, para, para,
+    ])
+    assert _count_words(body) > 1500
+    trimmed = _trim_to_band(body, "deep")
+    _, hi = length_band("deep")
+    assert _count_words(trimmed) <= hi
+    # Every section heading survives; the Executive Summary is never trimmed.
+    for heading in ("## Executive Summary", "## What It Is",
+                    "## Evidence & Data", "## Limitations & Critique"):
+        assert heading in trimmed
+    assert "Executive Summary" in trimmed
+
+
+def test_trim_to_band_leaves_in_band_draft_untouched():
+    from app.agents.synthesizer import _trim_to_band
+
+    body = "## Answer\n\nA short, in-band answer [1]."
+    assert _trim_to_band(body, "deep") == body

@@ -532,24 +532,41 @@ def contract_queries(contract: Any, max_queries: int = 3) -> List[str]:
     variant. Variants exist precisely because different phrasings retrieve
     different documents, and until now they were parsed, validated, stored and
     never used. Capped so a 5-contract plan cannot fan out to 20 searches.
+
+    The primary-source-scoped variant is RESERVED a slot, not appended last and
+    truncated: it is the query aimed at the publisher that owns the fact
+    (site:worldbank.org, site:arxiv.org, ...), and it was being dropped on any
+    contract the model had already given two variants — which is every
+    high-value contract. Reserving the slot is what actually raises the
+    independent/primary-source yield the source ledger reports.
     """
     question, _ = _split_query(contract)
     queries: List[str] = []
     if question:
         queries.append(question)
+    primary = ""
+    if isinstance(contract, dict):
+        primary = re.sub(r"\s+", " ", str(contract.get("primary_source_query", "") or "")).strip()
+    budget = max(1, max_queries)
+    # Hold one slot for the primary query whenever it exists and there is room
+    # for more than the base question.
+    variant_budget = budget
+    if primary and budget > 1:
+        variant_budget = budget - 1
     if isinstance(contract, dict):
         for variant in contract.get("variants") or ():
             text = re.sub(r"\s+", " ", str(variant or "")).strip()
             if text and text.lower() != question.lower():
                 queries.append(text)
-        primary = re.sub(r"\s+", " ", str(contract.get("primary_source_query", "") or "")).strip()
-        if primary:
-            queries.append(primary)
+            if len(queries) >= variant_budget:
+                break
+    if primary:
+        queries.append(primary)
     deduped: List[str] = []
     for q in queries:
         if not any(_semantic_overlap(q, kept) >= 0.92 for kept in deduped):
             deduped.append(q)
-        if len(deduped) >= max(1, max_queries):
+        if len(deduped) >= budget:
             break
     return deduped
 

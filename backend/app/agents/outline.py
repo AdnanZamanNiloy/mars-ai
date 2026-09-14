@@ -24,6 +24,7 @@ Design
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Sequence
 
@@ -114,6 +115,23 @@ def _axis_for_fact(fact: Dict[str, Any]) -> str:
     return "general"
 
 
+def _sense_match(fact_sense: str, label: str) -> bool:
+    """True when a fact's sense tag names the same sense as `label`.
+
+    Case- and punctuation-insensitive containment in EITHER direction: the
+    planner stamps the exact label, but a summarizer may record a lightly
+    reworded tag ("Transformer neural network architecture" vs
+    "transformer neural network architecture (ML)"). Containment is
+    deliberately the test, not equality — an orphaned tag would silently
+    starve the sense section of its own evidence.
+    """
+    a = re.sub(r"[^a-z0-9]+", " ", (fact_sense or "").lower()).strip()
+    b = re.sub(r"[^a-z0-9]+", " ", (label or "").lower()).strip()
+    if not a or not b:
+        return False
+    return a in b or b in a
+
+
 def _section_title(axis: str, question: str) -> str:
     known = _AXIS_TITLES.get(axis)
     if known:
@@ -184,19 +202,58 @@ def build_outline(
     sections: List[OutlineSection] = []
     if ambiguous:
         # A term with two senses needs one section per sense — never blended.
+        # Each sense section receives ONLY the facts tagged with that sense.
+        # The old code handed `list(facts)` (EVERY fact, both senses) to every
+        # sense section, so the ML-transformer section was fed electrical-price
+        # index claims and the not-researched sense was written from the other
+        # sense's evidence — the exact blend the intent stage exists to stop.
+        # A fact with no sense tag (unambiguous contract) is a fallback shared
+        # below, so a sense-agnostic pool never yields empty sections.
+        sense_by_fact: Dict[str, List[Dict[str, Any]]] = {}
+        untagged: List[Dict[str, Any]] = []
+        for fact in facts:
+            tag = str(fact.get("sense", "") or "").strip()
+            if tag:
+                sense_by_fact.setdefault(tag, []).append(fact)
+            else:
+                untagged.append(fact)
         for sense in senses[:2]:
             label = str(sense.get("label", "")).strip()
+            # Match the fact's sense tag to the sense label case-insensitively;
+            # the exact label is what the planner stamps, but normalization
+            # keeps a lightly-reworded tag from orphaning its evidence.
+            matched = [
+                f
+                for tag, tagged in sense_by_fact.items()
+                if _sense_match(tag, label)
+                for f in tagged
+            ]
+            if not matched:
+                # No sense-tagged evidence at all: fall back to the shared pool
+                # so the section is never empty (old behaviour, only when the
+                # pool carries no usable sense signal).
+                matched = list(facts)
             sections.append(
                 OutlineSection(
                     axis=str(sense.get("domain", "definition") or "definition"),
                     title=label,
                     question=label,
-                    facts=list(facts),
+                    facts=matched,
                     coverage_goal="disambiguate this meaning from the others",
                 )
             )
 
+    # Axis sections are only added when they are NOT the senses' own dimensions:
+    # a sense section already covers its evidence, so re-emitting the axis would
+    # duplicate it (the report shipped an "Electrical transformer" sense section
+    # AND a second evidence section reciting its price-index data).
+    sense_axes = {
+        str(s.get("domain", "") or "").strip().lower() for s in senses[:2]
+    } if ambiguous else set()
+
     for axis in ordered:
+        if ambiguous and axis in sense_axes:
+            continue
         if len(sections) >= 8:
             break
         sections.append(

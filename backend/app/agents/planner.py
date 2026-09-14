@@ -288,10 +288,23 @@ RULE 2 — COVER IN PHASES, NOT JUST AXES
   measurements, or official data — never leave a plan without one.
   Phase D (challenge): at least 1 criticism question seeking limitations,
   counter-evidence, or risks — this feeds the contradiction engine.
-  Cover at least 2 distinct axes overall:
+  Cover at least 3 distinct axes overall:
   definition | mechanism | application | criticism | comparison |
   evidence | history | outlook
   Do not restate the same angle twice.
+
+  NON-OVERLAP IS MANDATORY. Two sub-questions overlap when a single source
+  could answer both, or when they differ only in phrasing. If you cannot
+  name the DISTINCT evidence each question would retrieve, you have written
+  the same question twice — replace one with a genuinely different angle.
+  BAD  → "AI trends 2026" and "current AI developments" (same retrieval)
+  GOOD → "enterprise agentic AI adoption rate 2026" and "scaling-law
+          diminishing returns evidence 2025-2026" (different sources)
+
+  WHY ANGLE — for any analytical, trend, or comparative query, at least one
+  sub-question must target MECHANISM/CAUSATION: why the trend is happening,
+  what drives it, how the mechanism works, or what trade-off explains it.
+  A plan of only "what is X" and "X statistics" answers what, never why.
 
   DIVERSITY TABLE — spread the plan across information types by using at
   least 3 distinct search_types (they are the plan's diversity contract):
@@ -619,6 +632,26 @@ def enforce_axis_coverage(
         "outlook": (
             f"{concept} outlook forecast recent developments{year}", "news", 2,
         ),
+        # WHY/mechanism angle: the missing dimension in the live deep run, whose
+        # plans were [definition, evidence, criticism] on every pass and whose
+        # report therefore described WHAT without explaining WHY (mechanisms,
+        # causation, trade-offs). Wording steers at the causal/explanatory
+        # literature rather than another broad definition.
+        "mechanism": (
+            f"{concept} how it works mechanism why causes drivers{year}", "academic", 1,
+        ),
+        "risk": (
+            f"{concept} risks failure modes downsides{year}", "academic", 2,
+        ),
+        "cost": (
+            f"{concept} cost price economics figures{year}", "statistical", 2,
+        ),
+        "history": (
+            f"{concept} history origin development timeline", "encyclopedia", 3,
+        ),
+        "regulation": (
+            f"{concept} regulation policy law governance{year}", "news", 3,
+        ),
     }
 
     for axis in required_axes or ():
@@ -673,8 +706,14 @@ def select_plan(
         picked_ids.add(int(item.get("id", -1)))
 
     for axis in required:
-        if len(picked) >= target_count:
-            break
+        # Required axes are a CONTRACT, not a preference: they must survive
+        # truncation. The budget cap below is honoured for optional angles, but
+        # a required axis is only skipped when no contract serves it at all.
+        # Previously `len(picked) >= target_count` broke this loop, so with
+        # target=3 and axes [definition, evidence, criticism, mechanism,
+        # outlook] the injected mechanism/outlook angles were selected and then
+        # immediately discarded — the same 3-axis plan every pass, which is the
+        # decomposition gap the WHY angle exists to close.
         for item in ranked:
             if int(item.get("id", -1)) in picked_ids:
                 continue

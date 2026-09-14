@@ -72,6 +72,34 @@ from app.agents.sources import canonical_url, classify_source, primary_source_sh
 logger = get_logger(__name__)
 
 
+# Reasoning-depth contract injected into every section-writing prompt. The
+# live deep run produced a report that recited WHAT was true per dimension and
+# scored reasoning=65 with the gate note "the report states no limitations" —
+# it named facts but never explained why they hold or what follows from them.
+# GPT Researcher's sections read as analysis because each one argues a
+# mechanism and weighs a trade-off; this instruction makes that an explicit
+# requirement, while forbidding the two failure modes that would satisfy it
+# dishonestly (invented causes, and hedging that says nothing).
+_REASONING_DEPTH_INSTRUCTION = (
+    "REASONING DEPTH — every section must explain, not just report:\n"
+    "- Where the evidence gives a mechanism or cause, state it ('because', "
+    "'driven by', 'as a result of'). Connect the facts into a causal chain "
+    "instead of listing them.\n"
+    "- Where sources disagree or a trade-off exists, present BOTH sides and "
+    "name what the disagreement turns on — never average it away or pick a "
+    "side silently.\n"
+    "- Name the section's limitation or open question when the evidence does "
+    "not settle it. An honest gap beats a confident assertion.\n"
+    "- Do NOT invent a mechanism, cause, or number that is not in the "
+    "evidence. If the evidence only establishes correlation, say so."
+)
+
+# The same contract, appended to the monolithic writer's prompt so the
+# single-pass path (non-broad queries, section-wise fallback) is not weaker
+# than the section-wise path.
+_REASONING_DEPTH_BLOCK = "\n" + _REASONING_DEPTH_INSTRUCTION + "\n\n"
+
+
 SYNTHESIZER_SYSTEM_PROMPT = """
 You are the MARS Synthesis Engine — the Final Synthesis Agent. Your only job
 is to turn verified research into a clean, premium, highly readable
@@ -140,9 +168,16 @@ renumber, do not guess, do not cite a number you were not given.
      provided angle list (title = the angle, never the raw question
      restated). Skip straight to Evidence & Confidence when no angle adds
      anything.
-   - SYNTHESIZE, DON'T PARAPHRASE: each section must weave together 2+ of
-     the provided sources into a cause/effect or comparison narrative.
-     Single-source recitation is what makes a report read like raw notes.
+    - SYNTHESIZE, DON'T PARAPHRASE: each section must weave together 2+ of
+      the provided sources into a cause/effect or comparison narrative.
+      Single-source recitation is what makes a report read like raw notes.
+    - EXPLAIN, DON'T JUST REPORT: wherever the evidence supports it, state
+      the mechanism or cause behind a finding ("because", "driven by"),
+      present competing explanations or trade-offs side by side, and name
+      what remains unresolved. A report that only lists WHAT is true has not
+      answered an analytical query. Never invent a cause the evidence does
+      not state.
+
    - PROSE QUALITY — this is an intelligence brief, not a note dump:
      open every section with a 1-3 sentence synthesis paragraph in your own
      words (weaving that section's cited facts), then bullets for genuinely
@@ -441,6 +476,7 @@ async def synthesize(
                 if angles
                 else ""
             )
+            + _REASONING_DEPTH_BLOCK
             + "Evidence — each line begins with the citation number you MUST use for\n"
             "that claim:\n"
             + _render_evidence_block(cited_facts)
@@ -508,6 +544,7 @@ async def synthesize(
     answer = _sanitize_answer_text(answer, query)
     answer = _scrub_pipeline_telemetry(answer)
     answer = _ensure_disambiguation(answer, ctx)
+    answer = _trim_to_band(answer, mode)
     audit = audit_citations(answer, numbered, cited_facts)
 
     # Out-of-range markers are removed (they resolve to nothing), but unlike the
@@ -557,6 +594,68 @@ def _strip_duplicate_section_heading(body: str, title: str) -> str:
     if remaining and not remaining[0].strip():
         remaining = remaining[1:]
     return "\n".join(remaining).strip() if remaining else ""
+
+
+def _count_words(text: str) -> int:
+    return len(re.findall(r"[A-Za-z0-9']+", text or ""))
+
+
+def _trim_to_band(body: str, mode: str) -> str:
+    """Deterministically bring an assembled draft inside the mode's word band.
+
+    The section-wise assembler asks each writer for a per-section budget, but
+    the model overshoots it (observed: 1715 words against a 1500 deep cap), and
+    the revision pass re-runs the same section writers and overshoots again, so
+    the length contract was never actually enforced. Evidence coverage must not
+    be lost, so this never drops a section or its Executive Summary: it removes
+    trailing paragraphs from the LONGEST sections first (after the first
+    paragraph, which carries the section's synthesis), stopping as soon as the
+    draft fits. Sentence-boundary and paragraph-granular; no LLM.
+    """
+    band_lo, band_hi = length_band(mode)
+    if _count_words(body) <= band_hi:
+        return body
+
+    # Split into blocks on blank lines, remembering heading boundaries.
+    blocks: List[str] = [b for b in (body or "").split("\n\n")]
+    # Index blocks by the section they belong to. A heading starts a section;
+    # prose/bullets after it belong to it.
+    sections: List[Dict[str, Any]] = []
+    current: Optional[Dict[str, Any]] = None
+    preamble: List[str] = []
+    for block in blocks:
+        stripped = block.strip()
+        if stripped.startswith("#"):
+            current = {"heading": block, "paras": []}
+            sections.append(current)
+        elif current is None:
+            preamble.append(block)
+        else:
+            current["paras"].append(block)
+
+    def _render() -> str:
+        out = list(preamble)
+        for section in sections:
+            out.append(section["heading"])
+            out.extend(section["paras"])
+        return "\n\n".join(b for b in out if b != "").strip()
+
+    # Protect the Executive Summary: it is the answer's headline, never trimmed.
+    protected = {"executive summary"}
+    while _count_words(_render()) > band_hi:
+        # Pick the longest trimmable section with >1 paragraph.
+        candidates = [
+            s for s in sections
+            if len(s["paras"]) > 1
+            and _normalize_heading(str(s["heading"]).lstrip("# ").strip()) not in protected
+        ]
+        if not candidates:
+            break
+        longest = max(candidates, key=lambda s: _count_words("\n\n".join(s["paras"])))
+        # Drop the LAST paragraph (the least structural) of the longest section,
+        # keeping the first, which carries its synthesis claim.
+        longest["paras"].pop()
+    return _render()
 
 
 async def _synthesize_sectioned(
@@ -616,14 +715,20 @@ async def _synthesize_sectioned(
     # Per-section word budget so the assembled report lands inside the mode's
     # band. The old prompt gave each section "2-4 tight paragraphs" with only a
     # whole-report hint, and the sections summed to 3809 words against a 1500
-    # cap. Reserve ~200 words for the Executive Summary and divide the rest.
+    # cap. Reserve words for the Executive Summary and the machine-appended
+    # ledger/integrity sections, then divide the rest. The required-axes
+    # contract added a 4th-5th section, so the reserve and the floor account for
+    # a real section count instead of assuming three.
     mode = str(ctx.get("mode", "standard") or "standard")
     band_lo, band_hi = length_band(mode)
-    per_section_hi = max(120, (band_hi - 200) // max(1, len(groups)))
+    heading_reserve = 260  # Executive Summary + Source ledger + Evidence integrity
+    per_section_hi = max(110, (band_hi - heading_reserve) // max(1, len(groups)))
     section_length_hint = (
-        f"LENGTH: {per_section_hi} words maximum for THIS section — the report "
-        f"assembles to at most {band_hi} words total across "
-        f"{len(groups)} sections plus the Executive Summary. Be concise."
+        f"LENGTH: {per_section_hi} words MAXIMUM for this section — a hard "
+        f"limit, not a target. The report assembles to at most {band_hi} words "
+        f"total across {len(groups)} sections plus the Executive Summary, so "
+        "exceeding this makes the report fail its own length contract. Prefer "
+        "one tight synthesis paragraph over two loose ones."
     )
 
     # Executive Summary first. The single-pass prompt mandates this heading and
@@ -702,6 +807,8 @@ async def _synthesize_sectioned(
             f"the \"## {section.title}\" heading itself. Start directly with prose. "
             "Do not write an Executive Summary, a Sources list, or other sections — "
             "they are added separately. Use these exact [n] markers.\n\n"
+            + _REASONING_DEPTH_INSTRUCTION
+            + "\n\n"
             "Evidence:\n"
             + _render_evidence_block(section_cited)
             + "\n\n"
@@ -743,6 +850,7 @@ async def _synthesize_sectioned(
     assembled = "\n\n".join(section_bodies)
     answer = _sanitize_answer_text(assembled, query)
     answer = _scrub_pipeline_telemetry(answer)
+    answer = _trim_to_band(answer, mode)
     answer = _ensure_disambiguation(answer, ctx)
     audit = audit_citations(answer, numbered, cited_facts)
     if audit.invalid_markers:

@@ -454,6 +454,21 @@ def plan_targets(
         # argue against; these two axes are what separate research from recall.
         required.append("evidence")
         required.append("criticism")
+        # A WHY angle. Live deep runs repeatedly produced plans whose axes were
+        # [definition, evidence, criticism] on every pass — the report could say
+        # WHAT and HOW MUCH but rarely WHY (mechanism, causation, trade-offs),
+        # which is exactly the gap against a GPT Researcher report. Mechanism
+        # is a first-class required dimension for any question that asks how
+        # something works or why a trend is happening. The lexical classifier
+        # types "current trend of AI" as factual, so `needs_recency` (trend /
+        # latest / outlook vocabulary) is the reliable signal for a WHY angle
+        # on those queries — without it the requirement never fires on the
+        # exact query this gap was measured on.
+        if (
+            complexity.query_type in ("analytical", "comparative", "exploratory")
+            or complexity.needs_recency
+        ):
+            required.append("mechanism")
     if complexity.query_type == "comparative":
         required.append("comparison")
     if complexity.needs_recency:

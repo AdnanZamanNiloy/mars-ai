@@ -293,3 +293,131 @@ def test_sanitize_dependencies_breaks_cycles_to_roots():
     waves = execution_waves(plan)
     assert [q["id"] for q in waves[0]] == [1]
     assert [q["id"] for q in waves[1]] == [2]
+
+
+def test_axis_enforcement_injects_mechanism_why_angle():
+    """The live deep run produced plans whose axes were always
+    [definition, evidence, criticism] — no WHY/mechanism angle — so the report
+    recited WHAT without explaining WHY. Mechanism injection closes it."""
+    from app.agents.planner import _contract, enforce_axis_coverage
+
+    plan = [_contract(index=1, question="ai definition", axis="definition",
+                      search_type="encyclopedia", priority=1, domain="general")]
+    plan, injected = enforce_axis_coverage(
+        plan, "What is the current trend of AI?",
+        ["evidence", "criticism", "mechanism"], today="2026-09-14",
+    )
+    assert "mechanism" in injected
+    mech = [p for p in plan if p["axis"] == "mechanism"]
+    assert mech, [p["axis"] for p in plan]
+    # The injected angle must read as a search-ready causal query, not a label.
+    assert "why" in mech[0]["question"].lower() or "cause" in mech[0]["question"].lower()
+
+
+def test_plan_has_no_overlapping_questions_after_dedupe():
+    """Two questions differing only in phrasing must not both survive — a
+    duplicate angle burns a whole search agent for the same retrieval."""
+    from app.agents.planner import deduplicate_semantic
+
+    plan = deduplicate_semantic([
+        {"question": "what is the current trend of AI in business",
+         "axis": "definition"},
+        {"question": "current AI business trend what is it",
+         "axis": "definition"},
+        {"question": "global AI capital expenditure 2025 official statistics",
+         "axis": "evidence"},
+    ])
+    assert len(plan) == 2
+    axes = {p["axis"] for p in plan}
+    assert axes == {"definition", "evidence"}
+
+
+def test_planner_schema_accepts_surplus_variants_without_failing():
+    """Regression: 3+ variants must not fail the whole plan payload.
+
+    SubQuestionModel capped variants at 2, but models routinely emit 3-4 — one
+    surplus variant raised a pydantic ValidationError that discarded the ENTIRE
+    plan and silently degraded to the deterministic template (observed live as
+    the same generic axes every pass). The parser already slices to 2, so the
+    schema must accept surplus and let the parser trim."""
+    from app.core.schemas import PlannerOutputModel
+
+    model = PlannerOutputModel.model_validate({
+        "sub_questions": [{
+            "id": 1,
+            "question": "global AI capex 2025",
+            "variants": ["a", "b", "c", "d"],
+            "scope": ["x", "y", "z", "p", "q", "r"],
+        }],
+    })
+    assert len(model.sub_questions[0].variants) == 4
+
+
+def test_planner_trims_surplus_variants_to_two():
+    """The prompt promises 1-2 variants; trimming happens in the parser."""
+    from app.agents.planner import planner_agent
+    import asyncio
+
+    payload = {
+        "query_type": "analytical",
+        "query_scope": "broad",
+        "dominant_domain": "general",
+        "sub_questions": [{
+            "id": 1,
+            "question": "why is enterprise AI adoption accelerating 2026",
+            "axis": "mechanism",
+            "search_type": "academic",
+            "priority": 1,
+            "variants": ["v one", "v two", "v three", "v four"],
+        }],
+        "coverage_note": "",
+    }
+    result = asyncio.run(planner_agent(FakeLLM(payload), "why is AI accelerating?"))
+    assert result
+    assert len(result[0]["variants"]) <= 2
+
+
+def test_mechanism_required_for_trend_query():
+    """A recency/trend query must require a WHY angle even when the lexical
+    classifier types it 'factual' (the live 'current trend of AI' case)."""
+    from app.agents.orchestrator import plan_targets, score_complexity
+
+    targets = plan_targets(score_complexity("What is the current trend of AI?"), "deep", 5)
+    assert "mechanism" in targets.required_axes
+
+
+def test_required_axes_survive_truncation():
+    """Required axes are a contract, not a preference: with a target smaller
+    than the required-axis set, every required axis must still be selected.
+
+    Regression: `select_plan` broke its required-axis loop at target_count, so
+    on the live deep run (target=3, axes=[definition, evidence, criticism,
+    mechanism, outlook]) the injected mechanism and outlook contracts were
+    chosen and immediately dropped — the plan collapsed to the same three axes
+    on every pass, and the WHY angle never reached the report."""
+    from app.agents.planner import _contract, select_plan
+
+    axes = ["definition", "evidence", "criticism", "mechanism", "outlook"]
+    plan = [
+        _contract(index=i + 1, question=f"q{i}", axis=a,
+                  search_type="encyclopedia", priority=1, domain="general")
+        for i, a in enumerate(axes)
+    ]
+    out = select_plan(plan, target_count=3, required_axes=axes)
+    assert set(axes) <= {p["axis"] for p in out}
+
+
+def test_optional_axes_still_respect_the_budget():
+    """Raising required axes above the budget must not let optional angles in."""
+    from app.agents.planner import _contract, select_plan
+
+    plan = [
+        _contract(index=1, question="a", axis="evidence",
+                  search_type="statistical", priority=1, domain="general"),
+        _contract(index=2, question="b", axis="outlook",
+                  search_type="news", priority=2, domain="general"),
+        _contract(index=3, question="c", axis="history",
+                  search_type="encyclopedia", priority=3, domain="general"),
+    ]
+    out = select_plan(plan, target_count=2, required_axes=["evidence"])
+    assert [p["axis"] for p in out] == ["evidence", "outlook"]

@@ -23,10 +23,17 @@ class SubQuestionModel(BaseModel):
     domain: str = "general"
     minimum_sources: int = Field(default=2, ge=1)
     stop_condition: str = "sufficient evidence for this axis"
-    variants: List[str] = Field(default_factory=list, max_length=2)
+    # The planner prompt asks for 1-2 variants, but models routinely emit 3-4.
+    # max_length=2 made that a HARD validation error on the WHOLE plan payload:
+    # one extra variant discarded the entire plan and silently degraded to the
+    # deterministic template (observed live as the same 3 generic axes every
+    # pass). planner._clean_str_list / the `variants[:2]` slice already resolve
+    # the surplus, so the schema accepts up to 8 and lets the parser trim —
+    # validation should reject malformed output, not well-formed-but-extra.
+    variants: List[str] = Field(default_factory=list, max_length=8)
     agent: str = ""
     tools: List[str] = Field(default_factory=lambda: ["web_search"])
-    scope: List[str] = Field(default_factory=list, max_length=5)
+    scope: List[str] = Field(default_factory=list, max_length=8)
     output_format: str = "structured_findings"
     # Intent sense label this sub-question researches ("" when unambiguous).
     sense: str = ""

@@ -93,6 +93,57 @@ def test_ambiguous_intent_splits_senses():
     assert "Electrical transformer (AC voltage device)" in titles
 
 
+def test_ambiguous_sense_sections_never_share_evidence():
+    """Regression: each sense section gets ONLY that sense's facts.
+
+    The old build_outline assigned `list(facts)` — every fact, both senses — to
+    every sense section. The shipped ML-transformer report was therefore written
+    with electrical-transformer price-index evidence in its own section. A
+    sense-tagged fact must never appear under the other sense.
+    """
+    intent = {
+        "ambiguity": True,
+        "senses": [
+            {"label": "Transformer neural network architecture", "domain": "machine_learning"},
+            {"label": "Electrical transformer (AC voltage device)", "domain": "engineering"},
+        ],
+    }
+    facts = [
+        {"claim": "Self-attention lets each token attend to every other.",
+         "axis": "definition", "source": "https://arxiv.org/x",
+         "sense": "Transformer neural network architecture"},
+        {"claim": "The transformer PPI stood at 474.830 in July 2026.",
+         "axis": "evidence", "source": "https://fred.stlouisfed.org/x",
+         "sense": "Electrical transformer (AC voltage device)"},
+    ]
+    outline = build_outline("What is a transformer?", facts, [], intent=intent)
+    by_title = {s.title: s for s in outline.sections}
+    ml = by_title["Transformer neural network architecture"]
+    elec = by_title["Electrical transformer (AC voltage device)"]
+    assert [f["claim"] for f in ml.facts if "PPI" in f["claim"]] == []
+    assert [f["claim"] for f in elec.facts if "Self-attention" in f["claim"]] == []
+
+
+def test_ambiguous_sense_without_tags_falls_back_to_full_pool():
+    """No sense-tagged evidence must not empty a sense section."""
+    intent = {
+        "ambiguity": True,
+        "senses": [
+            {"label": "Transformer neural network architecture", "domain": "machine_learning"},
+            {"label": "Electrical transformer (AC voltage device)", "domain": "engineering"},
+        ],
+    }
+    facts = [{"claim": "A transformer changes voltage.", "axis": "definition",
+              "source": "https://a.example/x"}]
+    outline = build_outline("What is a transformer?", facts, [], intent=intent)
+    for section in outline.sections:
+        if section.title in (
+            "Transformer neural network architecture",
+            "Electrical transformer (AC voltage device)",
+        ):
+            assert section.facts, section.title
+
+
 def test_render_outline_names_sections_and_fact_counts():
     outline = build_outline("What is the current trend of AI?", _facts(), _sub_questions())
     rendered = render_outline(outline)
