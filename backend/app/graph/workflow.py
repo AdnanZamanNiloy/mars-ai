@@ -842,13 +842,14 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
 
         # v3 plan targets live on the orchestration dict (build_initial_state).
         orchestration = state.get("orchestration", {})
-        required_axes = list(orchestration.get("required_axes", []) or [])
-        # Retrieval diversity per section/angle: on an expansion pass, the
-        # axes already researched must survive selection so each outline
-        # dimension keeps its own retrieval rather than being crowded out by
-        # a repeated background question. Additive — on the first pass the
-        # orchestration's axes are already the contract.
         if expanding:
+            # Per-axis expansion: the axes already under research ARE the
+            # required contract. Seeding from the orchestration's static axis
+            # list here re-injected the generic canonical axes (definition/
+            # evidence/criticism/mechanism) on every expansion pass, which put
+            # the boilerplate back alongside the dynamic-planning dimensions the
+            # first pass derived. Existing contracts carry those dimensions.
+            required_axes = []
             existing_axes = {
                 str(item.get("axis", "") or "").strip().lower()
                 for item in existing
@@ -857,6 +858,8 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             for axis in existing_axes:
                 if axis and axis not in required_axes:
                     required_axes.append(axis)
+        else:
+            required_axes = list(orchestration.get("required_axes", []) or [])
         sub_questions = await planner_agent(
             llm=llm,
             query=state["query"],

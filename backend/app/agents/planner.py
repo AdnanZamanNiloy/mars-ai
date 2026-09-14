@@ -35,12 +35,12 @@ Fixes and upgrades in this version
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, TypedDict
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, TypedDict
 
 from app.core.degradation import record_fallback
 from app.core.llm import LLMClient
 from app.core.logging import get_logger
-from app.core.schemas import PlannerOutputModel
+from app.core.schemas import PlannerOutputModel, PlanningDirectiveModel
 
 from app.agents.sources import build_primary_source_query, primary_source_hints
 
@@ -169,6 +169,112 @@ def normalize_domain(domain: str) -> str:
 def normalize_axis(axis: str) -> str:
     a = normalize_text(axis).replace(" ", "_")
     return a if a in VALID_AXES else "general"
+
+
+# Ordered (label-fragment, canonical-axis) aliases. Common wordings for the
+# canonical retrieval categories are recognized so a model-chosen dimension
+# ("head-to-head comparison") still maps onto the retrieval/section machinery,
+# while genuinely query-specific dimensions keep their own label. Order
+# matters: more specific fragments are matched first.
+_AXIS_ALIASES: Tuple[Tuple[str, str], ...] = (
+    ("counter-evidence", "criticism"),
+    ("counterevidence", "criticism"),
+    ("criticism", "criticism"),
+    ("critique", "criticism"),
+    ("limitation", "criticism"),
+    ("drawback", "criticism"),
+    ("downside", "criticism"),
+    ("failure mode", "risk"),
+    ("risk", "risk"),
+    ("hazard", "risk"),
+    ("safety", "risk"),
+    ("head-to-head", "comparison"),
+    ("comparison", "comparison"),
+    ("compared", "comparison"),
+    ("versus", "comparison"),
+    ("trade-off", "comparison"),
+    ("tradeoff", "comparison"),
+    ("cost", "cost"),
+    ("price", "cost"),
+    ("financing", "cost"),
+    ("financial", "cost"),
+    ("funding", "cost"),
+    ("budget", "cost"),
+    ("efficiency", "cost"),
+    ("mechanism", "mechanism"),
+    ("how it works", "mechanism"),
+    ("causal", "mechanism"),
+    ("cause", "mechanism"),
+    ("driver", "mechanism"),
+    ("root cause", "mechanism"),
+    ("post-mortem", "mechanism"),
+    ("definition", "definition"),
+    ("what is", "definition"),
+    ("overview", "definition"),
+    ("background", "definition"),
+    ("outlook", "outlook"),
+    ("forecast", "outlook"),
+    ("projection", "outlook"),
+    ("trend", "outlook"),
+    ("future", "outlook"),
+    ("evidence", "evidence"),
+    ("data", "evidence"),
+    ("statistic", "evidence"),
+    ("quantitative", "evidence"),
+    ("measurement", "evidence"),
+    ("application", "application"),
+    ("use case", "application"),
+    ("implementation", "application"),
+    ("history", "history"),
+    ("origin", "history"),
+    ("timeline", "history"),
+    ("regulation", "regulation"),
+    ("regulatory", "regulation"),
+    ("policy", "regulation"),
+    ("governance", "regulation"),
+    ("legal", "regulation"),
+)
+
+
+def dimension_to_axis(dimension: str, search_type: str = "") -> str:
+    """Canonical retrieval axis for a model-chosen dimension label.
+
+    The dynamic dimensions are free-form text; this maps the ones that clearly
+    name a canonical category onto that category's retrieval/section behavior,
+    preferring a `search_type` implied by the dimension when it is explicit.
+    A genuinely query-specific dimension ("policy options", "institutional
+    failure") returns its normalized slug unchanged — downstream code holds
+    unknown axes as first-class string keys, so it still gets its own section.
+    """
+    text = normalize_text(dimension)
+    if not text:
+        return "general"
+    if search_type == "statistical" and not any(
+        c in text for c in ("risk", "failure", "criticism", "counter")
+    ):
+        return "evidence"
+    for fragment, axis in _AXIS_ALIASES:
+        if fragment in text:
+            return axis
+    slug = text.replace(" ", "_")
+    return slug if slug in VALID_AXES else slug
+
+
+def axis_search_type(axis: str, *, default: str = "academic") -> str:
+    """Retrieval type for an axis — canonical map first, else a text hint."""
+    if axis in AXIS_SEARCH_TYPE:
+        return AXIS_SEARCH_TYPE[axis]
+    text = axis.replace("_", " ")
+    if any(c in text for c in ("cost", "price", "financ", "evidence", "stat", "number", "data")):
+        return "statistical"
+    if any(c in text for c in ("comparison", "compared", "trade", "versus", "option", "altern")):
+        return "comparison"
+    if any(c in text for c in ("outlook", "forecast", "trend", "projection", "future", "recent")):
+        return "news"
+    if any(c in text for c in ("definition", "background", "overview", "history")):
+        return "encyclopedia"
+    return default
+
 
 
 def is_valid_question(q: str) -> bool:
@@ -387,7 +493,7 @@ Return ONLY valid JSON. No markdown fences. No text outside JSON.
     {
       "id": 1,
       "question": "<specific, search-ready sub-question>",
-      "axis": "<definition|mechanism|application|criticism|comparison|evidence|history|outlook>",
+      "axis": "<the research dimension this sub-question serves — a short lowercase label. Prefer the required-dimension labels supplied in the request when they apply; otherwise name the dimension yourself (e.g. 'cost and financing', 'mechanism of action', 'counter-evidence'). Do not use 'general'.>",
       "search_type": "<encyclopedia|academic|statistical|news|comparison>",
       "priority": 1,
       "depends_on": [],
@@ -405,6 +511,287 @@ Return ONLY valid JSON. No markdown fences. No text outside JSON.
   "coverage_note": "<one sentence: what would full coverage of this query require>"
 }
 """.strip()
+
+
+# =========================
+# Dynamic planning (Phase 2)
+# =========================
+
+# The old pipeline asked the plan model for an enum axis and then injected a
+# hard-coded template (mechanism/outlook/risk/cost/history/regulation) whenever
+# a required axis was missing. Measured across eight diverse live queries, that
+# made different query TYPES converge: every plan carried
+# ["evidence", "criticism"], with mechanism/definition/outlook bolted on
+# regardless of whether the question was a definition, a decision, a mechanism
+# explanation, a causal post-mortem or a quantitative forecast. This stage runs
+# FIRST and asks a model which dimensions the SPECIFIC query needs; the plan
+# below must cover whatever it returns, so the required-axis machinery enforces
+# the model's dimensions instead of a generic template. See
+# test_dynamic_planning.py for the diversity invariant.
+PLANNING_DIRECTIVE_PROMPT = """
+You are the Planning Directive stage of a multi-agent research pipeline.
+Your ONLY job: decide which research dimensions THIS SPECIFIC query needs.
+
+You are not writing a report and not choosing from a fixed menu. You are
+writing the dimension list that the research plan will be measured against.
+
+━━━ METHOD ━━━
+1. Read the query and identify what KIND of answer it demands:
+   definition / mechanism / comparison / decision / causal explanation /
+   quantitative forecast / controversy / trend / feasibility / cost.
+2. Name the dimensions that would have to be researched to answer it WELL.
+   A dimension is a distinct kind of evidence — not a topic.
+   GOOD dimension → "mechanism of action", "cost per unit", "failure modes"
+   BAD  dimension → "information", "background", "details"   (topic labels)
+
+━━━ MANDATORY RULES ━━━
+R1 — DERIVE THE DIMENSIONS FROM THE QUERY. Do not emit a stock list.
+   A "what is X?" question needs fewer, more definitional dimensions than a
+   "should we do X over 20 years?" decision question, which needs cost,
+   feasibility and risk dimensions. A "why did X happen?" question needs
+   causal/post-mortem dimensions, not outlook. Different query types MUST
+   produce different dimension sets. Copy-pasting the same set onto every
+   query is the failure this stage exists to prevent.
+
+R2 — A WHY/MECHANISM dimension is required ONLY when the query asks how
+   something works, why something happens, or how a mechanism produces its
+   effect. A pure "what is X" definition or a pure "how much" figure question
+   does NOT require one.
+
+R3 — A QUANTITATIVE dimension (numbers, statistics, measurements, forecasts)
+   is required ONLY when the query asks for amounts, trends, comparisons of
+   magnitude, or projections. Do not force numbers onto a conceptual query.
+
+R4 — If the query is a DECISION ("should we", "should X"), include a
+   cost/trade-off dimension AND a risk-or-feasibility dimension.
+   If it is COMPARATIVE ("X vs Y"), include a head-to-head comparison
+   dimension. If it is CAUSAL ("why did", "what caused"), include a
+   causal-mechanism dimension and a counterfactual/alternative-explanation
+   dimension. If it is CONTESTED, include a strongest-counter-evidence
+   dimension.
+
+R5 — 3 to 6 dimensions. More is not better: each one becomes a research
+   contract and a search budget. Name ONLY what this query needs.
+
+R6 — `must_cover` is the 1-3 dimensions whose absence would make the answer
+   fail the question. They may repeat entries from `dimensions` exactly.
+
+━━━ OUTPUT FORMAT ━━━
+
+Return ONLY valid JSON. No markdown fences. No text outside JSON.
+
+{
+  "query_type": "<factual|comparative|analytical|exploratory>",
+  "dominant_domain": "<machine_learning|software|philosophy|economics|science|legal|policy|academic|general>",
+  "reasoning": "<one sentence: what kind of answer this query wants>",
+  "dimensions": [
+    "<specific dimension this query needs, 2-4 words>",
+    "<...>"
+  ],
+  "must_cover": ["<1-3 of the dimensions above that are indispensable>"],
+  "preferred_search_types": ["<optional: statistical|academic|news|comparison|encyclopedia the dimensions would use>"],
+  "coverage_note": "<what full coverage would require for THIS query>"
+}
+""".strip()
+
+
+# Deterministic dimensions by coarse query shape. This is the fallback tuple
+# for `_heuristic_dimensions` when the query text carries no usable signal at
+# all — kept deliberately coarse so the LLM directive, not a template, is what
+# normally drives the plan.
+_HEURISTIC_DIMENSION_DEFAULTS: Tuple[str, ...] = ("background", "evidence", "criticism")
+
+
+def _heuristic_dimensions(query: str, intent: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Deterministic, query-type-aware dimension list for the fallback path.
+
+    Mirrors the LLM directive's rules with lexical signals only (AGENTS.md
+    4.7): a decision query gets cost/risk dimensions, a comparative query gets
+    a head-to-head dimension, a causal query gets post-mortem dimensions —
+    genuinely different sets per query type, never the old fixed template.
+    """
+    intent = intent or {}
+    text = f" {(query or '').lower().strip()} "
+    qtype = str(intent.get("query_type", "") or "").strip().lower()
+    if qtype not in ("factual", "comparative", "analytical", "exploratory"):
+        # Local import: orchestrator is a leaf module that must not import the
+        # planner (planner -> orchestrator would close a cycle at import time).
+        from app.agents.orchestrator import classify_query_type
+
+        qtype = classify_query_type(query)
+    dims: List[str] = []
+
+    def _add(name: str) -> None:
+        if name not in dims:
+            dims.append(name)
+
+    is_decision = any(
+        m in text
+        for m in ("should we", "should i", "should our", "should the",
+                  "should ", "invest", "worth it", "recommend", "decide")
+    )
+    is_comparative = qtype == "comparative" or any(
+        m in text for m in (" vs ", " versus ", "compare", "compared", "comparison")
+    )
+    is_causal = any(
+        m in text
+        for m in ("what caused", "why did", "why does", "why is", "cause of",
+                  "cause ", "reasons for", "root cause", "how did", "led to")
+    )
+    is_mechanism = qtype == "analytical" or any(
+        m in text
+        for m in ("how does", "how do", "how is", "how it works", "mechanism",
+                  "work and", "works")
+    )
+    is_quant = any(
+        m in text
+        for m in ("how much", "how many", "cost", "price", "market size",
+                  "growth", "rate", "percentage", "percent", "share",
+                  "forecast", "projection", "statistics", "by 20")
+    )
+    is_contested = any(
+        m in text
+        for m in ("harmful", "controversial", "debate", "criticism", "myth",
+                  "safe", "danger", "ethical", "controversial", "bias")
+    )
+
+    if is_decision:
+        _add("policy options")
+        _add("cost and financing")
+        _add("risk and feasibility")
+        _add("evidence and projections")
+    elif is_causal:
+        _add("causal mechanism")
+        _add("alternative explanations")
+        _add("institutional and regulatory failures")
+    elif is_comparative:
+        _add("head-to-head comparison")
+        _add("cost per unit")
+        _add("operational trade-offs")
+        _add("evidence and data")
+    else:
+        _add("definition")
+        if is_mechanism:
+            _add("mechanism of action")
+        _add("evidence and data")
+
+    if is_quant and not any("evidence" in d for d in dims):
+        _add("evidence and projections")
+    if is_contested:
+        _add("counter-evidence and criticism")
+    if not any("criticism" in d or "counter" in d for d in dims):
+        _add("criticism and limitations")
+
+    # Preserve the historical WHY dimension for analytical/trend queries even
+    # when the lexical shape above produced only broad dimensions.
+    if qtype in ("analytical", "exploratory") and not any(
+        "mechanism" in d or "cause" in d for d in dims
+    ):
+        _add("underlying drivers")
+
+    return dims[:6] or list(_HEURISTIC_DIMENSION_DEFAULTS)
+
+
+def _coarse_query_type(query: str) -> str:
+    """query_type classification for the directive stage (leaf import)."""
+    from app.agents.orchestrator import classify_query_type
+
+    return classify_query_type(query)
+
+
+async def plan_dimensions(
+    llm: LLMClient,
+    query: str,
+    *,
+    today: str = "",
+    intent: Optional[Dict[str, Any]] = None,
+    context_snippets: Optional[Sequence[str]] = None,
+) -> Tuple[List[str], List[str], Dict[str, Any]]:
+    """Ask the model which research dimensions THIS query needs.
+
+    Returns (dimensions, must_cover, meta). On any LLM failure the deterministic
+    query-type-aware fallback is returned so a degraded run still gets genuinely
+    different dimensions per query type rather than a generic template
+    (AGENTS.md 4.7). `meta` carries the model's query_type/domain plus a
+    `planned_by` marker ("llm" | "heuristic") for the trace.
+    """
+    intent = intent or {}
+    date_block = f"\nToday is {today.strip()}." if today.strip() else ""
+    intent_note = ""
+    if intent.get("ambiguity") and intent.get("senses"):
+        labels = [
+            str(s.get("label", "")).strip()
+            for s in intent["senses"]
+            if isinstance(s, dict) and str(s.get("label", "")).strip()
+        ]
+        if labels:
+            intent_note = (
+                "\nThis query is AMBIGUOUS between: " + "; ".join(labels[:2])
+                + ". Include a disambiguation dimension for each meaning."
+            )
+    snippet_block = ""
+    snippets = [s for s in (context_snippets or []) if str(s).strip()]
+    if snippets:
+        snippet_block = (
+            "\nTop web results for the raw query (ground your dimensions in "
+            "this real terminology; do not answer the query):\n"
+            + "\n".join(f"- {s}" for s in snippets[:5])
+        )
+    user_prompt = (
+        f"Query: {query}{date_block}{intent_note}{snippet_block}\n\n"
+        "Which research dimensions does THIS query need? Return JSON only."
+    )
+
+    try:
+        payload = await llm.generate_json(
+            system_prompt=PLANNING_DIRECTIVE_PROMPT,
+            user_prompt=user_prompt,
+            response_model=PlanningDirectiveModel,
+        )
+    except Exception as exc:
+        logger.warning("[Planner] dimension directive LLM failed, using heuristic", exc_info=exc)
+        record_fallback("planner_dimensions")
+        dims = _heuristic_dimensions(query, intent)
+        return dims, dims[:2], {"planned_by": "heuristic", "query_type": _coarse_query_type(query)}
+
+    if not isinstance(payload, dict):
+        logger.warning("[Planner] dimension directive returned non-dict, using heuristic")
+        record_fallback("planner_dimensions")
+        dims = _heuristic_dimensions(query, intent)
+        return dims, dims[:2], {"planned_by": "heuristic", "query_type": _coarse_query_type(query)}
+
+    dims: List[str] = []
+    for raw in payload.get("dimensions") or []:
+        name = re.sub(r"\s+", " ", str(raw or "")).strip()
+        if name and len(name) <= 60 and name.lower() not in {d.lower() for d in dims}:
+            dims.append(name)
+    if not dims:
+        logger.warning("[Planner] dimension directive returned no dimensions, using heuristic")
+        record_fallback("planner_dimensions")
+        dims = _heuristic_dimensions(query, intent)
+        return dims, dims[:2], {"planned_by": "heuristic", "query_type": _coarse_query_type(query)}
+
+    must_cover: List[str] = []
+    for raw in payload.get("must_cover") or []:
+        name = re.sub(r"\s+", " ", str(raw or "")).strip()
+        if name and name not in must_cover:
+            must_cover.append(name)
+    if not must_cover:
+        must_cover = dims[:2]
+
+    meta = {
+        "planned_by": "llm",
+        "query_type": str(payload.get("query_type", "") or _coarse_query_type(query)),
+        "dominant_domain": str(payload.get("dominant_domain", "general") or "general"),
+        "reasoning": str(payload.get("reasoning", "") or ""),
+        "coverage_note": str(payload.get("coverage_note", "") or ""),
+        "preferred_search_types": [
+            str(s) for s in (payload.get("preferred_search_types") or [])
+            if str(s) in VALID_SEARCH_TYPES
+        ],
+    }
+    logger.info("[Planner] dynamic dimensions: %s (must_cover=%s)", dims, must_cover)
+    return dims, must_cover, meta
 
 
 # =========================
@@ -435,9 +822,16 @@ def _contract(
     preferences) is present on contracts from the LLM path, the axis-repair
     path and the fallback path alike. Downstream code can rely on the shape
     instead of defaulting per call site.
+    Dynamic-planning note: `axis` may be a model-chosen dimension label, not a
+    canonical enum value. Canonical labels and common aliases are mapped via
+    `dimension_to_axis`; a genuinely query-specific label is kept as a slug so
+    it still gets its own report section (downstream keyed by axis string).
     """
-    axis = normalize_axis(axis)
-    search_type = search_type if search_type in VALID_SEARCH_TYPES else AXIS_SEARCH_TYPE.get(axis, "encyclopedia")
+    axis = dimension_to_axis(axis)
+    search_type = (
+        search_type if search_type in VALID_SEARCH_TYPES
+        else axis_search_type(axis, default="encyclopedia")
+    )
     domain = normalize_domain(domain)
     specialist = DOMAIN_TO_SPECIALIST.get(domain, "general")
     hints = list(primary_source_hints(search_type, domain))
@@ -595,6 +989,59 @@ def _assign_intent_senses(
     return plan
 
 
+def synthesize_dimension_contract(
+    *,
+    index: int,
+    dimension: str,
+    query: str,
+    domain: str = "general",
+    minimum_sources: int = DEFAULT_MINIMUM_SOURCES,
+    today: str = "",
+    coverage_goal: str = "",
+) -> Dict[str, Any]:
+    """Build a search-ready contract for a model-chosen dimension the plan omitted.
+
+    The dynamic-planning replacement for the old fixed axis templates: the
+    dimension label is the model's own, so the question is derived from that
+    label + the query's concept rather than from a stock sentence. Keyword-
+    shaped (not prose) because its whole job is to be a search string.
+    """
+    axis = dimension_to_axis(dimension)
+    search_type = axis_search_type(axis)
+    concept = _query_concept(query)
+    year = _year_from(today)
+    label = dimension.replace("_", " ").strip()
+    question = f"{concept} {label}{year}".strip()
+    return _contract(
+        index=index,
+        question=question,
+        axis=axis,
+        search_type=search_type,
+        priority=1,
+        domain=domain,
+        coverage_goal=coverage_goal or f"required dimension: {label}",
+        minimum_sources=minimum_sources,
+    )
+
+
+# Legacy axis->keyword template. Retained ONLY for the no-dimension fallback
+# (a caller that requires canonical axes but supplied no dynamic dimension
+# labels). New planning flows should never reach it — required axes now come
+# from `plan_dimensions` and are synthesized by `synthesize_dimension_contract`.
+_AXIS_FALLBACK_TEMPLATES: Dict[str, Tuple[str, str, int]] = {
+    "evidence": ("statistics official data figures", "statistical", 1),
+    "criticism": ("limitations criticism counter-evidence risks", "academic", 2),
+    "comparison": ("compared alternatives side by side", "comparison", 2),
+    "definition": ("definition explanation overview", "encyclopedia", 1),
+    "outlook": ("outlook forecast recent developments", "news", 2),
+    "mechanism": ("how it works mechanism why causes drivers", "academic", 1),
+    "risk": ("risks failure modes downsides", "academic", 2),
+    "cost": ("cost price economics figures", "statistical", 2),
+    "history": ("history origin development timeline", "encyclopedia", 3),
+    "regulation": ("regulation policy law governance", "news", 3),
+}
+
+
 def enforce_axis_coverage(
     plan: List[Dict[str, Any]],
     query: str,
@@ -603,62 +1050,57 @@ def enforce_axis_coverage(
     domain: str = "general",
     minimum_sources: int = DEFAULT_MINIMUM_SOURCES,
     today: str = "",
+    required_questions: Optional[Mapping[str, str]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """Add a contract for every required axis the model omitted.
+    """Add a contract for every required dimension the model omitted.
 
-    Returns (plan, injected_axes). The injected questions are deliberately
-    keyword-shaped rather than prose: they are search strings, and the whole
-    reason they exist is that the model already failed to produce one.
+    `required_axes` are the dynamic dimensions from `plan_dimensions`; when a
+    `required_questions` mapping is supplied (as `axis -> literal question`),
+    the injected contract uses that question verbatim instead of synthesizing
+    one. Returns (plan, injected_axes).
     """
     present = {str(item.get("axis", "")) for item in plan}
     concept = _query_concept(query)
     year = _year_from(today)
     injected: List[str] = []
     next_id = max((int(item.get("id", 0)) for item in plan), default=0) + 1
-
-    templates: Dict[str, Tuple[str, str, int]] = {
-        "evidence": (
-            f"{concept} statistics official data figures{year}", "statistical", 1,
-        ),
-        "criticism": (
-            f"{concept} limitations criticism counter-evidence risks", "academic", 2,
-        ),
-        "comparison": (
-            f"{concept} compared alternatives side by side{year}", "comparison", 2,
-        ),
-        "definition": (
-            f"{concept} definition explanation overview", "encyclopedia", 1,
-        ),
-        "outlook": (
-            f"{concept} outlook forecast recent developments{year}", "news", 2,
-        ),
-        # WHY/mechanism angle: the missing dimension in the live deep run, whose
-        # plans were [definition, evidence, criticism] on every pass and whose
-        # report therefore described WHAT without explaining WHY (mechanisms,
-        # causation, trade-offs). Wording steers at the causal/explanatory
-        # literature rather than another broad definition.
-        "mechanism": (
-            f"{concept} how it works mechanism why causes drivers{year}", "academic", 1,
-        ),
-        "risk": (
-            f"{concept} risks failure modes downsides{year}", "academic", 2,
-        ),
-        "cost": (
-            f"{concept} cost price economics figures{year}", "statistical", 2,
-        ),
-        "history": (
-            f"{concept} history origin development timeline", "encyclopedia", 3,
-        ),
-        "regulation": (
-            f"{concept} regulation policy law governance{year}", "news", 3,
-        ),
+    overrides = {
+        dimension_to_axis(k): str(v).strip()
+        for k, v in (required_questions or {}).items()
+        if str(v).strip()
     }
 
-    for axis in required_axes or ():
-        axis = normalize_axis(axis)
-        if axis in present or axis not in templates:
+    for raw_axis in required_axes or ():
+        # `required_axes` may carry dynamic dimension labels ("cost and
+        # financing"): map each to its canonical axis first so an existing
+        # contract that already serves it counts as covering it.
+        axis = dimension_to_axis(raw_axis)
+        if axis in present or not str(raw_axis).strip():
             continue
-        question, search_type, priority = templates[axis]
+        label = str(raw_axis).replace("_", " ").strip()
+        if axis in overrides:
+            question = overrides[axis]
+            search_type = axis_search_type(axis)
+            priority = 1
+        elif axis in _AXIS_FALLBACK_TEMPLATES:
+            suffix, search_type, priority = _AXIS_FALLBACK_TEMPLATES[axis]
+            question = f"{concept} {suffix}{year}".strip()
+        else:
+            # A dynamic, non-canonical dimension with no supplied question.
+            plan.append(
+                synthesize_dimension_contract(
+                    index=next_id,
+                    dimension=label,
+                    query=query,
+                    domain=domain,
+                    minimum_sources=minimum_sources,
+                    today=today,
+                )
+            )
+            present.add(axis)
+            injected.append(axis)
+            next_id += 1
+            continue
         plan.append(
             _contract(
                 index=next_id,
@@ -667,7 +1109,7 @@ def enforce_axis_coverage(
                 search_type=search_type,
                 priority=priority,
                 domain=domain,
-                coverage_goal=f"required {axis} coverage (injected by axis enforcement)",
+                coverage_goal=f"required dimension: {label}",
                 minimum_sources=minimum_sources,
             )
         )
@@ -676,8 +1118,9 @@ def enforce_axis_coverage(
         next_id += 1
 
     if injected:
-        logger.info("[Planner] injected required axes: %s", ", ".join(injected))
+        logger.info("[Planner] injected required dimensions: %s", ", ".join(injected))
     return plan, injected
+
 
 
 def select_plan(
@@ -697,7 +1140,10 @@ def select_plan(
     ranked = sorted(
         plan, key=lambda item: (int(item.get("priority", 2)), int(item.get("id", 0)))
     )
-    required = [normalize_axis(a) for a in (required_axes or ())]
+    # Required dimensions arrive as model labels ("cost and financing"): map
+    # each to the canonical axis its contract carries so the protection below
+    # actually matches (enforce_axis_coverage applies the same mapping).
+    required = [dimension_to_axis(a) for a in (required_axes or ())]
     picked: List[Dict[str, Any]] = []
     picked_ids: Set[int] = set()
 
@@ -859,10 +1305,59 @@ async def planner_agent(
         if today.strip() else ""
     )
 
+    intent = intent or {}
+
+    # -------- Dynamic planning directive (Phase 2) --------
+    # The plan must cover the dimensions THIS query needs. On the first pass we
+    # ask the directive stage which dimensions those are and use its answer as
+    # the required set, replacing the generic axis templates. On expansion
+    # passes the workflow has already folded in the axes under research, so we
+    # do NOT re-plan dimensions (that would undo per-axis expansion) — the
+    # caller's required_axes is authoritative and any missing one is filled by
+    # the dimension synthesizer below.
+    planned_dimensions: List[str] = []
+    required_questions: Dict[str, str] = {}
+    directive_meta: Dict[str, Any] = {}
+    # `critique_feedback` is non-empty only on expansion passes (the workflow
+    # passes the critic's gap list). First-pass planning is the only time the
+    # dimension directive runs; expansion must preserve the axes already under
+    # research instead of re-deriving a fresh dimension set.
+    if not critique_feedback:
+        planned_dimensions, must_cover, directive_meta = await plan_dimensions(
+            llm, query, today=today, intent=intent, context_snippets=context_snippets,
+        )
+        # The directive's dimensions become the plan's hard requirements.
+        # Caller-supplied required_axes (orchestration budget axes) are folded
+        # in ONLY when the directive actually planned (planned_by=llm): on the
+        # deterministic fallback the caller's explicit axes are the contract
+        # (a caller that passed required_axes gets exactly those, not the
+        # heuristic set added on top — otherwise required axes balloon past the
+        # plan budget).
+        if directive_meta.get("planned_by") == "llm":
+            # The directive's dimensions ARE the contract: they are specific to
+            # this query and already encode whatever evidence/criticism/mechanism
+            # angles it needs. Re-merging the orchestration's generic axes here
+            # would re-introduce exactly the boilerplate this stage replaces
+            # (measured: every plan then carried definition/evidence/criticism/
+            # mechanism alongside its real dimensions). The orchestration axes
+            # remain the fallback contract when the directive cannot plan.
+            required_axes = tuple(
+                str(d or "").strip() for d in planned_dimensions if str(d or "").strip()
+            )
+        # On the deterministic fallback (directive LLM failed) the caller's
+        # required_axes, if any, stay authoritative; if the caller passed none,
+        # nothing is force-injected here — a plan-LLM failure already routes to
+        # fallback_plan(), which guarantees the canonical safety-net axes.
+        # must_cover dimensions are non-negotiable: if the plan model omits one,
+        # the coverage enforcement below synthesizes a contract from the
+        # dimension label itself. (No literal question is supplied — the
+        # synthesizer derives one from the label + query concept.)
+        if directive_meta.get("coverage_note"):
+            logger.info("[Planner] directive coverage note: %s", directive_meta["coverage_note"])
+
     # Intent block: the resolved understanding of the question. It overrides
     # the model's own reading — that is the whole point of resolving intent
     # BEFORE research is shaped.
-    intent = intent or {}
     intent_senses = [
         s for s in (intent.get("senses") or [])
         if isinstance(s, dict) and str(s.get("label", "")).strip()
@@ -912,10 +1407,13 @@ async def planner_agent(
     axis_block = ""
     if required_axes:
         axis_block = (
-            "\nMandatory axes — the plan MUST contain one sub-question for each "
-            f"of: {', '.join(normalize_axis(a) for a in required_axes)}. A plan "
-            "missing any of them will be repaired automatically, and the "
-            "repaired question will be cruder than one you write yourself."
+            "\nRequired research dimensions — the plan MUST contain one "
+            "sub-question for each of: "
+            f"{', '.join(str(a).replace('_', ' ') for a in required_axes)}. "
+            "These were derived for THIS query. A plan missing any of them will "
+            "be repaired automatically, and the repaired question will be cruder "
+            "than one you write yourself. Use each dimension's label as the "
+            "sub-question's axis."
         )
     budget_block = (
         f"\nProduce at most {target} sub-questions — this is a hard budget, so "
@@ -1032,10 +1530,14 @@ Return JSON only.
     cleaned, injected = enforce_axis_coverage(
         cleaned, query, required_axes,
         domain=dominant_domain, minimum_sources=minimum_sources, today=today,
+        required_questions=required_questions,
     )
 
     # Axis enforcement may push the plan over budget; selection decides what
-    # survives, and required axes are protected inside it.
+    # survives, and required axes are protected inside it. `select_plan` maps
+    # each required label to its canonical axis the same way the contracts were
+    # mapped, so a dynamic dimension is matched against the contract its own
+    # enforcement step created.
     final = select_plan(cleaned, target, required_axes)
     final = sanitize_dependencies(final)
     final = _assign_intent_senses(final, intent)
@@ -1046,11 +1548,12 @@ Return JSON only.
         return fallback_plan(query, target, required_axes or ("definition", "evidence", "criticism"), today, intent=intent)
 
     logger.info(
-        "[Planner] %d contract(s), axes=%s, search_types=%s, injected=%s",
+        "[Planner] %d contract(s), axes=%s, search_types=%s, injected=%s, planned_by=%s",
         len(final),
         sorted({item["axis"] for item in final}),
         sorted(diversity_coverage(final)),
         injected or "none",
+        directive_meta.get("planned_by", "caller" if critique_feedback else "heuristic"),
     )
     return final
 

@@ -40,7 +40,11 @@ def test_planner_fallback_records():
     try:
         result = asyncio.run(planner_agent(ExplodingLLM(), "Some deep query here?"))
         assert len(result) == 5  # failure fallback sized to planner target (v3)
-        assert take_fallbacks() == ["planner"]
+        # Both LLM stages degrade: the dimension directive falls back to its
+        # deterministic query-type-aware dimensions, then the plan itself falls
+        # back to fallback_plan. Order is directive-then-plan (the directive
+        # runs first).
+        assert take_fallbacks() == ["planner_dimensions", "planner"]
     finally:
         clear_fallbacks()
 

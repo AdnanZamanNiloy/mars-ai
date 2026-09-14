@@ -12,6 +12,29 @@ from typing import Any, List, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
+class PlanningDirectiveModel(BaseModel):
+    """LLM-authored research plan: the dimensions THIS query needs.
+
+    Phase 2 (dynamic planning) replaces the generic axis-template injection
+    (mechanism/outlook/risk/cost/history/regulation strings added whenever the
+    model omitted one) with the model's own query-specific dimensions. The
+    schema mirrors the PLANNING_DIRECTIVE_PROMPT output block and the parser in
+    planner_agent — all three must stay in sync (AGENTS.md 4.2).
+    """
+    query_type: Literal["factual", "comparative", "analytical", "exploratory"] = "factual"
+    dominant_domain: str = "general"
+    reasoning: str = ""
+    # Free-form, query-specific dimension labels (2-4 words). These become the
+    # contract axes; the prompt tells the model to name what the query needs,
+    # not to pick from a fixed enum.
+    dimensions: List[str] = Field(default_factory=list, max_length=8)
+    # The one dimension that, if missing, would leave the question unanswered.
+    must_cover: List[str] = Field(default_factory=list, max_length=4)
+    coverage_note: str = ""
+    # Optional retrieval vocabulary the model proposes for the primary sources.
+    preferred_search_types: List[str] = Field(default_factory=list, max_length=8)
+
+
 class SubQuestionModel(BaseModel):
     id: int = 1
     question: str = Field(min_length=1)

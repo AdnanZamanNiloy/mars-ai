@@ -136,7 +136,12 @@ def _section_title(axis: str, question: str) -> str:
     known = _AXIS_TITLES.get(axis)
     if known:
         return known
-    text = (question or axis or "").strip()
+    text = (question or "").strip()
+    if not text:
+        # A dynamic-planning dimension slug ("capacity_factor_and_reliability")
+        # has no question text yet: render it as a readable title instead of
+        # leaking the underscore slug into the report.
+        text = (axis or "").replace("_", " ").strip()
     if not text:
         return "Key Findings"
     return text[0].upper() + text[1:]

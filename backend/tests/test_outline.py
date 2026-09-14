@@ -150,3 +150,24 @@ def test_render_outline_names_sections_and_fact_counts():
     assert "REPORT OUTLINE" in rendered
     for section in outline.sections:
         assert section.title in rendered
+
+
+def test_dynamic_dimension_axes_get_readable_section_titles():
+    """Dynamic-planning dimension slugs (e.g. 'grid_firming_requirements')
+    must render as readable titles, not leak the underscore slug, and each
+    keeps its own section."""
+    facts = [
+        {"claim": "Solar firm capacity costs rise with storage duration.",
+         "axis": "grid_firming_requirements", "source": "https://a.example/x",
+         "confidence": 0.8},
+    ]
+    sub_questions = [
+        {"question": "How much firming does solar need?", "axis": "grid_firming_requirements",
+         "coverage_goal": "quantify firming"},
+    ]
+    outline = build_outline("Compare solar vs nuclear for baseload", facts, sub_questions)
+    dims = outline_dimensions(outline)
+    assert "grid_firming_requirements" in dims
+    rendered = render_outline(outline)
+    assert "grid_firming_requirements" not in rendered  # no slug leak
+    assert "How much firming does solar need?" in rendered
