@@ -159,6 +159,19 @@ class Settings(BaseSettings):
     quality_threshold: float = 70.0
     synthesis_revision_enabled: bool = True
 
+    # Answer-first outline + section-wise synthesis (GPT Researcher parity):
+    # the synthesizer derives the report's section shape from the query and
+    # evidence before writing. Broad questions (3+ outline dimensions) are
+    # written section by section and assembled, which stops a broad query
+    # collapsing into one narrow thesis or a source dump. Degrades to the
+    # single-pass writer when disabled or when a section call fails.
+    synthesis_outline_enabled: bool = True
+    synthesis_section_wise_enabled: bool = True
+    # Context compression: merge near-duplicate claims into one thematic
+    # entry before the writer sees them. Distinct claims are never dropped.
+    synthesis_context_compression: bool = True
+    synthesis_compression_threshold: float = 0.72
+
     # Dynamic Research Depth (Phase 2.8)
     sufficiency_threshold: float = 0.75
     min_marginal_gain: float = 0.03

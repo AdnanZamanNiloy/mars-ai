@@ -90,6 +90,52 @@ def _length_band_score(words: int, mode: str) -> float:
     return 1.0
 
 
+def score_answer_relevance(query: str, answer: str) -> float:
+    """How much of the answer's content serves the QUESTION asked (0-1).
+
+    This is the "evidence-rich but answers the wrong thing" guard, and unlike
+    the in-gate relevance blend it is a pure answer-vs-query measure — it
+    cannot be inflated by verified evidence or citation density. It uses the
+    MARS semantic engine (TF-IDF cosine) over the query against the answer's
+    substantive sentences, plus the query-concept hit rate, so a report about
+    a neighbouring topic scores low even when every claim is well sourced.
+
+    Deterministic; no LLM, no network.
+    """
+    query = (query or "").strip()
+    answer = (answer or "").strip()
+    if not query or not answer:
+        return 0.0
+
+    concept_terms = _concept_terms(query)
+    concept_hit = (
+        sum(1 for t in concept_terms if t in answer.lower()) / len(concept_terms)
+        if concept_terms else 1.0
+    )
+
+    # Semantic alignment: best match of the query against the answer's
+    # substantive sentences (skip bullets that are pure data dumps and very
+    # short lines, which produce noisy cosine scores).
+    sentences = [
+        s.strip()
+        for s in re.split(r"(?<=[.!?])\s+|\n+", answer)
+        if s.strip() and _word_count(s) >= 5
+    ]
+    semantic = 0.0
+    if sentences:
+        try:
+            from app.core.semantic import rank_by_similarity
+
+            scores = rank_by_similarity(query, sentences[:200])
+            if scores:
+                top = sorted(scores, reverse=True)[:5]
+                semantic = sum(top) / len(top)
+        except Exception:
+            semantic = 0.0
+
+    return round(0.5 * concept_hit + 0.5 * semantic, 4)
+
+
 def _is_data_dump_line(line: str) -> bool:
     """A bullet that is mostly digits/punctuation with no prose — the
     'citation spam / statistics dump' shape the gate must reject."""
@@ -125,6 +171,7 @@ class QualityReport:
             "threshold": self.threshold,
             "passed": self.passed,
             "failures": list(self.failures),
+            "details": dict(self.details),
         }
 
     def render(self) -> str:
@@ -231,9 +278,24 @@ def evaluate_answer(
     contamination = (
         1 - len(unsupported_units) / len(cited_units) if cited_units else 0.6
     )
-    relevance = round(100 * (0.35 * concept_hit + 0.35 * sense_alignment + 0.30 * contamination))
+    # Answer-to-query relevance gate: a separate, evidence-independent measure
+    # of whether the report addresses the QUESTION. Evidence-rich text about
+    # the wrong topic scores high on accuracy/evidence but low here.
+    answer_relevance = score_answer_relevance(query, answer)
+    relevance = round(
+        100 * (0.25 * concept_hit + 0.25 * sense_alignment + 0.20 * contamination + 0.30 * answer_relevance)
+    )
     if not disambig_ok:
         relevance = min(relevance, RELEVANCE_FLOOR - 5)
+    if answer_relevance < 0.18:
+        # Hard-fail territory: the body does not semantically match the query
+        # at all. Cap below the floor regardless of other signals.
+        relevance = min(relevance, RELEVANCE_FLOOR - 5)
+        failures.append(
+            "Relevance: the report's content does not match the question asked — "
+            "it reads as evidence about a different topic. Restructure around the "
+            f"query's actual subject: {query[:80]!r}."
+        )
     if concept_hit < 0.5:
         failures.append(
             "Relevance: the Executive Summary does not address the query's core "
@@ -335,6 +397,7 @@ def evaluate_answer(
             "words": words,
             "concept_hit": round(concept_hit, 3),
             "sense_alignment": round(sense_alignment, 3),
+            "answer_relevance": round(answer_relevance, 3),
             "citation_density": round(density, 3),
             "primary_share": round(primary, 3),
         },

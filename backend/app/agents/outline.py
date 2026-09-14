@@ -1,0 +1,267 @@
+"""Answer-first outline builder — decide the report's shape BEFORE writing.
+
+The failure this module exists for: broad questions ("What is the current
+trend of AI?") were being answered by whatever claims happened to rank
+highest, so the report collapsed into a narrow thesis or a source dump.
+GPT Researcher avoids this by planning a report outline (subtopics) and
+researching each section — this is the MARS-native, low-risk half of that:
+an outline derived from the query + the evidence already in hand, computed
+deterministically and handed to the synthesizer so the writer targets the
+question's dimensions instead of dumping claims.
+
+Design
+------
+* Deterministic first: the outline is built from the plan's research angles
+  (`sub_question`), the query's own structure, and the evidence grade
+  distribution. No LLM call is required, so this cannot degrade a run or
+  add latency. An optional LLM polish is available but off the critical
+  path.
+* Each section names a *dimension* (definition / mechanism / evidence /
+  criticism / comparison / outlook / ...) and carries the facts that
+  belong to it, so section-wise synthesis has a real grouping.
+* Deterministic fallback (AGENTS.md 4.7): if anything is missing, the
+  outline is the query's detected dimensions or a single "Answer" section.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Sequence
+
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+# Axis → human section title. Mirrors the planner's axis enum; unknown axes
+# keep their own (title-cased) name so a model-invented angle still shows.
+_AXIS_TITLES: Dict[str, str] = {
+    "definition": "What It Is",
+    "mechanism": "How It Works",
+    "application": "Applications",
+    "evidence": "Evidence & Data",
+    "comparison": "How It Compares",
+    "criticism": "Limitations & Critique",
+    "history": "Background & History",
+    "outlook": "Outlook & Trends",
+}
+
+# Order sections so a report reads survey → depth → challenge, like the
+# planner's phases. Unknown axes sort last (stable).
+_AXIS_ORDER: List[str] = [
+    "definition",
+    "history",
+    "mechanism",
+    "application",
+    "evidence",
+    "comparison",
+    "criticism",
+    "outlook",
+]
+
+# A query with this many distinct research axes is treated as "broad" — the
+# signal for section-wise synthesis rather than one monolithic pass.
+BROAD_MIN_DIMENSIONS = 3
+
+
+@dataclass
+class OutlineSection:
+    """One section of the answer, with the evidence that belongs to it."""
+
+    axis: str
+    title: str
+    question: str = ""
+    facts: List[Dict[str, Any]] = field(default_factory=list)
+    coverage_goal: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "axis": self.axis,
+            "title": self.title,
+            "question": self.question,
+            "coverage_goal": self.coverage_goal,
+            "fact_count": len(self.facts),
+        }
+
+
+@dataclass
+class AnswerOutline:
+    """The report's planned shape."""
+
+    query: str
+    sections: List[OutlineSection] = field(default_factory=list)
+    broad: bool = False
+    source: str = "deterministic"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "query": self.query,
+            "broad": self.broad,
+            "source": self.source,
+            "sections": [s.to_dict() for s in self.sections],
+        }
+
+
+def _axis_for_fact(fact: Dict[str, Any]) -> str:
+    """Best-effort axis for a fact: its contract axis, else its sub-question."""
+    axis = str(fact.get("axis", "") or "").strip().lower()
+    if axis:
+        return axis
+    sub_question = str(fact.get("sub_question", "") or "").strip().lower()
+    if not sub_question:
+        return "evidence"
+    for candidate in _AXIS_ORDER:
+        if candidate in sub_question:
+            return candidate
+    return "general"
+
+
+def _section_title(axis: str, question: str) -> str:
+    known = _AXIS_TITLES.get(axis)
+    if known:
+        return known
+    text = (question or axis or "").strip()
+    if not text:
+        return "Key Findings"
+    return text[0].upper() + text[1:]
+
+
+def build_outline(
+    query: str,
+    facts: Sequence[Dict[str, Any]] = (),
+    sub_questions: Sequence[Any] = (),
+    *,
+    intent: Dict[str, Any] | None = None,
+    min_sections: int = 2,
+) -> AnswerOutline:
+    """Deterministically derive the answer's section outline.
+
+    Sections come from (in priority order):
+      1. the research plan's axes (each axis is a dimension the query needs),
+      2. the facts' own axes/sub-questions when the plan is unavailable,
+      3. a single fallback section so the writer never receives an empty shape.
+    """
+    facts = [f for f in (facts or []) if isinstance(f, dict)]
+    # Group facts by axis, preserving first-seen question text for the title.
+    by_axis: Dict[str, List[Dict[str, Any]]] = {}
+    axis_question: Dict[str, str] = {}
+    coverage_goal: Dict[str, str] = {}
+
+    for item in sub_questions or ():
+        if not isinstance(item, dict):
+            continue
+        axis = str(item.get("axis", "") or "").strip().lower()
+        if not axis:
+            continue
+        by_axis.setdefault(axis, [])
+        q = str(item.get("question", "") or "").strip()
+        if q and axis not in axis_question:
+            axis_question[axis] = q
+        goal = str(item.get("coverage_goal", "") or "").strip()
+        if goal and axis not in coverage_goal:
+            coverage_goal[axis] = goal
+
+    for fact in facts:
+        axis = _axis_for_fact(fact)
+        by_axis.setdefault(axis, []).append(fact)
+        q = str(fact.get("sub_question", "") or "").strip()
+        if q and axis not in axis_question:
+            axis_question[axis] = q
+
+    intent = intent or {}
+    senses = [
+        s for s in (intent.get("senses") or [])
+        if isinstance(s, dict) and str(s.get("label", "")).strip()
+    ]
+    ambiguous = bool(intent.get("ambiguity")) and len(senses) >= 2
+
+    ordered = sorted(
+        by_axis.keys(),
+        key=lambda a: (
+            _AXIS_ORDER.index(a) if a in _AXIS_ORDER else len(_AXIS_ORDER),
+            a,
+        ),
+    )
+
+    sections: List[OutlineSection] = []
+    if ambiguous:
+        # A term with two senses needs one section per sense — never blended.
+        for sense in senses[:2]:
+            label = str(sense.get("label", "")).strip()
+            sections.append(
+                OutlineSection(
+                    axis=str(sense.get("domain", "definition") or "definition"),
+                    title=label,
+                    question=label,
+                    facts=list(facts),
+                    coverage_goal="disambiguate this meaning from the others",
+                )
+            )
+
+    for axis in ordered:
+        if len(sections) >= 8:
+            break
+        sections.append(
+            OutlineSection(
+                axis=axis,
+                title=_section_title(axis, axis_question.get(axis, "")),
+                question=axis_question.get(axis, ""),
+                facts=by_axis.get(axis, []),
+                coverage_goal=coverage_goal.get(axis, ""),
+            )
+        )
+
+    if not sections:
+        sections = [
+            OutlineSection(
+                axis="answer",
+                title="Answer",
+                question=(query or "").strip(),
+                facts=list(facts),
+            )
+        ]
+
+    broad = len(sections) >= BROAD_MIN_DIMENSIONS
+    outline = AnswerOutline(query=query, sections=sections, broad=broad)
+    logger.info(
+        "[Outline] %d section(s) (%s) broad=%s",
+        len(sections), ", ".join(s.axis for s in sections), broad,
+    )
+    return outline
+
+
+def outline_dimensions(outline: AnswerOutline) -> List[str]:
+    """The distinct axes the outline will write sections for, in order."""
+    seen: List[str] = []
+    for section in outline.sections:
+        if section.axis and section.axis not in seen:
+            seen.append(section.axis)
+    return seen
+
+
+def render_outline(outline: AnswerOutline) -> str:
+    """Render the outline for the writer prompt: section order + fact budget.
+
+    The writer is told to produce one section per entry, in this order, so
+    the answer covers the query's dimensions rather than the top-ranked
+    claim's neighbourhood.
+    """
+    if not outline.sections:
+        return ""
+    lines = [
+        "REPORT OUTLINE — write one section per entry, in this order. "
+        "Cover every dimension the query needs; do not collapse the report "
+        "into the first dimension that has evidence."
+    ]
+    for i, section in enumerate(outline.sections, 1):
+        line = f"{i}. {section.title}"
+        if section.coverage_goal:
+            line += f" — {section.coverage_goal}"
+        line += f" ({len(section.facts)} evidence item(s))"
+        lines.append(line)
+    return "\n".join(lines) + "\n\n"
+
+
+def group_facts_by_section(
+    outline: AnswerOutline,
+) -> List[tuple[OutlineSection, List[Dict[str, Any]]]]:
+    """Pair each section with its facts (empty list allowed)."""
+    return [(section, list(section.facts)) for section in outline.sections]

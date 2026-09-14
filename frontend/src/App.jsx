@@ -156,6 +156,9 @@ function blankRun(query, mode) {
     intent: null,
     quality: null,
     evidenceDistribution: null,
+    // Answer-first outline: the section shape the writer targeted.
+    outline: null,
+    sectionWise: false,
     done: false,
     error: "",
     resumable: false,
@@ -343,6 +346,8 @@ export default function App() {
             quality: evt.quality && typeof evt.quality === "object" ? evt.quality : m.run.quality,
             evidenceDistribution: evt.evidence_distribution && typeof evt.evidence_distribution === "object"
               ? evt.evidence_distribution : m.run.evidenceDistribution,
+            outline: evt.outline && typeof evt.outline === "object" ? evt.outline : m.run.outline,
+            sectionWise: typeof evt.section_wise === "boolean" ? evt.section_wise : m.run.sectionWise,
             done: true,
             resuming: false,
           };

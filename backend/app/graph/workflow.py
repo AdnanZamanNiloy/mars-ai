@@ -64,6 +64,12 @@ class ResearchState(TypedDict, total=False):
     context_snippets: List[str]
     # Answer quality gate: five-axis 0-100 score of the delivered report.
     quality: Dict[str, Any]
+    # Answer-first outline (GPT Researcher adaptation): the section shape the
+    # writer targeted (broad flag + section list), and whether section-wise
+    # synthesis was used. Declared on state so LangGraph carries them to the
+    # route for streaming.
+    outline: Dict[str, Any]
+    section_wise: bool
     # Evidence grades (Step 5): A/B/C/D counts over the verified fact pool.
     evidence_distribution: Dict[str, int]
     # Research-loop: whether a counter-evidence query has actually been issued.
@@ -127,6 +133,11 @@ class SynthesizerUpdate(TypedDict):
     citation_health: Dict[str, Any]
     quality: Dict[str, Any]
     evidence_distribution: Dict[str, int]
+    # Answer-first outline: the section shape the writer targeted (broad flag
+    # + section list) and whether the section-wise path was used. Rides in
+    # state so the existing final_report event can surface it.
+    outline: Dict[str, Any]
+    section_wise: bool
 
 
 class FinalizeUpdate(TypedDict):
@@ -831,6 +842,21 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
 
         # v3 plan targets live on the orchestration dict (build_initial_state).
         orchestration = state.get("orchestration", {})
+        required_axes = list(orchestration.get("required_axes", []) or [])
+        # Retrieval diversity per section/angle: on an expansion pass, the
+        # axes already researched must survive selection so each outline
+        # dimension keeps its own retrieval rather than being crowded out by
+        # a repeated background question. Additive — on the first pass the
+        # orchestration's axes are already the contract.
+        if expanding:
+            existing_axes = {
+                str(item.get("axis", "") or "").strip().lower()
+                for item in existing
+                if isinstance(item, dict) and str(item.get("axis", "") or "").strip()
+            }
+            for axis in existing_axes:
+                if axis and axis not in required_axes:
+                    required_axes.append(axis)
         sub_questions = await planner_agent(
             llm=llm,
             query=state["query"],
@@ -841,7 +867,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             # v3 plan targets from orchestration: the plan is sized and
             # axis-shaped here; the hardware cap below stays as backstop.
             target_count=int(orchestration.get("target_sub_questions", 0) or 0) or None,
-            required_axes=list(orchestration.get("required_axes", []) or []),
+            required_axes=required_axes,
             minimum_sources=int(orchestration.get("min_sources_per_axis", 0) or 0) or 2,
         )
         # Hardware guardrail: cap the plan at the orchestrated target agents.
@@ -1377,6 +1403,9 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             # Intent: the synthesis must answer the user's likely meaning
             # and disambiguate up front when the query was ambiguous.
             "intent": intent,
+            # Answer-first outline inputs: the plan's axes are the query's
+            # dimensions; the synthesizer turns them into the report's shape.
+            "sub_questions": state.get("sub_questions", []),
         }
         # Evidence grades (Step 4): the measured quality distribution drives
         # the writer's epistemic labeling. Computed once, failure-safe.
@@ -1397,12 +1426,56 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         revision_enabled = bool(getattr(llm.settings, "synthesis_revision_enabled", True))
         threshold = float(getattr(llm.settings, "quality_threshold", 70.0) or 70.0)
 
+        # Answer-first outline + section-wise synthesis (GPT Researcher
+        # adaptation). Section-wise is reserved for genuinely broad questions
+        # in deeper modes: it costs one LLM call per section, and the
+        # synthesizer itself falls back to a single pass when a section fails.
+        outline_enabled = bool(getattr(llm.settings, "synthesis_outline_enabled", True))
+        section_wise_enabled = bool(
+            getattr(llm.settings, "synthesis_section_wise_enabled", True)
+        ) and outline_enabled
+        compress_context = bool(
+            getattr(llm.settings, "synthesis_context_compression", True)
+        )
+        compress_threshold = float(
+            getattr(llm.settings, "synthesis_compression_threshold", 0.72) or 0.72
+        )
+        answer_outline = None
+        if outline_enabled:
+            try:
+                from app.agents.outline import build_outline
+
+                answer_outline = build_outline(
+                    state["query"],
+                    usable,
+                    state.get("sub_questions", []),
+                    intent=intent,
+                )
+            except Exception as exc:
+                logger.warning("outline_build_failed", error=str(exc), exc_info=exc)
+                answer_outline = None
+        section_wise = bool(
+            section_wise_enabled
+            and answer_outline is not None
+            and answer_outline.broad
+            and str(state.get("mode", "standard") or "standard") in ("deep", "executive", "standard", "audit")
+        )
+
         async def _synthesize_and_score(ctx: Dict[str, Any]):
+            # Outline / section-wise / compression options ride in `context` so
+            # the synthesizer entry point keeps its original signature (test
+            # doubles patch it with that signature).
             answer = await synthesizer_agent(
                 llm=llm,
                 query=state["query"],
                 facts=usable,
-                context=ctx,
+                context={
+                    **ctx,
+                    "outline": answer_outline,
+                    "section_wise": section_wise,
+                    "compress_context": compress_context,
+                    "compress_threshold": compress_threshold,
+                },
             )
             # Report-contract verification: check the emitted answer's citations
             # against the evidence (never the reverse). Observational only —
@@ -1477,6 +1550,8 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             "citation_health": citation_health,
             "quality": quality.to_dict(),
             "evidence_distribution": evidence_distribution,
+            "outline": answer_outline.to_dict() if answer_outline is not None else {},
+            "section_wise": bool(section_wise),
         }
 
     async def finalize_node(state: ResearchState) -> FinalizeUpdate:

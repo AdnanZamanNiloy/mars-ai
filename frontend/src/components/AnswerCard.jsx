@@ -174,6 +174,7 @@ export default function AnswerCard({ run }) {
   const degradedNotice = describeDegradation(degraded);
   const decisions = Array.isArray(run.decisions) ? run.decisions : [];
   const support = typeof run.answerSupport === "number" ? Math.round(run.answerSupport * 100) : null;
+  const outlineSections = run.outline && Array.isArray(run.outline.sections) ? run.outline.sections : [];
 
   const stats = [
     { icon: IconDoc, value: String(total), label: "Total claims", sub: `From ${run.snippets || "—"} sources`, tone: "muted" },
@@ -206,6 +207,22 @@ export default function AnswerCard({ run }) {
       ) : (
         <p className="answer-lead">The final report did not include an executive summary.</p>
       )}
+
+      {outlineSections.length ? (
+        <div className="outline-block">
+          <h3 style={{ fontSize: 15.5, fontWeight: 650, margin: "0 0 8px" }}>
+            Report outline{run.sectionWise ? " (section-wise synthesis)" : ""}
+          </h3>
+          <ol className="outline-list">
+            {outlineSections.map((s) => (
+              <li key={`${s.axis}-${s.title}`}>
+                <b>{s.title}</b>
+                {s.coverage_goal ? <span className="sub2"> — {s.coverage_goal}</span> : null}
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
 
       {sections.contradictions ? (
         <div className="contradiction">

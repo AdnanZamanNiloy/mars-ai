@@ -51,6 +51,12 @@ from app.core.usage import run_seconds_remaining
 from app.core.schemas import SynthesizerAnswerModel
 
 from app.agents.contradiction import numeric_ranges, summarize_contradictions
+from app.agents.outline import (
+    AnswerOutline,
+    build_outline,
+    group_facts_by_section,
+    render_outline,
+)
 from app.agents.evidence_utils import (
     dedupe_semantic_facts,
     extract_domain,
@@ -267,6 +273,7 @@ async def synthesizer_agent(
     query: str,
     facts: List[Dict[str, Any]],
     context: Dict[str, Any] | None = None,
+    **kwargs: Any,
 ) -> str:
     """Synthesize the final report and return it as markdown text.
 
@@ -274,8 +281,10 @@ async def synthesizer_agent(
     `context` carries the decision-grade inputs the workflow already computed:
     contradictions to flag, overall confidence, degraded stages, red-team
     findings, and evidence counts for the Evidence & Confidence section.
+    Extra keyword arguments (outline, section_wise, compress_context) pass
+    through to `synthesize` — callers that pass none keep the old behaviour.
     """
-    result = await synthesize(llm, query, facts, context)
+    result = await synthesize(llm, query, facts, context, **kwargs)
     return result.answer
 
 
@@ -284,8 +293,22 @@ async def synthesize(
     query: str,
     facts: List[Dict[str, Any]],
     context: Dict[str, Any] | None = None,
+    *,
+    outline: AnswerOutline | None = None,
+    section_wise: bool | None = None,
+    compress_context: bool | None = None,
+    compress_threshold: float | None = None,
 ) -> SynthesisResult:
-    """The same synthesis, returning the audit and legend alongside the text."""
+    """The same synthesis, returning the audit and legend alongside the text.
+
+    Answer-first outline (new): the report's section shape is derived from
+    the query + evidence BEFORE writing, so a broad question is answered
+    dimension by dimension instead of dumping the top-ranked claims.
+    `section_wise` writes each outline section as its own call and assembles
+    the result; it degrades cleanly to a single pass when unsupported.
+    `compress_context` merges near-duplicate claims into one thematic entry
+    (never dropping distinct claims) before the writer sees them.
+    """
     usable_facts = dedupe_semantic_facts(filter_facts_by_domain(facts))
     if not usable_facts:
         return SynthesisResult(
@@ -299,6 +322,29 @@ async def synthesize(
 
     ctx = context or {}
     contradictions = [c for c in (ctx.get("contradictions") or []) if isinstance(c, dict)]
+
+    # Options may arrive as explicit kwargs (tests, direct callers) or inside
+    # `context` (the workflow passes them there to keep this entry point's
+    # signature stable for test doubles). Explicit wins; context is default.
+    if compress_context is None:
+        compress_context = bool(ctx.get("compress_context", True))
+    if compress_threshold is None:
+        compress_threshold = float(ctx.get("compress_threshold", 0.72) or 0.72)
+    if outline is None:
+        ctx_outline = ctx.get("outline")
+        if isinstance(ctx_outline, AnswerOutline):
+            outline = ctx_outline
+
+    if compress_context:
+        usable_facts = _compress_to_themes(usable_facts, similarity_threshold=compress_threshold)
+
+    if outline is None:
+        outline = build_outline(
+            query,
+            usable_facts,
+            ctx.get("sub_questions") or [],
+            intent=ctx.get("intent") or {},
+        )
 
     # Mode-aware depth: deep/executive runs are allowed a longer, more
     # analytical report — that depth is the product. Quick/standard stay tight
@@ -328,6 +374,29 @@ async def synthesize(
     if ambiguity_block:
         length_hint = f"{length_hint}\n\n{ambiguity_block}"
 
+    # Section-wise synthesis for broad questions: write each outline section
+    # as its own bounded call and assemble. This is what stops a broad query
+    # from collapsing into one narrow thesis, and it also keeps every prompt
+    # small enough to survive size-capped providers. It is opt-in via the
+    # caller (the workflow gates it on mode); when any section fails, the
+    # whole report falls back to the single-pass writer — never a mixed
+    # report and never a crash.
+    if section_wise is None:
+        section_wise = bool(ctx.get("section_wise", False))
+    if section_wise and outline.broad and len(outline.sections) > 1:
+        sectioned = await _synthesize_sectioned(
+            llm,
+            query,
+            usable_facts,
+            ctx,
+            outline,
+            contradictions,
+            length_hint,
+        )
+        if sectioned is not None:
+            return sectioned
+        logger.warning("[Synthesizer] section-wise path failed; falling back to single pass")
+
     # Adaptive fact-cap ladder: the writer prompt carries up to 40 facts plus
     # the legend; on providers that cap request size (Groq 413s ~21-41KB) the
     # first attempt can be rejected whole. Shrinking the evidence view keeps
@@ -352,6 +421,7 @@ async def synthesize(
         user_prompt = (
             f"Main query: {query}\n\n"
             f"{length_hint}\n\n"
+            + render_outline(outline)
             + (
                 "Angles to cover (one section each, in this order):\n"
                 + "\n".join(f"- {a}" for a in angles)
@@ -437,6 +507,127 @@ async def synthesize(
 
     answer = _append_evidence_appendix(answer, ctx, usable_facts, contradictions)
     answer = _append_source_legend(answer, numbered)
+    return SynthesisResult(answer=answer, sources=numbered, audit=audit, angles=angles)
+
+
+async def _synthesize_sectioned(
+    llm: LLMClient,
+    query: str,
+    usable_facts: List[Dict[str, Any]],
+    ctx: Dict[str, Any],
+    outline: AnswerOutline,
+    contradictions: List[Dict[str, Any]],
+    length_hint: str,
+) -> SynthesisResult | None:
+    """Write each outline section as its own call, then assemble.
+
+    Returns None (so the caller re-runs the single-pass writer) when there
+    are fewer than two usable sections, when any section call fails, or when
+    the assembled draft is empty. Deterministic guarantees (citation audit,
+    evidence appendix, source legend) are applied to the assembled text
+    exactly as in the single-pass path.
+    """
+    groups = [
+        (section, facts)
+        for section, facts in group_facts_by_section(outline)
+        if facts
+    ]
+    if len(groups) < 2:
+        return None
+
+    # One shared legend across sections so markers stay stable and in range.
+    # Number the ORIGINAL fact objects (a single legend + a per-fact marker),
+    # then split them back per section. `_assign_numbers` preserves identity,
+    # unlike `_number_facts` which copies.
+    all_section_facts: List[Dict[str, Any]] = []
+    for _, facts in groups:
+        all_section_facts.extend(facts)
+    numbered, pairs = _assign_numbers(all_section_facts)
+    cited_facts: List[Dict[str, Any]] = []
+    facts_by_section: List[List[Dict[str, Any]]] = []
+    marker_by_id: Dict[int, int] = {}
+    for fact, index in pairs:
+        item = dict(fact)
+        item["citation"] = index
+        cited_facts.append(item)
+        marker_by_id[id(fact)] = index
+    for _, facts in groups:
+        section_cited: List[Dict[str, Any]] = []
+        for fact in facts:
+            index = marker_by_id.get(id(fact))
+            if index is None:
+                continue
+            item = dict(fact)
+            item["citation"] = index
+            section_cited.append(item)
+        facts_by_section.append(section_cited)
+    source_lines = _source_lines(numbered)
+    ranges_block = _render_ranges_block(contradictions)
+    context_block = _render_context_block(ctx)
+
+    section_bodies: List[str] = []
+    for (section, _), section_cited in zip(groups, facts_by_section):
+        if not section_cited:
+            continue
+        # Reuse the global numbering: the evidence block renders each fact's
+        # own citation marker, so section prompts cannot renumber the legend.
+        prompt = (
+            f"Main query: {query}\n\n"
+            f"{length_hint}\n\n"
+            f"You are writing ONE section of a larger report, the section titled "
+            f"\"{section.title}\" (dimension: {section.axis}).\n"
+            + (f"Section goal: {section.coverage_goal}\n" if section.coverage_goal else "")
+            + "Write 2-4 tight paragraphs of synthesis for THIS section only. "
+            "Do not write an Executive Summary, a Sources list, or other sections — "
+            "they are added separately. Use these exact [n] markers.\n\n"
+            "Evidence:\n"
+            + _render_evidence_block(section_cited)
+            + "\n\n"
+            + ranges_block
+            + context_block
+            + f"Sources (cite by number only):\n{source_lines}\n\n"
+            "Return JSON in this schema: "
+            '{"answer": "<section markdown with [n] citations>"}'
+        )
+        try:
+            payload = await llm.generate_json(
+                SYNTHESIZER_SYSTEM_PROMPT,
+                prompt,
+                response_model=SynthesizerAnswerModel,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[Synthesizer] section '%s' failed (%s); abandoning section-wise path",
+                section.title, str(exc)[:120],
+            )
+            return None
+        body = str(payload.get("answer", "")).strip() if isinstance(payload, dict) else ""
+        if not body:
+            logger.warning("[Synthesizer] section '%s' empty; abandoning section-wise path", section.title)
+            return None
+        section_bodies.append(f"## {section.title}\n\n{body}")
+
+    if len(section_bodies) < 2:
+        return None
+
+    assembled = "\n\n".join(section_bodies)
+    answer = _sanitize_answer_text(assembled, query)
+    audit = audit_citations(answer, numbered, cited_facts)
+    if audit.invalid_markers:
+        answer = _drop_invalid_markers(answer, len(numbered))
+    integrity = _integrity_note(audit)
+    if integrity:
+        answer = f"{answer.rstrip()}\n\n{integrity}"
+    answer = _append_evidence_appendix(answer, ctx, usable_facts, contradictions)
+    answer = _append_source_legend(answer, numbered)
+    angles = [
+        str(f.get("sub_question", "") or "").strip()
+        for f in cited_facts
+        if str(f.get("sub_question", "") or "").strip()
+    ]
+    # Preserve order, drop duplicates.
+    angles = list(dict.fromkeys(angles))
+    logger.info("[Synthesizer] section-wise report: %d sections assembled", len(section_bodies))
     return SynthesisResult(answer=answer, sources=numbered, audit=audit, angles=angles)
 
 
@@ -1258,6 +1449,52 @@ def _fact_confidence(fact: Any) -> float:
         return float(fact.get("confidence", 0.0))
     except (TypeError, ValueError, AttributeError):
         return 0.0
+
+
+def _compress_to_themes(
+    facts: Sequence[Dict[str, Any]],
+    *,
+    similarity_threshold: float = 0.72,
+) -> List[Dict[str, Any]]:
+    """Collapse near-duplicate claims into one thematic entry per group.
+
+    GPT Researcher compresses scraped chunks before the writer sees them so
+    many sources become coherent reasoning instead of a fact dump. The MARS
+    equivalent must NOT drop distinct claims (that would weaken verification
+    guarantees), so compression here only merges claims that are already
+    near-identical, keeps one representative, and records how many sources
+    asserted it in `corroboration_count`. Distinct claims pass through
+    untouched, in their original order.
+
+    Deterministic and pure — no LLM, no network. Safe to run on every path.
+    """
+    kept: List[Dict[str, Any]] = []
+    for fact in facts or []:
+        if not isinstance(fact, dict):
+            continue
+        claim = str(fact.get("claim", "") or "").strip()
+        if not claim:
+            continue
+        merged = False
+        for existing in kept:
+            if semantic_similarity(claim, str(existing.get("claim", ""))) >= similarity_threshold:
+                # Same assertion restated: keep the better-supported copy and
+                # count the rest as corroboration rather than discarding them.
+                try:
+                    existing_count = int(existing.get("corroboration_count", 1) or 1)
+                except (TypeError, ValueError):
+                    existing_count = 1
+                existing["corroboration_count"] = existing_count + 1
+                if _fact_confidence(fact) > _fact_confidence(existing):
+                    merged_claim = existing["claim"]
+                    existing.clear()
+                    existing.update(fact)
+                    existing["claim"] = merged_claim
+                merged = True
+                break
+        if not merged:
+            kept.append(dict(fact))
+    return kept
 
 
 def _section_title(sub_question: str) -> str:
