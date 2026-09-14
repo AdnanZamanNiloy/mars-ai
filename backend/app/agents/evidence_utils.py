@@ -259,6 +259,50 @@ def _significant_quantities(text: str) -> List[Quantity]:
     ]
 
 
+# Distinctive-term extraction for corroboration anchoring. Deliberately a
+# LOCAL list rather than importing the semantic engine's private stopword
+# set: the anchor matcher must stay cheap, deterministic and independently
+# testable, and must never silently change meaning if that engine is
+# re-calibrated. Negation words are, as everywhere else in this repo, NOT
+# stopwords — a candidate that shares "not" is speaking about the same
+# assertion (polarity is guarded separately by the dedup/merge path).
+_ANCHOR_STOPWORDS: frozenset = frozenset("""
+a about above after again against all also am an and any are as at be because
+been before being below between both but by can could did do does doing during
+each few for from further had has have having he her here hers herself him
+himself his how i if in into is it its itself just me more most my myself now
+of off on once only or other our ours ourselves out over own same she should
+so some such than that the their theirs them themselves then there these they
+this those through to too under until very was we were what when where which
+while who whom why will with you your yours yourself yourselves shall may
+might must upon among within without across per via etc said says say
+according based new one two three four five six seven eight nine ten first
+second third last next many much several various including included include
+still also become became becoming make made making use used using
+""".split())
+
+
+def rare_content_tokens(text: str, min_length: int = 4) -> Set[str]:
+    """Distinctive content tokens of a text (numeric or long, non-stopword).
+
+    These are the "rare anchors" of a claim: the tokens that carry its
+    specificity (numbers, named entities, domain nouns). Used by the
+    corroboration anchor matcher, which needs a signal that survives the
+    paraphrase gap where full-claim similarity collapses. Numeric tokens
+    matter most for quantitative claims ("200", "billion"), so they are kept
+    regardless of length; ordinary words must be at least `min_length` chars
+    to count, which filters the function vocabulary that leaked through the
+    stopword list.
+    """
+    out: Set[str] = set()
+    for token in re.findall(r"[a-z0-9]+", (text or "").lower()):
+        if token in _ANCHOR_STOPWORDS:
+            continue
+        if token.isdigit() or len(token) >= min_length:
+            out.add(token)
+    return out
+
+
 def numbers_grounded(claim: str, source_text: str, tolerance: float = 0.02) -> bool:
     """True when every significant number in `claim` appears in `source_text`.
 

@@ -30,6 +30,10 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from app.agents.evidence_utils import (
     extract_domain,
     extract_numbers,
+    numbers_grounded,
+    numeric_conflict,
+    rare_content_tokens,
+    _significant_quantities,
 )
 from app.agents.sources import classify_source
 
@@ -214,6 +218,120 @@ def distinct_publisher_count(sources: Iterable[str]) -> int:
 # reached two publishers zero times.
 CORROBORATION_SIMILARITY = 0.55
 
+# --- Anchor path (numeric + rare-term grounding) ----------------------------
+# Full-claim similarity is blind to paraphrase: a live corroborating page said
+# "Spending on AI infrastructure hit about $200 billion last year" against the
+# claim "Global AI capital expenditure reached $200 billion in 2025" and scored
+# 0.30 — below any usable semantic band. The distinctive part of a
+# quantitative claim is its numbers and rare content terms, so a deterministic
+# anchor matcher is the second, independent path.
+
+# Minimum overlap of rare content anchors for the "numerically grounded"
+# branch. A claim's significant numbers must FIRST all be grounded in the
+# candidate (value match with the shared 2% tolerance) — precision over
+# recall, so a same-topic page quoting a DIFFERENT figure cannot corroborate a
+# quantitative claim (a separate conflict guard also rejects that on the
+# semantic path). Kept at 2: the realistic paraphrase shares only
+# "200"/"billion" once anchors are counted, and requiring a third distinctive
+# word would re-break exactly the corroboration it exists to catch. Numbers
+# and named entities are anchors, not free passes.
+CORROBORATION_ANCHOR_MIN_CONTENT_OVERLAP = 2
+
+# The title/snippet branch fires only on a STRONG overlap of the claim's rare
+# anchors — a third of them, at least three. This is the conservative backstop
+# for headline-style matches ("AI capex $200 billion record") where the page
+# body is thin; a loosely related article will not clear it.
+CORROBORATION_ANCHOR_TITLE_MIN_SHARED = 3
+CORROBORATION_ANCHOR_TITLE_MIN_FRACTION = 0.34
+
+# Bounded retained page text used for matching after verification blanks the
+# full content (memory-release rule). Short enough to keep thousands of
+# results cheap.
+CORROBORATION_EXCERPT_CHARS = 800
+
+
+def _rare_anchors(text: str) -> Set[str]:
+    return rare_content_tokens(text)
+
+
+def _is_numeric_anchor(token: str) -> bool:
+    """True for the number-carrying anchors (digits) — unit words like
+    'billion' are content but not the discriminating quantity itself."""
+    return any(ch.isdigit() for ch in token)
+
+
+def _anchor_support(claim: str, candidate_text: str) -> bool:
+    """Deterministic anchor match: numbers AND rare-term overlap.
+
+    Branch (b): every significant quantity in the claim is numerically present
+    in the candidate (via the shared `numbers_grounded` tolerance), AND the
+    two texts share at least `CORROBORATION_ANCHOR_MIN_CONTENT_OVERLAP` rare
+    content terms. Claims with no significant numbers cannot use this branch —
+    they fall back to semantic similarity.
+    """
+    claim_numbers = _significant_quantities(claim)
+    if not claim_numbers:
+        return False
+    if not numbers_grounded(claim, candidate_text):
+        return False
+    shared = _rare_anchors(claim) & _rare_anchors(candidate_text)
+    if len(shared) < CORROBORATION_ANCHOR_MIN_CONTENT_OVERLAP:
+        return False
+    # At least one shared anchor must be a number: a page that merely repeats
+    # the claim's vocabulary without its quantity is not corroboration of a
+    # quantitative claim.
+    return any(_is_numeric_anchor(tok) for tok in shared)
+
+
+def _numeric_conflict_guard(claim: str, candidate_text: str) -> bool:
+    """True when the candidate states a CONFLICTING significant quantity.
+
+    A quantitatively similar page with the wrong figure ("$300 billion" for a
+    "$200 billion" claim) scores high on lexical similarity and would sail
+    through the semantic band — but stating a different number is
+    contradiction, not corroboration. Applies only when the claim itself is
+    quantitative and the candidate carries a comparable quantity.
+    """
+    if not _significant_quantities(claim):
+        return False
+    return numeric_conflict(claim, candidate_text) is not None
+
+
+def _title_snippet_support(claim: str, title: str, snippet: str) -> bool:
+    """Branch (c): strong rare-anchor overlap in title+snippet alone.
+
+    For headline-shaped evidence where the page body is unavailable. Requires
+    an absolute floor AND a fraction of the claim's anchors, so long claims
+    cannot be satisfied by incidental vocabulary.
+    """
+    anchors = _rare_anchors(claim)
+    if not anchors:
+        return False
+    surface = _rare_anchors(f"{title} {snippet}")
+    shared = anchors & surface
+    if len(shared) < CORROBORATION_ANCHOR_TITLE_MIN_SHARED:
+        return False
+    return len(shared) / len(anchors) >= CORROBORATION_ANCHOR_TITLE_MIN_FRACTION
+
+
+def _candidate_text(candidate: Dict[str, Any]) -> str:
+    """Title + snippet + retained excerpt + best sentence, whitespace-normalized.
+
+    Built from every text field a search result carries, because real
+    corroboration is scattered across them: the title names the figure, the
+    snippet paraphrases it and the retained excerpt (surviving the verifier's
+    content blank) holds the surrounding sentence. Snippet-only matching was
+    root cause 1 of the zero-corroboration live failure.
+    """
+    parts = [
+        str(candidate.get("title", "") or ""),
+        str(candidate.get("snippet", "") or ""),
+        str(candidate.get("corroboration_excerpt", "") or ""),
+        str(candidate.get("content", "") or "")[:2000],
+    ]
+    text = " ".join(p for p in parts if p)
+    return re.sub(r"\s+", " ", text).strip()
+
 
 def apply_corroboration(fact: Dict[str, Any], url: str) -> bool:
     """Attach `url` as a corroborating source to `fact`, enforcing independence.
@@ -266,13 +384,24 @@ def find_corroborating_sources(
 ) -> List[str]:
     """New-publisher URLs among `candidates` whose text supports `claim`.
 
-    `candidates` are search-result dicts (`url`, `snippet`, `content`). Text
-    support is measured with the shared hybrid semantic engine against the
-    result's snippet and its best-matching sentence — the claim-bearing
-    passage, not the whole page. A URL is only returned when its registrable
-    domain is absent from `existing_urls` (`is_new_publisher`), so ambiguity
-    about which publisher a hit belongs to is always resolved conservatively.
-    Deterministic and LLM-free.
+    `candidates` are search-result dicts (`url`, `title`, `snippet`, `content`,
+    `corroboration_excerpt`). A URL is returned when its registrable domain is
+    absent from `existing_urls` (`is_new_publisher` — the sole independence
+    gate) AND EITHER:
+
+      (a) the candidate's combined title/snippet/excerpt text scores at or
+          above `threshold` on the shared hybrid semantic engine, OR
+      (b) the claim's significant numbers are all numerically grounded in the
+          candidate AND the two share enough rare content anchors
+          (`_anchor_support`), OR
+      (c) the title+snippet alone share a strong fraction of the claim's rare
+          anchors (`_title_snippet_support`).
+
+    Paths (b)/(c) exist because a real corroborating page paraphrases the
+    claim; near-verbatim similarity was the sole test and it never fired on
+    live evidence. (b)/(c) are deliberately conservative (numbers must all
+    match; anchors must overlap) so a same-topic-different-claim page cannot
+    corroborate. Deterministic and LLM-free.
     """
     text = str(claim or "").strip()
     if not text:
@@ -288,30 +417,37 @@ def find_corroborating_sources(
         domain = registrable_domain(url)
         if not domain or domain in seen_domains:
             continue
+        combined = _candidate_text(candidate)
+        title = str(candidate.get("title", "") or "")
         snippet = str(candidate.get("snippet", "") or "")
-        content = str(candidate.get("content", "") or "")
-        score = _best_text_support(text, snippet, content)
-        if score >= threshold:
+        if _numeric_conflict_guard(text, combined):
+            continue  # contradictory figure is never corroboration
+        supported = (
+            _best_text_support(text, combined) >= threshold
+            or _anchor_support(text, combined)
+            or _title_snippet_support(text, title, snippet)
+        )
+        if supported:
             seen_domains.add(domain)
             out.append(url)
     return out
 
 
-def _best_text_support(claim: str, snippet: str, content: str) -> float:
-    """Max hybrid similarity of `claim` to a result's snippet / best sentence."""
+def _best_text_support(claim: str, text: str) -> float:
+    """Max hybrid similarity of `claim` to combined candidate text / its best
+    sentence. Sentence-level scoring keeps a long page from diluting a single
+    claim-bearing passage."""
     from app.core.semantic import cross_similarity, pair_similarity
 
-    best = 0.0
-    for text in (snippet, content[:2000]):
-        compact = re.sub(r"\s+", " ", text or "").strip()
-        if not compact:
-            continue
-        best = max(best, pair_similarity(claim, compact))
-        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", compact) if s.strip()]
-        if sentences:
-            row = cross_similarity([claim], sentences[:80])[0]
-            if len(row):
-                best = max(best, float(max(row)))
+    compact = re.sub(r"\s+", " ", text or "").strip()
+    if not compact:
+        return 0.0
+    best = pair_similarity(claim, compact)
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", compact) if s.strip()]
+    if sentences:
+        row = cross_similarity([claim], sentences[:80])[0]
+        if len(row):
+            best = max(best, float(max(row)))
     return best
 
 

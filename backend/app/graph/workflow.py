@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import re
 from typing import Any, Dict, List, Optional, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -1187,11 +1188,26 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         # Raw content is discarded once verification completes — verification
         # is the last consumer of full page text (it checks claims against
         # content, not just snippets); nothing downstream (critic, synthesizer,
-        # finalize, later iterations) needs it. Blank in place: these dict
-        # objects are shared with the contexts built in summarizer_node.
+        # finalize, later iterations) needs the full page. Blank in place: these
+        # dict objects are shared with the contexts built in summarizer_node.
+        # Before blanking, retain a BOUNDED excerpt: the expansion-pass
+        # corroboration linker runs after verification and otherwise has only
+        # short snippets to match a pending claim against. The excerpt is a
+        # few hundred chars (memory-release rule still holds — the full page is
+        # released), falling back to the snippet when content was already empty.
+        from app.core.evidence_grade import CORROBORATION_EXCERPT_CHARS
+
         for result in state.get("search_results", []):
-            if isinstance(result, dict) and "content" in result:
-                result["content"] = ""
+            if not isinstance(result, dict) or "content" not in result:
+                continue
+            raw = str(result.get("content", "") or "")
+            if not raw:
+                raw = str(result.get("snippet", "") or "")
+            if raw and not result.get("corroboration_excerpt"):
+                result["corroboration_excerpt"] = re.sub(
+                    r"\s+", " ", raw
+                ).strip()[:CORROBORATION_EXCERPT_CHARS]
+            result["content"] = ""
 
         logger.info("verifier_done", **stats)
         return {"facts": verified, "verification_stats": stats}

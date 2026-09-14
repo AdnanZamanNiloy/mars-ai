@@ -80,6 +80,35 @@ async def test_search_node_links_new_publisher_to_pending_claim():
     assert ev.needs_corroboration is False
 
 
+async def test_search_node_links_non_verbatim_new_publisher():
+    """Regression: live expansion hits paraphrase the claim and scored ~0.30,
+    so snippet-only matching never linked them. Title+snippet+excerpt with the
+    numeric anchor path must link this realistic OECD page."""
+    settings = _settings()
+    oecd = "https://www.oecd.org/ai/investment-outlook"
+    results = [{
+        "url": oecd,
+        "title": "OECD AI investment outlook",
+        "snippet": (
+            "Spending on AI infrastructure hit about $200 billion last year, "
+            "per OECD figures."
+        ),
+        "content": "",
+        "sub_question": "",
+    }]
+    out = await _run_search(settings, results, _pending_state())
+
+    facts = out.get("facts")
+    assert facts, "linking must return the annotated facts"
+    linked = [f for f in facts if _CLAIM in str(f.get("claim", ""))]
+    assert linked[0].get("corroboration_count", 1) == 2
+    assert oecd in (linked[0].get("corroborating_sources") or [])
+
+    ev = grade_claim(linked[0])
+    assert ev.corroboration_count >= 2
+    assert ev.needs_corroboration is False
+
+
 async def test_search_node_same_publisher_does_not_raise_corroboration():
     """Another reuters.com URL is the SAME publisher: count stays 1."""
     settings = _settings()
