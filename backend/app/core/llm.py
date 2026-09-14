@@ -341,6 +341,14 @@ class LLMClient:
             return self._probe_cache[1], self._probe_cache[2]
         try:
             targets = await self.probe_targets()
+            # Exclusivity scope: when a UI-selected active provider leads the
+            # chain, it is the ONLY provider that matters for pre-flight health
+            # (unless the user opted into env fallback). A healthy env provider
+            # must never mask the active provider's 429 — that starts a run
+            # optimistically against a failing primary and degrades mid-run.
+            custom, exclusive = await self._resolve_custom()
+            fallback_ok = bool(getattr(self.settings, "active_provider_fallback", False))
+            active_name = str(custom.get("name", "custom")) if (custom and exclusive) else ""
         except Exception as exc:
             logger.warning("probe target resolution failed, skipping pre-flight: %s", exc, exc_info=exc)
             return True, ""
@@ -376,6 +384,20 @@ class LLMClient:
                 return False, target["name"], f"{type(exc).__name__}: {detail[:140]}"
 
         results = await asyncio.gather(*(_ping(t) for t in targets))
+        by_name = {name: (ok, err) for ok, name, err in results}
+        # Exchange-scoped health: an exclusive active provider is the gate.
+        # Its failure is reported even when a fallback env provider would
+        # answer — the run's primary is down. With env fallback enabled the
+        # chain can still serve calls, so a healthy fallback keeps the run
+        # viable (any_ok semantics), but the active failure is named first.
+        if active_name and not fallback_ok:
+            ok, err = by_name.get(active_name, (False, "probe did not run"))
+            if not ok:
+                detail = f"{active_name}: {err}" if err else active_name
+                self._probe_cache = None
+                return False, detail
+            self._probe_cache = (time.monotonic() + 30.0, True, "")
+            return True, ""
         any_ok = any(ok for ok, _, _ in results)
         if any_ok:
             # Cache successes only: a healthy provider stays healthy for the

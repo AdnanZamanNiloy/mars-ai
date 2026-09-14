@@ -599,6 +599,7 @@ async def _synthesize_sectioned(
             logger.warning(
                 "[Synthesizer] section '%s' failed (%s); abandoning section-wise path",
                 section.title, str(exc)[:120],
+                exc_info=exc,
             )
             return None
         body = str(payload.get("answer", "")).strip() if isinstance(payload, dict) else ""
