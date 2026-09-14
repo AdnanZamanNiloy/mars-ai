@@ -103,12 +103,14 @@ def test_needs_corroboration_claim_generates_different_domain_query():
             "verified": True,
         },
     ])
-    queries = _corroboration_queries(state)
+    queries, registry = _corroboration_queries(state)
     assert queries, "a single-publisher quantitative claim must procure corroboration"
     joined = " ".join(queries).lower()
     assert "-site:example.com" in joined
-    # Quantitative claims lean on primary/official vocabulary.
+    # Quantitative claims target the authoritative publisher registry.
+    assert "site:" in joined
     assert any(term in joined for term in ("official report", "government data", "dataset", "peer-reviewed"))
+    assert registry, "per-claim attempt state must be tracked"
 
 
 def test_definitional_uncorroborated_claim_targets_new_publisher():
@@ -119,11 +121,12 @@ def test_definitional_uncorroborated_claim_targets_new_publisher():
             "verified": True,
         },
     ])
-    queries = _corroboration_queries(state)
+    queries, _ = _corroboration_queries(state)
     assert queries
     joined = " ".join(queries).lower()
     assert "-site:secondary.com" in joined
-    assert "independent source" in joined or "independent publisher" in joined
+    assert "independent source" in joined
+    assert "site:" in joined
 
 
 def test_corroborated_claim_yields_no_procurement_query():
@@ -135,7 +138,8 @@ def test_corroborated_claim_yields_no_procurement_query():
             "corroborating_sources": ["https://b.org/x", "https://c.net/y"],
         },
     ])
-    assert _corroboration_queries(state) == []
+    queries, _ = _corroboration_queries(state)
+    assert queries == []
 
 
 # ---------------------------------------------------------------------------

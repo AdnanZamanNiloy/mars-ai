@@ -467,6 +467,112 @@ def build_primary_source_query(
 
 
 # ---------------------------------------------------------------------------
+# Corroboration targeting: authoritative publishers to seek a SECOND source
+# ---------------------------------------------------------------------------
+
+# The single curated set of independent AUTHORITATIVE publishers a
+# corroboration query should be pointed at. It is DERIVED from the same
+# tiering registries used by classify_source (not a parallel list): the
+# inter-governmental/statistical agencies, standards bodies, peer-reviewed
+# venues and preprint servers are exactly the publishers whose word can
+# independently corroborate an important claim. Ordering is stable and
+# priority-ordered (highest-signal agencies first) so a capped query always
+# carries the strongest targets and never wobbles between runs.
+#
+# `site:` operators for the suffix-matched families (.gov/.edu/.int) are
+# appended by `authoritative_site_terms` because Google-style site: accepts a
+# TLD suffix and the search providers translate site: to include_domains.
+_AUTHORITATIVE_HOSTS: Tuple[str, ...] = (
+    # Inter-governmental / statistical agencies: they publish the numbers.
+    "worldbank.org", "who.int", "oecd.org", "un.org", "imf.org",
+    "eurostat.ec.europa.eu", "ec.europa.eu", "gov.uk", "ons.gov.uk",
+    "bls.gov", "census.gov", "eia.gov", "nasa.gov", "noaa.gov",
+    "nist.gov", "iso.org", "ipcc.ch", "iea.org",
+    # Peer-reviewed venues and preprint servers.
+    "nature.com", "science.org", "thelancet.com", "nejm.org", "bmj.com",
+    "pnas.org", "jstor.org", "arxiv.org", "biorxiv.org", "medrxiv.org",
+    "nber.org", "doi.org",
+    # Bounded institutional reference points.
+    "ourworldindata.org",
+)
+
+# Bare site: suffixes proven to reach authoritative publishers without naming
+# each host: government, military, international treaty bodies and academic
+# institutions.
+_AUTHORITATIVE_SUFFIXES: Tuple[str, ...] = ("gov", "edu", "int", "gov.uk")
+
+# Query vocabulary that steers a general web search at primary documents even
+# when site: scoping returns nothing.
+AUTHORITATIVE_INTENT_TERMS: Tuple[str, ...] = (
+    "official report", "government data", "dataset", "peer-reviewed study",
+)
+
+
+def authoritative_site_terms(
+    max_sites: int = 4, include_suffixes: bool = True, offset: int = 0
+) -> Tuple[str, ...]:
+    """`site:`-ready authoritative hosts/suffixes, capped and deterministic.
+
+    Prefers explicit hosts in priority order; when the cap allows, appends the
+    generic authoritative suffixes (gov/edu/int) so any agency or university
+    counts, not only the enumerated ones. `offset` rotates the starting host so
+    successive corroboration attempts for one claim target DIFFERENT publishers
+    instead of repeating the same scoped query.
+    """
+    pool: List[str] = list(_AUTHORITATIVE_HOSTS)
+    if include_suffixes:
+        pool.extend(_AUTHORITATIVE_SUFFIXES)
+    if not pool:
+        return ()
+    start = offset % len(pool)
+    rotated = pool[start:] + pool[:start]
+    terms: List[str] = []
+    for entry in rotated:
+        if entry in terms:
+            continue
+        terms.append(entry)
+        if len(terms) >= max(0, max_sites):
+            break
+    return tuple(terms)
+
+
+def build_corroboration_query(
+    claim_terms: str,
+    exclude_domain: str = "",
+    *,
+    quantitative: bool = False,
+    max_sites: int = 4,
+    attempt: int = 0,
+) -> str:
+    """A query that seeks an INDEPENDENT authoritative publisher for a claim.
+
+    Targets the authoritative registry (site:gov/edu/int plus named agencies,
+    journals and datasets), excludes the claim's current publisher with
+    `-site:<domain>` so the search cannot return the source we already hold,
+    and — for quantitative claims — adds primary-document vocabulary where the
+    corroborating figure is most likely to live.
+
+    `attempt` rotates the targeted hosts so a second procurement pass for the
+    same claim reaches publishers the first pass did not.
+
+    Deterministic and total: an empty claim yields "" (never invent a query).
+    """
+    text = re.sub(r"\s+", " ", (claim_terms or "")).strip()
+    if not text:
+        return ""
+    sites = authoritative_site_terms(max_sites=max_sites, offset=max(0, int(attempt)))
+    if not sites:
+        return ""
+    site_clause = " OR ".join(f"site:{s}" for s in sites)
+    intent = " ".join(AUTHORITATIVE_INTENT_TERMS) if quantitative else "independent source"
+    query = f"{text} {intent} ({site_clause})"
+    domain = (exclude_domain or "").strip()
+    if domain:
+        query = f"{query} -site:{domain}"
+    return re.sub(r"\s+", " ", query).strip()
+
+
+# ---------------------------------------------------------------------------
 # Freshness
 # ---------------------------------------------------------------------------
 

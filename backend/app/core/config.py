@@ -92,6 +92,13 @@ class Settings(BaseSettings):
     # every other soft stop is disabled.
     max_expansion_passes: int = 12
     max_expansion_searches: int = 48
+    # Corroboration ACQUISITION: how many times each pending claim's
+    # corroboration query may be issued before the claim is left as a recorded
+    # limitation (bounded, identical re-issues are also deduped by query text);
+    # and the claim-vs-page semantic similarity band at/above which a NEW
+    # publisher's text counts as independent corroboration.
+    max_corroboration_attempts: int = 2
+    corroboration_similarity: float = 0.55
     # Tavily search depth ("basic" or "advanced")
     tavily_search_depth: str = "basic"
 

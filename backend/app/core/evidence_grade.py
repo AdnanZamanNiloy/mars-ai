@@ -23,6 +23,7 @@ input yields a conservative grade, never an exception.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
@@ -204,6 +205,114 @@ def distinct_publisher_count(sources: Iterable[str]) -> int:
         if d:
             seen.add(d)
     return len(seen)
+
+
+# Similarity band at/above which a NEW publisher's page text is treated as
+# supporting an existing claim (independent corroboration). Deliberately below
+# the 0.86 dedup-merge threshold: a corroborating page rarely restates the
+# claim verbatim, and requiring near-identity is exactly why the live deep run
+# reached two publishers zero times.
+CORROBORATION_SIMILARITY = 0.55
+
+
+def apply_corroboration(fact: Dict[str, Any], url: str) -> bool:
+    """Attach `url` as a corroborating source to `fact`, enforcing independence.
+
+    The ONLY sanctioned write path for acquired corroboration: it rejects a
+    URL whose registrable domain the fact already holds (via `is_new_publisher`)
+    and recomputes `corroboration_count` with `distinct_publisher_count`, so a
+    same-publisher page can never raise the count. Returns True when the count
+    actually increased, False otherwise. Additive: mutates `fact` in place
+    (callers own the dict), and is total — a bad URL is a no-op.
+    """
+    if not isinstance(fact, dict):
+        return False
+    candidate = str(url or "").strip()
+    if not candidate:
+        return False
+    existing: List[str] = [
+        str(u) for u in (fact.get("corroborating_sources") or []) if str(u).strip()
+    ]
+    source = str(fact.get("source", "") or "").strip()
+    if source and not any(
+        registrable_domain(source) == registrable_domain(u) for u in existing
+    ):
+        existing.append(source)
+    if not is_new_publisher(candidate, existing):
+        return False
+    try:
+        before = int(fact.get("corroboration_count", 1) or 1)
+    except (TypeError, ValueError):
+        before = 1
+    seen = {registrable_domain(u) for u in existing}
+    seen.add(registrable_domain(candidate))
+    seen.discard("")
+    after = len(seen)
+    if after <= before:
+        return False
+    if candidate not in existing:
+        existing.append(candidate)
+    fact["corroborating_sources"] = existing
+    fact["corroboration_count"] = max(after, before + 1)
+    return True
+
+
+def find_corroborating_sources(
+    claim: str,
+    candidates: Sequence[Dict[str, Any]],
+    existing_urls: Iterable[str],
+    *,
+    threshold: float = CORROBORATION_SIMILARITY,
+) -> List[str]:
+    """New-publisher URLs among `candidates` whose text supports `claim`.
+
+    `candidates` are search-result dicts (`url`, `snippet`, `content`). Text
+    support is measured with the shared hybrid semantic engine against the
+    result's snippet and its best-matching sentence — the claim-bearing
+    passage, not the whole page. A URL is only returned when its registrable
+    domain is absent from `existing_urls` (`is_new_publisher`), so ambiguity
+    about which publisher a hit belongs to is always resolved conservatively.
+    Deterministic and LLM-free.
+    """
+    text = str(claim or "").strip()
+    if not text:
+        return []
+    out: List[str] = []
+    seen_domains: Set[str] = set()
+    for candidate in candidates or ():
+        if not isinstance(candidate, dict):
+            continue
+        url = str(candidate.get("url", "") or "").strip()
+        if not url or not is_new_publisher(url, [*existing_urls, *out]):
+            continue
+        domain = registrable_domain(url)
+        if not domain or domain in seen_domains:
+            continue
+        snippet = str(candidate.get("snippet", "") or "")
+        content = str(candidate.get("content", "") or "")
+        score = _best_text_support(text, snippet, content)
+        if score >= threshold:
+            seen_domains.add(domain)
+            out.append(url)
+    return out
+
+
+def _best_text_support(claim: str, snippet: str, content: str) -> float:
+    """Max hybrid similarity of `claim` to a result's snippet / best sentence."""
+    from app.core.semantic import cross_similarity, pair_similarity
+
+    best = 0.0
+    for text in (snippet, content[:2000]):
+        compact = re.sub(r"\s+", " ", text or "").strip()
+        if not compact:
+            continue
+        best = max(best, pair_similarity(claim, compact))
+        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", compact) if s.strip()]
+        if sentences:
+            row = cross_similarity([claim], sentences[:80])[0]
+            if len(row):
+                best = max(best, float(max(row)))
+    return best
 
 
 def grade_claim(

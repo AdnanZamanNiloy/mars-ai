@@ -71,6 +71,11 @@ class ResearchState(TypedDict, total=False):
     # claims. Computed in critic_node, executed directly in search_node (they
     # do not depend on the planner model rephrasing them).
     corroboration_queries: List[str]
+    # Corroboration ACQUISITION: per-claim attempt state (normalized claim ->
+    # {claim, domains_queried, query_keys, attempts}), threaded through state so
+    # no module-level mutable registry is needed. A claim stops being re-queried
+    # once its attempt budget is spent (it stays in the gap set as a limitation).
+    corroboration_registry: Dict[str, Dict[str, Any]]
     # Fix B: hard per-run cap on expansion search passes actually issued.
     expansion_passes: int
 
@@ -111,6 +116,7 @@ class CriticUpdate(TypedDict):
     redteam: Dict[str, Any]
     facts: List[Dict[str, Any]]
     counter_evidence_attempted: bool
+    corroboration_registry: Dict[str, Dict[str, Any]]
 
 
 class SynthesizerUpdate(TypedDict):
@@ -356,7 +362,9 @@ def _claim_terms(claim: str, limit: int = 8) -> str:
     return " ".join(out)
 
 
-def _corroboration_queries(state: ResearchState, limit: int = 3) -> List[str]:
+def _corroboration_queries(
+    state: ResearchState, limit: int = 3, settings: Any | None = None
+) -> tuple[List[str], Dict[str, Dict[str, Any]]]:
     """CLAIM-SPECIFIC procurement queries that seek a DIFFERENT publisher.
 
     The live deep run measured corroboration perfectly and then never went
@@ -365,33 +373,40 @@ def _corroboration_queries(state: ResearchState, limit: int = 3) -> List[str]:
 
     For each important single-publisher claim this builds a query that
     (a) targets the claim's own terms, (b) explicitly EXCLUDES the current
-    publisher with `-site:<registrable-domain>`, and (c) for quantitative
-    claims leans on primary/official vocabulary where the corroborating
-    figure is most likely to live (official reports, government data,
-    peer-reviewed studies, datasets). Deterministic fallback: if grading
-    fails, returns [] (never invent queries).
+    publisher with `-site:<registrable-domain>`, and (c) targets the
+    authoritative publisher registry (site:gov/edu/int + named agencies,
+    journals and datasets) where an independent corroborating source is most
+    likely to live.
+
+    Per-claim attempt state is threaded through `corroboration_registry`
+    (keyed by normalized claim) so a claim is never re-queried identically
+    beyond `max_corroboration_attempts` and so the caller can see which
+    domains were already targeted. Deterministic fallback: if grading fails,
+    returns ([], {}) — never invent queries.
     """
     facts = [f for f in state.get("facts", []) or [] if isinstance(f, dict)]
     if not facts:
-        return []
+        return [], {}
     try:
         from app.core.evidence_grade import grade_facts, registrable_domain
+        from app.agents.sources import build_corroboration_query
     except Exception as exc:
         logger.warning("corroboration_grading_failed", error=str(exc), exc_info=exc)
-        return []
+        return [], {}
 
     try:
         graded = grade_facts(facts, contradictions=state.get("contradictions") or [])
     except Exception as exc:
         logger.warning("corroboration_grading_failed", error=str(exc), exc_info=exc)
-        return []
+        return [], {}
 
-    # Existing publishers across the pool, so we never re-query a domain we
-    # already hold — the whole point is to reach a NEW one.
-    seen_domains = {
-        registrable_domain(str(f.get("source", "") or ""))
-        for f in facts
-    } - {""}
+    settings = settings if settings is not None else get_settings_safe()
+    max_attempts = max(1, int(getattr(settings, "max_corroboration_attempts", 2) or 2))
+    registry: Dict[str, Dict[str, Any]] = {
+        str(k): dict(v)
+        for k, v in (state.get("corroboration_registry") or {}).items()
+        if isinstance(v, dict)
+    }
 
     queries: List[str] = []
     for g in graded:
@@ -401,23 +416,124 @@ def _corroboration_queries(state: ResearchState, limit: int = 3) -> List[str]:
         claim = str(ev.get("claim", "")).strip()
         if not claim:
             continue
+        key = normalize_text(claim)
+        entry = registry.setdefault(
+            key, {"claim": claim, "domains_queried": [], "query_keys": [], "attempts": 0}
+        )
+        # Hard wall: a claim whose attempt budget is spent stays in the gap set
+        # (so it is recorded as a limitation) but is no longer re-queried.
+        try:
+            attempts = int(entry.get("attempts", 0) or 0)
+        except (TypeError, ValueError):
+            attempts = 0
+        if attempts >= max_attempts:
+            continue
         domain = registrable_domain(str(ev.get("domain", "") or ev.get("source", "")))
         terms = _claim_terms(claim)
         if not terms:
             continue
-        if ev.get("has_numbers"):
-            base = f"{terms} official report government data dataset peer-reviewed study"
-        else:
-            base = f"{terms} independent source"
-        if domain:
-            query = f"{base} -site:{domain}"
-        else:
-            query = f"{base} independent publisher"
-        if query not in queries:
-            queries.append(query)
+        # Rotate targeted hosts per attempt so a second pass is genuinely new
+        # procurement, not a repeat of the first scoped query.
+        query = build_corroboration_query(
+            terms,
+            exclude_domain=domain,
+            quantitative=bool(ev.get("has_numbers")),
+            attempt=attempts,
+        )
+        if not query:
+            continue
+        query_key = normalize_text(query)
+        if query_key in (entry.get("query_keys") or []):
+            # Identical query text is never re-issued — even with a larger
+            # attempt budget, a rotation collision must not double-spend.
+            entry["attempts"] = max_attempts
+            continue
+        queries.append(query)
+        entry["attempts"] = attempts + 1
+        entry["query_keys"] = [*(entry.get("query_keys") or []), query_key]
+        if domain and domain not in (entry.get("domains_queried") or []):
+            entry["domains_queried"] = [*(entry.get("domains_queried") or []), domain]
         if len(queries) >= max(1, limit):
             break
-    return queries
+    return queries, registry
+
+
+def get_settings_safe():
+    """Settings for deterministic-fallback helpers; never raises."""
+    try:
+        from app.core.config import get_settings
+
+        return get_settings()
+    except Exception as exc:  # settings failure must not break query generation
+        logger.warning("settings_lookup_failed", error=str(exc), exc_info=exc)
+        return None
+
+
+def _acquire_corroboration(
+    facts: List[Dict[str, Any]],
+    search_results: List[Dict[str, Any]],
+    contradictions: List[Dict[str, Any]] | None = None,
+) -> List[Dict[str, Any]]:
+    """Attach NEW-publisher supporting pages to single-source claims.
+
+    For every fact whose graded record still needs corroboration, find search
+    results from a registrable domain the fact does not already hold whose text
+    supports the claim at/above the corroboration similarity band, and attach
+    them through `apply_corroboration` (the only sanctioned write path, which
+    rejects same-publisher URLs). Facts are mutated in place and the same list
+    is returned; deterministic, LLM-free, and total — any grading failure
+    leaves the pool untouched rather than breaking the run.
+    """
+    items = [f for f in facts or [] if isinstance(f, dict)]
+    candidates = [r for r in search_results or [] if isinstance(r, dict)]
+    if not items or not candidates:
+        return list(facts or [])
+    try:
+        from app.core.evidence_grade import (
+            apply_corroboration,
+            find_corroborating_sources,
+            grade_facts,
+        )
+    except Exception as exc:
+        logger.warning("corroboration_acquisition_import_failed", error=str(exc), exc_info=exc)
+        return list(facts or [])
+
+    try:
+        graded = grade_facts(items, contradictions=contradictions or [])
+    except Exception as exc:
+        logger.warning("corroboration_acquisition_grading_failed", error=str(exc), exc_info=exc)
+        return list(facts or [])
+
+    by_claim = {
+        normalize_text(str(g.get("claim", ""))): g
+        for g in graded
+        if isinstance(g, dict)
+    }
+    attached = 0
+    settings = get_settings_safe()
+    threshold = float(getattr(settings, "corroboration_similarity", 0.55) or 0.55)
+    for fact in items:
+        claim = str(fact.get("claim", "") or "").strip()
+        if not claim:
+            continue
+        record = by_claim.get(normalize_text(claim))
+        ev = record.get("evidence") if isinstance(record, dict) else None
+        if not isinstance(ev, dict) or not ev.get("needs_corroboration"):
+            continue
+        existing = [
+            str(u) for u in (fact.get("corroborating_sources") or []) if str(u).strip()
+        ]
+        if fact.get("source"):
+            existing.append(str(fact["source"]))
+        matches = find_corroborating_sources(
+            claim, candidates, existing, threshold=threshold
+        )
+        for url in matches:
+            if apply_corroboration(fact, url):
+                attached += 1
+    if attached:
+        logger.info("corroboration_acquired", attachments=attached)
+    return list(facts or [])
 
 
 def _counter_evidence_queries(state: ResearchState, limit: int = 2) -> List[str]:
@@ -964,6 +1080,12 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
 
         fresh_facts = accumulated
         merged = dedupe_semantic_facts([*state.get("facts", []), *fresh_facts])
+        # Corroboration ACQUISITION: attach a NEW publisher's supporting page
+        # text to pending single-source claims, deterministically. Measurement
+        # (`independent_corroboration`) already existed; without this pass the
+        # corroboration searches ran and their results were never matched back
+        # to the claims that needed them.
+        merged = _acquire_corroboration(merged, state.get("search_results", []))
         logger.info("summarizer_done", fresh_facts=len(fresh_facts), total_facts=len(merged),
                     waves=len(wave_report))
         return {"facts": merged, "wave_report": wave_report}
@@ -1105,7 +1227,9 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         # queries are executed directly by search_node (not left to the planner
         # model to rephrase). They also ride improved_queries so the stopping
         # policy can see them.
-        corroboration_queries = _corroboration_queries(state)
+        corroboration_queries, corroboration_registry = _corroboration_queries(
+            state, settings=getattr(llm, "settings", None)
+        )
         for q in corroboration_queries:
             if q not in improved:
                 improved.append(q)
@@ -1134,6 +1258,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             "redteam": redteam_state,
             "facts": enriched_facts,
             "corroboration_queries": corroboration_queries,
+            "corroboration_registry": corroboration_registry,
         }
 
     async def synthesizer_node(state: ResearchState) -> SynthesizerUpdate:
