@@ -552,6 +552,18 @@ async def synthesize(
     if audit.invalid_markers:
         answer = _drop_invalid_markers(answer, len(numbered))
 
+    # Mandatory sections, enforced post-assembly: the writer cannot omit
+    # Limitations/unknowns or Counterarguments (or any of the other three) and
+    # ship a report that hides them. Missing sections are added deterministically
+    # from measured state, before the appendix/legend.
+    answer = ensure_required_sections(
+        answer,
+        ctx=ctx,
+        usable_facts=usable_facts,
+        contradictions=contradictions,
+        cited_facts=cited_facts,
+    )
+
     integrity = _integrity_note(audit)
     if integrity:
         answer = f"{answer.rstrip()}\n\n{integrity}"
@@ -855,6 +867,13 @@ async def _synthesize_sectioned(
     audit = audit_citations(answer, numbered, cited_facts)
     if audit.invalid_markers:
         answer = _drop_invalid_markers(answer, len(numbered))
+    answer = ensure_required_sections(
+        answer,
+        ctx=ctx,
+        usable_facts=usable_facts,
+        contradictions=contradictions,
+        cited_facts=cited_facts,
+    )
     integrity = _integrity_note(audit)
     if integrity:
         answer = f"{answer.rstrip()}\n\n{integrity}"
@@ -869,6 +888,208 @@ async def _synthesize_sectioned(
     angles = list(dict.fromkeys(angles))
     logger.info("[Synthesizer] section-wise report: %d sections assembled", len(section_bodies))
     return SynthesisResult(answer=answer, sources=numbered, audit=audit, angles=angles)
+
+
+# ---------------------------------------------------------------------------
+# Mandatory report sections: enforce post-assembly, not just in the prompt
+# ---------------------------------------------------------------------------
+
+# Every final report MUST carry these five sections, whatever the writer chose
+# to emit and whichever path wrote it. Keys are the canonical headings this
+# assembler may ADD; values are the recognized aliases (normalized) that count
+# as already present, so a well-written report is never duplicated.
+REQUIRED_SECTIONS: Dict[str, tuple] = {
+    "Executive Summary": ("executive summary", "summary", "overview"),
+    "Key Findings": ("key findings", "main findings", "findings", "takeaways"),
+    "Evidence Strength": (
+        "evidence strength", "evidence and confidence", "evidence & confidence",
+        "evidence quality", "source ledger",
+    ),
+    "Limitations & Unknowns": (
+        "limitations and unknowns", "limitations & unknowns", "limitations",
+        "unknowns", "gaps and limitations", "evidence limitations",
+    ),
+    "Counterarguments & Disputed Points": (
+        "counterarguments and disputed points", "counterarguments & disputed points",
+        "counterarguments", "disputed points", "standing objections",
+        "conflicting evidence", "contradictions",
+    ),
+}
+
+
+def _present_section_keys(answer: str) -> Set[str]:
+    """Normalized headings present in the report body."""
+    present: Set[str] = set()
+    for match in re.finditer(r"^\s{0,3}#{1,6}\s+(.*\S)\s*$", answer or "", re.M):
+        present.add(_normalize_heading(match.group(1)))
+    return present
+
+
+def _normalized_aliases(canonical: str) -> tuple:
+    return tuple(_normalize_heading(alias) for alias in REQUIRED_SECTIONS[canonical])
+
+
+def _render_required_section(
+    canonical: str,
+    *,
+    ctx: Dict[str, Any],
+    usable_facts: Sequence[Dict[str, Any]],
+    contradictions: Sequence[Dict[str, Any]],
+    cited_facts: Sequence[Dict[str, Any]] = (),
+) -> str:
+    """Deterministic body for a missing required section, from measured state.
+
+    Never invents facts: each section is assembled from signals the pipeline
+    already measured (grade distribution, verified/corroborated counts,
+    contradictions, red-team findings, source mix). A genuinely empty signal
+    produces an honest "none detected" statement, not a fabricated one.
+    """
+    total = len(usable_facts)
+    verified = sum(1 for f in usable_facts if f.get("verified") is True)
+    corroborated = sum(
+        1 for f in usable_facts if int(f.get("corroboration_count", 1) or 1) > 1
+    )
+    distribution = ctx.get("evidence_distribution")
+    dist = distribution if isinstance(distribution, dict) else {}
+    a = int(dist.get("A", 0) or 0)
+    b = int(dist.get("B", 0) or 0)
+    c = int(dist.get("C", 0) or 0)
+    d = int(dist.get("D", 0) or 0)
+
+    if canonical == "Key Findings":
+        lines = ["## Key Findings", ""]
+        source_facts = list(cited_facts) if cited_facts else list(usable_facts)
+        top = _stratified_top_facts(source_facts, per_angle=2, cap=8)
+        for fact in top:
+            claim = re.sub(r"\s+", " ", str(fact.get("claim", "") or "")).strip()
+            if not claim:
+                continue
+            try:
+                index = int(fact.get("citation"))
+            except (TypeError, ValueError):
+                index = 0
+            marker = f" [{index}]" if index else ""
+            lines.append(f"- {claim}{marker}")
+        if len(lines) == 2:
+            lines.append("- No verified findings were extracted from the available evidence.")
+        return "\n".join(lines)
+
+    if canonical == "Evidence Strength":
+        if total == 0:
+            body = "No verified evidence was available to grade."
+        else:
+            body = (
+                f"{verified}/{total} claims were verified against their cited source; "
+                f"{corroborated}/{total} are independently corroborated by 2+ sources. "
+                f"Evidence grades: A={a}, B={b}, C={c}, D={d} "
+                "(A/B = verified and strongly/independently sourced)."
+            )
+        return "## Evidence Strength\n\n" + body
+
+    if canonical == "Limitations & Unknowns":
+        lines = ["## Limitations & Unknowns", ""]
+        if total:
+            weak = c + d
+            if weak:
+                lines.append(
+                    f"- {weak} claim(s) are single-source or unverified and should "
+                    "be treated as provisional."
+                )
+            if corroborated < max(1, total // 2):
+                lines.append(
+                    "- Fewer than half the claims are independently corroborated; "
+                    "some findings rest on a single publisher."
+                )
+        unknown = ctx.get("coverage_gaps")
+        if isinstance(unknown, (list, tuple)):
+            lines.extend(f"- {str(u).strip()}" for u in unknown[:5] if str(u).strip())
+        degraded = ctx.get("degraded") or []
+        if isinstance(degraded, list) and degraded:
+            lines.append(
+                "- Pipeline stages on deterministic fallback: "
+                f"{', '.join(str(x) for x in degraded)} — those sections are "
+                "extractive, not model-written."
+            )
+        if len(lines) == 2:
+            lines.append("- No specific limitations were measured for this evidence set.")
+        return "\n".join(lines)
+
+    if canonical == "Counterarguments & Disputed Points":
+        lines = ["## Counterarguments & Disputed Points", ""]
+        for c in (contradictions or [])[:5]:
+            if not isinstance(c, dict):
+                continue
+            a_text = str(c.get("claim_a", "") or "")[:140]
+            b_text = str(c.get("claim_b", "") or "")[:140]
+            if a_text and b_text:
+                suffix = (
+                    f" RESOLVED: {c.get('resolution', '')}" if c.get("resolved") else ""
+                )
+                lines.append(f"- \"{a_text}\" conflicts with \"{b_text}\".{suffix}")
+        findings = ctx.get("redteam_findings") or []
+        if isinstance(findings, list):
+            for item in findings[:5]:
+                if isinstance(item, dict):
+                    statement = str(item.get("statement", "") or "").strip()
+                    if statement:
+                        lines.append(f"- {statement}")
+        if len(lines) == 2:
+            lines.append("- No credible counterarguments or source conflicts were detected.")
+        return "\n".join(lines)
+
+    # Executive Summary fallback (only when the writer omitted it entirely).
+    confidence = ctx.get("confidence")
+    level = ""
+    try:
+        score = float(confidence)
+        level = f" Overall confidence: {'High' if score >= 0.75 else 'Medium' if score >= 0.5 else 'Low'} ({score:.2f})."
+    except (TypeError, ValueError):
+        level = ""
+    return (
+        "## Executive Summary\n\n"
+        f"This report synthesizes {verified} verified claim(s) from "
+        f"{total} extracted, drawing on the evidence graded above.{level}"
+    )
+
+
+def ensure_required_sections(
+    answer: str,
+    *,
+    ctx: Dict[str, Any],
+    usable_facts: Sequence[Dict[str, Any]],
+    contradictions: Sequence[Dict[str, Any]],
+    cited_facts: Sequence[Dict[str, Any]] = (),
+) -> str:
+    """Guarantee the five mandatory sections are present, adding any missing.
+
+    Deterministic and total. A missing section is appended from measured state
+    (never invented), so the writer cannot omit Limitations/unknowns or
+    counterarguments and ship a report that hides them. Existing, differently
+    titled sections that mean the same thing (e.g. "Evidence & Confidence")
+    satisfy the requirement and are left untouched.
+    """
+    if not answer:
+        return answer
+    present = _present_section_keys(answer)
+    missing = [
+        canonical
+        for canonical in REQUIRED_SECTIONS
+        if not any(alias in present for alias in _normalized_aliases(canonical))
+    ]
+    if not missing:
+        return answer
+    blocks: List[str] = []
+    for canonical in missing:
+        blocks.append(
+            _render_required_section(
+                canonical,
+                ctx=ctx,
+                usable_facts=usable_facts,
+                contradictions=contradictions,
+                cited_facts=cited_facts,
+            )
+        )
+    return answer.rstrip() + "\n\n" + "\n\n".join(blocks)
 
 
 # ---------------------------------------------------------------------------

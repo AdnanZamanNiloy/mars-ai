@@ -57,10 +57,10 @@ async def test_tavily_used_when_configured(monkeypatch, tmp_path):
     settings = _settings(tavily_api_key="tvly-real-key",
                          database_url=str(tmp_path / "t.db"))
     client = SearchClient(settings)
-    seen = {}
+    seen = {"queries": []}
 
     async def fake_tavily(self, query, query_domains=None, topic="general"):
-        seen["q"] = query
+        seen["queries"].append(query)
         return []
 
     async def boom_ddg(self, query):
@@ -74,7 +74,9 @@ async def test_tavily_used_when_configured(monkeypatch, tmp_path):
     monkeypatch.setattr(SearchClient, "_ddg_news", boom_ddg)
     monkeypatch.setattr(SearchClient, "_wiki", empty_wiki)
     await client._search("tavily routing probe query")
-    assert seen["q"] == "tavily routing probe query"
+    # The base question is always searched, and every contract now reserves a
+    # primary-source query slot (workstream A) — both reach the provider.
+    assert "tavily routing probe query" in seen["queries"]
 
 
 async def test_tavily_failure_falls_back_to_ddg(monkeypatch, tmp_path):
@@ -393,10 +395,10 @@ async def test_news_contract_uses_news_topic(monkeypatch, tmp_path):
     settings = _settings(tavily_api_key="tvly-real-key",
                          database_url=str(tmp_path / "t.db"))
     client = SearchClient(settings)
-    seen = {}
+    seen = {"queries": []}
 
     async def fake_tavily(self, query, query_domains=None, topic="general"):
-        seen["query"] = query
+        seen["queries"].append(query)
         seen["topic"] = topic
         return []
 
@@ -407,7 +409,9 @@ async def test_news_contract_uses_news_topic(monkeypatch, tmp_path):
     monkeypatch.setattr(SearchClient, "_tavily_search", fake_tavily)
     monkeypatch.setattr(SearchClient, "_wiki", empty_wiki)
     await client._search({"question": "central bank rates today", "search_type": "news"})
-    assert seen["query"] == "central bank rates today"
+    # The base question reaches Tavily verbatim (clean text, never str(dict)),
+    # alongside the reserved primary-source query now issued per contract.
+    assert "central bank rates today" in seen["queries"]
     assert "wiki_query" not in seen
     assert seen["topic"] == "news"
 

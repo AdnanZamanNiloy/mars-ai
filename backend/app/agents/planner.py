@@ -42,7 +42,7 @@ from app.core.llm import LLMClient
 from app.core.logging import get_logger
 from app.core.schemas import PlannerOutputModel, PlanningDirectiveModel
 
-from app.agents.sources import build_primary_source_query, primary_source_hints
+from app.agents.sources import build_dimension_primary_query, primary_source_hints
 
 logger = get_logger(__name__)
 
@@ -853,7 +853,7 @@ def _contract(
         "output_format": "structured_findings",
         "specialist": specialist,
         "preferred_domains": hints,
-        "primary_source_query": build_primary_source_query(question, search_type, domain),
+        "primary_source_query": build_dimension_primary_query(question, search_type, domain),
         "wave": 0,
         "sense": str(sense or "").strip(),
     }

@@ -87,6 +87,35 @@ class FactModel(BaseModel):
         except (TypeError, ValueError):
             return 0.0
 
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_fact_fields(cls, data: Any) -> Any:
+        """Accept the near-miss field names models actually emit.
+
+        Live summarizer output has used `text`/`statement` for the claim and
+        `url`/`cite`/`citation` for the source. Rejecting those over a key name
+        burned an LLM call and cascaded into the deterministic fallback (the
+        observed `[Summarizer] LLM contributed nothing usable` degradation).
+        Normalize the aliases to claim/source; a fact with no claim text at all
+        still fails `min_length=1` as before.
+        """
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        if not str(out.get("claim", "") or "").strip():
+            for alt in ("text", "statement", "fact", "sentence", "content"):
+                value = out.get(alt)
+                if isinstance(value, str) and value.strip():
+                    out["claim"] = value
+                    break
+        if not str(out.get("source", "") or "").strip():
+            for alt in ("url", "cite", "citation", "source_url", "link"):
+                value = out.get(alt)
+                if isinstance(value, str) and value.strip():
+                    out["source"] = value
+                    break
+        return out
+
 
 class SummarizerFactsModel(BaseModel):
     # An EMPTY facts list is a valid model outcome (the sources genuinely had
@@ -100,19 +129,26 @@ class SummarizerFactsModel(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _coerce_fact_lists(cls, data: Any) -> Any:
-        """Accept the shapes models actually return: a bare list, or the
-        list under `claims`/`results`/`items` instead of `facts` (observed
-        live: fast models answer in a near-miss schema). Rejecting a good
-        fact list over its key name wastes calls and quota, then cascades
-        into rate limits — normalize instead. Genuinely malformed payloads
-        (no list anywhere) still fail validation and retry as before."""
+        """Accept the shapes models actually return: a bare list, the list
+        under `claims`/`results`/`items` instead of `facts`, or a SINGLE fact
+        object (observed live: a model returned one fact for a narrow contract
+        without the array wrapper). Rejecting a good fact list over its key
+        name wastes calls and quota, then cascades into rate limits — normalize
+        instead. Genuinely malformed payloads (a dict with no recognizable list
+        key and no claim text) still fail validation and retry as before."""
         if isinstance(data, list):
             return {"facts": data}
         if isinstance(data, dict):
-            for key in ("facts", "claims", "results", "items"):
+            for key in ("facts", "claims", "results", "items", "findings", "data"):
                 value = data.get(key)
                 if isinstance(value, list):
                     return {"facts": value}
+                # A single fact object under one of those keys.
+                if isinstance(value, dict):
+                    return {"facts": [value]}
+            # The payload IS one fact object (has a claim-ish field).
+            if any(str(data.get(k, "") or "").strip() for k in ("claim", "text", "statement", "fact")):
+                return {"facts": [data]}
             # A dict with NO recognized list key is genuinely malformed
             # (e.g. {"nope": []}) — fail validation rather than silently
             # treating it as "no facts found".

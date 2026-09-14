@@ -457,13 +457,58 @@ def build_primary_source_query(
     """A `site:`-scoped variant of `question` aimed at primary publishers.
 
     Returns "" when no hint applies, so callers can skip the extra search
-    instead of firing a duplicate of the plain query.
+    instead of firing a duplicate of the plain query. Use
+    `build_dimension_primary_query` when a guaranteed primary-source query is
+    required for EVERY research dimension (see its docstring).
     """
     hints = primary_source_hints(search_type, domain)[: max(0, max_sites)]
     text = re.sub(r"\s+", " ", (question or "")).strip()
     if not text or not hints:
         return ""
     return f"{text} " + " OR ".join(f"site:{h}" for h in hints)
+
+
+def build_dimension_primary_query(
+    question: str,
+    search_type: str,
+    domain: str = "general",
+    max_sites: int = 2,
+    attempt: int = 0,
+) -> str:
+    """A primary-source query guaranteed for EVERY dimension.
+
+    `build_primary_source_query` returns "" when the (search_type, domain) pair
+    has no registered host hint — which, live, meant the dimensions whose
+    evidence is most likely to be secondary (comparative/exploratory angles)
+    never issued a targeted primary query at all, and the report's primary
+    share stayed low. This wrapper keeps the precise host scoping when a hint
+    exists, and otherwise falls back to the DETERMINISTIC authoritative
+    publisher registry (`site:gov/edu/int` + named agencies/journals) plus the
+    dimension's own primary-intent vocabulary. It therefore never fabricates a
+    query for an empty question, and always returns a usable one otherwise.
+
+    The result is what `_contract` stores as `primary_source_query`, so every
+    delegation contract reserves a primary/official retrieval slot (search's
+    `contract_queries` holds one for it) rather than only the dense statistical
+    and academic contracts.
+
+    `attempt` rotates the fallback hosts so successive expansion passes for a
+    dimension reach publishers an earlier pass did not.
+    """
+    text = re.sub(r"\s+", " ", (question or "")).strip()
+    if not text:
+        return ""
+    scoped = build_primary_source_query(text, search_type, domain, max_sites=max_sites)
+    if scoped:
+        return scoped
+    sites = authoritative_site_terms(max_sites=max(1, max_sites), offset=max(0, attempt))
+    if not sites:
+        return text
+    terms = primary_intent_terms(search_type) or AUTHORITATIVE_INTENT_TERMS
+    intent = " ".join(terms[:2])
+    site_clause = " OR ".join(f"site:{s}" for s in sites)
+    query = f"{text} {intent} ({site_clause})".strip() if intent else f"{text} ({site_clause})"
+    return re.sub(r"\s+", " ", query).strip()
 
 
 # ---------------------------------------------------------------------------

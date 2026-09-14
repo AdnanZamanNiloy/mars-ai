@@ -201,6 +201,51 @@ def _critic_survival(critique: Dict[str, Any], iteration: int, max_iterations: i
 DEGRADED_CAP = 0.55
 EXTRACTIVE_FALLBACK_AGENTS = frozenset({"summarizer", "synthesizer"})
 
+# A summarizer that fell back to heuristic extraction but whose pool is still
+# well-verified and independently corroborated is NOT a degraded evidence base:
+# the fallback is extractive, but the evidence pipeline (verification,
+# corroboration, grading) succeeded on it. Capping such a run to 0.55 punishes
+# good evidence for a formatting/parse failure. The cap therefore depends on
+# the evidence quality: it applies to the summarizer only when the pool is
+# actually weak. The synthesizer is different — an extractive REPORT is a
+# degraded product regardless of the pool, so it always caps.
+SUMMARIZER_CAP_MIN_CORROBORATED_RATIO = 0.30
+SUMMARIZER_CAP_MIN_VERIFIED_RATIO = 0.60
+
+
+def _summarizer_fallback_is_degraded(
+    facts: List[Dict[str, Any]],
+    contradictions: List[Dict[str, Any]] | None,
+) -> bool:
+    """Should a summarizer fallback cap confidence?
+
+    Returns True (cap) when the evidence pool is genuinely weak — no pool, no
+    verification, or fewer than a third of verified claims independently
+    corroborated by a second publisher. Returns False (do not cap) only when the
+    extractive pool is still verified AND independently corroborated: the
+    summarizer fell back to extraction, but the evidence pipeline (verification
+    + corroboration) succeeded on it, so the report is not a false-confidence
+    risk of the kind the cap exists for. Deterministic and total.
+    """
+    pool = [f for f in (facts or []) if isinstance(f, dict) and str(f.get("claim", "")).strip()]
+    if not pool:
+        return True
+    if not any("verified" in f for f in pool):
+        # Verification never ran: we cannot claim the extractive pool is good.
+        return False
+    verified = [f for f in pool if f.get("verified")]
+    if not verified:
+        return True
+    verified_ratio = len(verified) / len(pool)
+    if verified_ratio < SUMMARIZER_CAP_MIN_VERIFIED_RATIO:
+        return True
+    corroborated_ratio = sum(
+        1 for f in verified if int(f.get("corroboration_count", 1) or 1) >= 2
+    ) / len(verified)
+    if corroborated_ratio < SUMMARIZER_CAP_MIN_CORROBORATED_RATIO:
+        return True
+    return False
+
 
 def _axis_coverage(sub_questions: List[Dict[str, Any]] | None, facts: List[Dict[str, Any]]) -> float:
     """Covered research axes / planned axes.
@@ -382,9 +427,25 @@ def compute_confidence(
 
     degraded_agents = {str(a) for a in (degraded or []) if a}
     extractive = sorted(degraded_agents & EXTRACTIVE_FALLBACK_AGENTS)
-    if extractive:
+    # A synthesizer fallback is always a degraded PRODUCT; a summarizer fallback
+    # only caps when the evidence pool it produced is actually weak (see
+    # _summarizer_fallback_is_degraded). This keeps an extractive-but-well-
+    # corroborated run from being falsely capped at 0.55 while preserving the
+    # guard against genuinely degraded runs.
+    capping = []
+    for agent_name in extractive:
+        if agent_name == "synthesizer":
+            capping.append(agent_name)
+        elif _summarizer_fallback_is_degraded(facts, contradictions):
+            capping.append(agent_name)
+        else:
+            notes.append(
+                "summarizer ran on deterministic extraction, but the evidence "
+                "pool is verified and independently corroborated — no cap applied"
+            )
+    if capping:
         notes.append(
-            "confidence capped: " + ", ".join(extractive)
+            "confidence capped: " + ", ".join(capping)
             + " ran on deterministic extraction — claims are unrewritten source text"
         )
         overall = round(min(overall, DEGRADED_CAP), 3)

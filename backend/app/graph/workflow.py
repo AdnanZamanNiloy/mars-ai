@@ -375,6 +375,31 @@ def _claim_terms(claim: str, limit: int = 8) -> str:
     return " ".join(out)
 
 
+def _summary_claim_texts(state: ResearchState) -> List[str]:
+    """Claim texts the executive summary / key findings will draw on.
+
+    Budget targeting prefers these claims because they are the report's
+    headline: corroborating a fact the summary states changes the answer, while
+    corroborating a peripheral remark does not. Sourced from the state's own
+    synthesized answer / critique when present; empty when synthesis has not run
+    yet (expansions before the first synthesis simply rank on the other
+    signals). Deterministic and total.
+    """
+    texts: List[str] = []
+    answer = str(state.get("synthesized_answer", "") or "")
+    if not answer:
+        return texts
+    # Best-effort: the summary's own sentences are its claims. Kept bounded so
+    # matching stays cheap; never parsed with an LLM.
+    for raw in re.split(r"[\n.!?]+", answer):
+        line = raw.strip().lstrip("-*# ").strip()
+        if 20 <= len(line) <= 200:
+            texts.append(line)
+        if len(texts) >= 12:
+            break
+    return texts
+
+
 def _corroboration_queries(
     state: ResearchState, limit: int = 3, settings: Any | None = None
 ) -> tuple[List[str], Dict[str, Dict[str, Any]]]:
@@ -413,6 +438,25 @@ def _corroboration_queries(
         logger.warning("corroboration_grading_failed", error=str(exc), exc_info=exc)
         return [], {}
 
+    # Budget allocation (workstream B): when there are more single-source
+    # claims than the pass can query, IMPACT decides which ones get the scarce
+    # queries — quantitative claims, claims the executive summary uses, and
+    # high-corroboration-need claims first. `rank_completion_targets` is
+    # deterministic and returns [] on any grading failure, so the loop below
+    # keeps its historical order in that case.
+    target_order: Dict[str, Dict[str, Any]] = {}
+    try:
+        from app.core.evidence_completion import rank_completion_targets
+
+        summary_claims = _summary_claim_texts(state)
+        for passed in rank_completion_targets(
+            facts, state.get("contradictions") or [], summary_claims=summary_claims
+        ):
+            target_order[normalize_text(str(passed.get("claim", "")))] = passed
+    except Exception as exc:
+        logger.warning("completion_ranking_failed", error=str(exc), exc_info=exc)
+        target_order = {}
+
     settings = settings if settings is not None else get_settings_safe()
     max_attempts = max(1, int(getattr(settings, "max_corroboration_attempts", 2) or 2))
     registry: Dict[str, Dict[str, Any]] = {
@@ -421,8 +465,22 @@ def _corroboration_queries(
         if isinstance(v, dict)
     }
 
+    # Highest-impact claims first; any graded claim not in the ranked set keeps
+    # its original relative order after the ranked targets.
+    ordered = sorted(
+        graded,
+        key=lambda g: (
+            0
+            if normalize_text(
+                str(((g.get("evidence") or {}) if isinstance(g, dict) else {}).get("claim", ""))
+            )
+            in target_order
+            else 1
+        ),
+    )
+
     queries: List[str] = []
-    for g in graded:
+    for g in ordered:
         ev = g.get("evidence") if isinstance(g, dict) else None
         if not isinstance(ev, dict) or not ev.get("needs_corroboration"):
             continue
@@ -630,6 +688,27 @@ def _attach_evidence(
             out.append(dict(fact))
     return out
 
+
+
+def _measured_coverage_gaps(state: ResearchState) -> List[str]:
+    """Human-readable evidence gaps for the mandatory Limitations section.
+
+    Deterministic, from the graded pool (single-source/contradicted claims) and
+    the corroboration registry (claims whose procurement budget is spent and
+    which remain uncorroborated). Empty on any failure — a limitations section
+    with no measured gap is honest, a crash is not.
+    """
+    facts = [f for f in state.get("facts", []) or [] if isinstance(f, dict)]
+    gaps: List[str] = []
+    if facts:
+        try:
+            from app.core.evidence_grade import coverage_gaps_from_records, grade_claim
+
+            records = [grade_claim(f, contradictions=state.get("contradictions") or []) for f in facts]
+            gaps.extend(coverage_gaps_from_records(records))
+        except Exception as exc:
+            logger.warning("coverage_gaps_failed", error=str(exc), exc_info=exc)
+    return gaps[:8]
 
 
 def build_markdown_report(
@@ -1359,6 +1438,25 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         corroboration_queries, corroboration_registry = _corroboration_queries(
             state, settings=getattr(llm, "settings", None)
         )
+        # Primary-source completion (workstream A): a dimension whose evidence
+        # is thin on primary/official publishers gets a targeted primary query
+        # on the next pass. These reuse the same per-pass search channel as the
+        # corroboration queries (never a new research loop) and are appended
+        # after them so claim-specific procurement keeps priority.
+        try:
+            from app.core.evidence_completion import primary_source_followups
+
+            attempt = max(0, int(state.get("iteration", 0)))
+            for q in primary_source_followups(
+                state.get("facts", []) or [],
+                state.get("sub_questions", []) or [],
+                limit=2,
+                attempt=attempt,
+            ):
+                if q not in corroboration_queries:
+                    corroboration_queries.append(q)
+        except Exception as exc:
+            logger.warning("primary_followup_generation_failed", error=str(exc), exc_info=exc)
         for q in corroboration_queries:
             if q not in improved:
                 improved.append(q)
@@ -1409,6 +1507,9 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             # Answer-first outline inputs: the plan's axes are the query's
             # dimensions; the synthesizer turns them into the report's shape.
             "sub_questions": state.get("sub_questions", []),
+            # Mandatory-section inputs: measured coverage gaps so the
+            # limitations section is populated from real deficiencies.
+            "coverage_gaps": _measured_coverage_gaps(state),
         }
         # Evidence grades (Step 4): the measured quality distribution drives
         # the writer's epistemic labeling. Computed once, failure-safe.

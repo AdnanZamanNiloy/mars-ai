@@ -54,7 +54,7 @@ from app.agents.sources import canonical_url, classify_source
 
 logger = get_logger(__name__)
 
-PROMPT_VERSION = "summarizer-v16"  # BUMP on any claim-shape change: the cache
+PROMPT_VERSION = "summarizer-v17"  # BUMP on any claim-shape change: the cache
 # key embeds this, and stale entries would otherwise serve pre-fix claims.
 # v14: output schema in the prompt matches the parser; smaller prompt footprint.
 # v15: wider extraction window (12 sources, 1000-char excerpts).
@@ -64,6 +64,9 @@ PROMPT_VERSION = "summarizer-v16"  # BUMP on any claim-shape change: the cache
 # under a token budget instead of hard-truncated, facts carry publish date /
 # search_type / primary flag / extracted numbers, and the cache key includes the
 # specialist role.
+# v17: JSON resilience — fenced/prose-wrapped/alternate-key/single-object
+# payloads are normalized before deterministic extraction, and one tightened
+# "return ONLY JSON" retry recovers a 200-OK-but-unparseable model response.
 
 # Specialist prompt additions: routed by the delegation contract's domain. Each
 # specialist is the generic summarizer plus a domain evidence-preference
@@ -521,6 +524,51 @@ async def summarizer_agent(
                 logger.warning("[Summarizer] LLM call failed, using heuristic fallback", exc_info=exc)
                 fallback_reason = "llm_error"
                 break
+        # One tightened retry: the provider returned HTTP 200 but the payload
+        # failed to parse into usable facts (fences, leading prose, alternate
+        # keys, a single object, or partial JSON). A stricter "ONLY JSON" user
+        # prompt — at the smallest excerpt budget so it transmits fast — often
+        # succeeds where the first, looser prompt did not. This is the fix for
+        # live `degraded: ['summarizer']` runs whose reason was "LLM
+        # contributed nothing usable". Never more than one retry (budget rule),
+        # and NEVER after a provider timeout / outage / oversize rejection:
+        # those are transport failures a format-tightening retry cannot fix and
+        # would only re-spend the wall-clock the timeout rule protects.
+        if not facts and fallback_reason not in (
+            "provider_timeout", "providers_unavailable", "payload_too_large",
+        ):
+            compact_results = _allocate_excerpts(
+                quality_results, _EXCERPT_BUDGET_LADDER[-1]
+            )
+            strict_prompt = (
+                f"Research query: {query}\n\n"
+                f"{sense_block}"
+                f"{prior_block}"
+                f"Sources ({len(compact_results)}):\n{compact_results}\n\n"
+                "Return ONLY a single JSON object. No markdown, no code fences, "
+                "no explanation before or after it. Use exactly this schema with "
+                "the key \"facts\" and a JSON array:\n"
+                '{"facts": [{"claim": "...", "source": "https://...", '
+                '"confidence": 0.0, "direct_quote": "..."}]}\n'
+                "Every \"source\" MUST be one of the url values above, copied "
+                "exactly. Do not add any other top-level keys."
+            )
+            try:
+                payload = await llm.generate_json(
+                    system_prompt,
+                    strict_prompt,
+                    response_model=SummarizerFactsModel,
+                )
+                facts = payload.get("facts", []) if isinstance(payload, dict) else []
+                if facts:
+                    logger.info(
+                        "[Summarizer] strict JSON retry recovered %d fact(s)", len(facts)
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "[Summarizer] strict JSON retry failed: %s", str(exc)[:140],
+                    exc_info=exc,
+                )
         if not facts:
             logger.warning("[Summarizer] LLM contributed nothing usable, using heuristic fallback")
         # Cache only successful, non-empty extractions: caching the empty list on
