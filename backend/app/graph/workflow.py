@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import re
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional, Sequence, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
@@ -690,15 +690,91 @@ def _attach_evidence(
 
 
 
+# Minimum semantic similarity for a fact to count as part of the query's own
+# evidence pool. Calibrated on live off-topic bleed: on-topic claims for a
+# short query scored 0.07-0.24, unrelated domains (Iran nuclear, NBER
+# clientelism) scored 0.00-0.02. Well below the on-topic band and above the
+# noise floor.
+IN_SCOPE_SIMILARITY = 0.04
+
+
+def _query_inscope_facts(
+    facts: List[Dict[str, Any]], query: str, senses: Sequence[str] = ()
+) -> List[Dict[str, Any]]:
+    """The query's OWN evidence pool: facts topically about the query.
+
+    Live reports leaked unrelated claims into the Limitations list (Iran's
+    nuclear programme, an NBER paper on clientelism — on a "What is a
+    transformer?" query) because this pool was the raw `state["facts"]`: every
+    sub-question's evidence, including off-domain material a search pass
+    happened to fetch. Limitations and the evidence scoring must describe THIS
+    query's evidence, not every domain the run touched.
+
+    Reuses the EXISTING relevance machinery rather than adding a new system:
+    word overlap (`claim_query_overlap` + `MIN_QUERY_OVERLAP`, the summarizer's
+    own filter) OR the shared TF-IDF hybrid engine's similarity
+    (`app.core.semantic`, the same engine section ranking and corroboration
+    trust). A fact is in scope when it clears either bar against the query or
+    any of the query's disambiguation senses (an ambiguous term's second
+    meaning is genuinely in scope). The filter is all-or-nothing-safe: if it
+    would leave nothing, the original pool is returned unchanged so a
+    limitations section is never starved (AGENTS.md 4.7).
+    """
+    if not facts:
+        return []
+    try:
+        from app.agents.evidence_utils import MIN_QUERY_OVERLAP, claim_query_overlap
+
+        scope_texts = [str(t) for t in (query, *senses) if str(t or "").strip()]
+        if not scope_texts:
+            return facts
+        claims = [str(f.get("claim", "") or "") for f in facts]
+        # Semantic similarity is the stronger signal for a SHORT query, where
+        # word overlap is stopword noise ("What is a transformer?" -> "a").
+        try:
+            from app.core.semantic import rank_by_similarity
+
+            semantic: List[float] = [0.0] * len(claims)
+            for text in scope_texts:
+                scores = rank_by_similarity(text, claims)
+                semantic = [max(a, float(b)) for a, b in zip(semantic, scores)]
+            inscope = [f for i, f in enumerate(facts) if semantic[i] >= IN_SCOPE_SIMILARITY]
+        except Exception as exc:  # noqa: BLE001 - fall back to word overlap
+            logger.warning("query_inscope_semantic_failed", error=str(exc), exc_info=exc)
+            inscope = [
+                f
+                for i, f in enumerate(facts)
+                if max(
+                    (claim_query_overlap(t, claims[i]) for t in scope_texts),
+                    default=0.0,
+                )
+                >= MIN_QUERY_OVERLAP
+            ]
+        return inscope or facts
+    except Exception as exc:  # noqa: BLE001 - isolation must never break a run
+        logger.warning("query_inscope_filter_failed", error=str(exc), exc_info=exc)
+        return facts
+
+
 def _measured_coverage_gaps(state: ResearchState) -> List[str]:
     """Human-readable evidence gaps for the mandatory Limitations section.
 
     Deterministic, from the graded pool (single-source/contradicted claims) and
     the corroboration registry (claims whose procurement budget is spent and
-    which remain uncorroborated). Empty on any failure — a limitations section
-    with no measured gap is honest, a crash is not.
+    which remain uncorroborated). Only the query's OWN evidence pool is graded,
+    so an unrelated domain's facts cannot surface as this report's limitations.
+    Empty on any failure — a limitations section with no measured gap is honest,
+    a crash is not.
     """
     facts = [f for f in state.get("facts", []) or [] if isinstance(f, dict)]
+    if facts:
+        intent = state.get("intent") or {}
+        senses = [
+            str(s.get("label", "") or "")
+            for s in (intent.get("senses") or [])
+            if isinstance(s, dict)
+        ]
+        facts = _query_inscope_facts(facts, str(state.get("query", "") or ""), senses)
     gaps: List[str] = []
     if facts:
         try:

@@ -510,3 +510,176 @@ def test_move_phrasing_matches_move_not_generic_template():
     # The chosen move is actually present in each phrasing.
     for move, text in outputs.items():
         assert move in reasoning_moves(text), (move, text)
+
+
+# ---------------------------------------------------------------------------
+# Bug 1 regression — adaptive-moves boilerplate injected into label bullets
+# ---------------------------------------------------------------------------
+# Live pilot evidence: on 4/6 queries the refinement pass appended generic move
+# clauses into nearly every Key-Figures bullet, e.g.
+#   "- SWE-bench Verified frontier performance: 60% rising to near 100% within
+#    a single year [2], and the underlying mechanism is that the earlier
+#    conditions compound, which forces the trade-offs described here."
+# These are label/value bullets (a label, a colon, a value list), not prose
+# restatements, so the refinement layer must leave them intact.
+
+# The exact corrupted strings observed in the live report.
+_CORRUPT_CLAUSES = (
+    "the underlying mechanism is that the earlier conditions compound",
+    "the cause behind that established point",
+    "reading that figure for its consequences",
+)
+
+
+_LABEL_BULLETS = (
+    "SWE-bench Verified frontier performance: 60% rising to near 100% within a single year [2].",
+    "U.S.–China top-model performance gap: 2.7%, as of March 2026 [2].",
+    "Organizational AI adoption: 88%; university students using generative AI: four in five [2].",
+    "Sector AI automation risk scores: financial services 62, information technology 58, "
+    "administrative & support services 55; healthcare support 24, construction 28, surgeons 8 [11].",
+    "UpstreamBench v0.1 size: 7,440 questions across 372 technical reference books [4].",
+    "German firm survey base: over 7,000 manufacturing and services firms, Q2 2025 [3].",
+    "SpaceX–Cursor acquisition value: $60 billion in stock, expected to close Q3 2026 [14].",
+)
+
+
+def test_label_bullets_are_not_refined():
+    """Bug 1: a label/value bullet (no finite verb before the delimiter) is a
+    fragment, not a prose restatement, and must never receive a move clause."""
+    from app.core.synthesis_intelligence import _is_refinable_sentence
+
+    for bullet in _LABEL_BULLETS:
+        assert _is_refinable_sentence(bullet) is False, bullet
+
+
+def test_bold_label_bullet_is_not_refined():
+    """Bug 1: a bold label + value/title bullet is left intact."""
+    from app.core.synthesis_intelligence import _is_refinable_sentence
+
+    assert _is_refinable_sentence(
+        "**$12.65 billion** — reported cost of the project [1]."
+    ) is False
+
+
+def test_label_bullets_are_not_corrupted_end_to_end():
+    """Bug 1 acceptance: a Key Figures section repeated across sections keeps
+    every label bullet verbatim; no corrupt clause is injected anywhere."""
+    body = "\n".join(f"- {b}" for b in _LABEL_BULLETS)
+    answer = _report(("Key Figures", body), ("More Figures", body))
+    compressed, report = apply_synthesis_intelligence(answer, protect_headings=MACHINE)
+
+    # No label bullet was transformed and none was dropped.
+    assert report.refined_transitions == 0
+    for bullet in _LABEL_BULLETS:
+        assert bullet in compressed, bullet
+    for clause in _CORRUPT_CLAUSES:
+        assert clause not in compressed.lower(), clause
+
+
+def test_genuine_prose_restatement_is_still_refined():
+    """Bug 1 guard must not over-reject: a real prose restatement is refined."""
+    from app.core.synthesis_intelligence import _is_refinable_sentence
+
+    prose = (
+        "The defining architectural choice is subtractive: the Transformer relies "
+        "entirely on attention mechanisms [1]."
+    )
+    assert _is_refinable_sentence(prose) is True
+    ledger = ClaimLedger()
+    ledger.register("S1", prose)
+    outcome = ledger.refine("S2", prose)
+    assert outcome.transformed is True
+
+
+def test_already_refined_sentence_is_not_refined_twice():
+    """Bug 1: a sentence that already carries a move transition must not be
+    refined again (no double-appending)."""
+    from app.core.synthesis_intelligence import _is_refinable_sentence
+
+    refined = refine_restatement(
+        "Rooppur costs about US$13 billion [3].",
+        prior_section="What It Is",
+        move="implication",
+    )
+    assert _is_refinable_sentence(refined) is False
+    # End-to-end: re-running the layer on its own output is idempotent.
+    answer = _report(("What It Is", refined), ("Cost", refined))
+    compressed, _ = apply_synthesis_intelligence(answer, protect_headings=MACHINE)
+    assert compressed.count("Building on") <= 2  # the two originals, no new ones
+    for clause in _CORRUPT_CLAUSES:
+        assert clause not in compressed.lower()
+
+
+# ---------------------------------------------------------------------------
+# Bug 2 regression — off-topic source bleed into Limitations/evidence
+# ---------------------------------------------------------------------------
+# Live pilot evidence: MARS's Limitations list carried unrelated items (Iran
+# nuclear, NBER clientelism, Shell PLC, SpaceX) on a "What is a transformer?"
+# query. Limitations and evidence scoring must draw only from the query's own
+# evidence pool.
+
+_OFF_TOPIC_FACTS = (
+    "It houses a heavily fortified tunnel facility associated with Iran's nuclear program [3].",
+    "NBER WORKING PAPER SERIES CLIENTELISM: HOW IT WORKS, WHY IT PERSISTS AND HOW TO BREAK IT [4].",
+    "However, a core challenge is that the actions and competence of politicians are not "
+    "fully observable to citizens and the paper models that agency problem [5].",
+)
+
+_ON_TOPIC_FACTS = (
+    "The transformer uses multi-head self-attention to process sequences [1].",
+    "A transformer changes AC voltage levels through electromagnetic induction [2].",
+)
+
+
+def test_coverage_gaps_exclude_off_topic_facts():
+    """Bug 2: gaps for Limitations name only claims from the query's own pool."""
+    from app.graph.workflow import _query_inscope_facts
+
+    facts = [{"claim": c} for c in (*_ON_TOPIC_FACTS, *_OFF_TOPIC_FACTS)]
+    inscope = _query_inscope_facts(
+        facts,
+        "What is a transformer?",
+        ["Transformer neural network architecture", "Electrical transformer"],
+    )
+    kept = {f["claim"] for f in inscope}
+    assert set(_ON_TOPIC_FACTS) <= kept
+    for off in _OFF_TOPIC_FACTS:
+        assert off not in kept, off
+
+
+def test_measured_coverage_gaps_have_no_off_topic_sources():
+    """Bug 2 end-to-end: the Limitations gap strings never name the off-topic
+    Iran/NBER/politics claims on a transformer query."""
+    from app.graph.workflow import _measured_coverage_gaps
+
+    state = {
+        "query": "What is a transformer?",
+        "intent": {
+            "senses": [
+                {"label": "Transformer neural network architecture"},
+                {"label": "Electrical transformer"},
+            ]
+        },
+        "facts": [
+            {
+                "claim": c,
+                "source": "https://example.org/x",
+                "corroboration_count": 1,
+                "verified": True,
+            }
+            for c in (*_ON_TOPIC_FACTS, *_OFF_TOPIC_FACTS)
+        ],
+    }
+    gaps = " ".join(_measured_coverage_gaps(state)).lower()
+    assert gaps  # a single-source pool still reports honest gaps
+    for token in ("iran", "nber", "clientelism", "politicians"):
+        assert token not in gaps, (token, gaps)
+
+
+def test_inscope_filter_never_starves_limitations():
+    """Bug 2 safety: if nothing clears the relevance bar, the original pool is
+    returned rather than emptied (AGENTS.md 4.7 — no starved section)."""
+    from app.graph.workflow import _query_inscope_facts
+
+    facts = [{"claim": c} for c in _OFF_TOPIC_FACTS]
+    assert _query_inscope_facts(facts, "What is a transformer?", []) == facts

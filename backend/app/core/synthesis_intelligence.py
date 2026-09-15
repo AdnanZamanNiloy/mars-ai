@@ -833,9 +833,102 @@ def refine_restatement(
 # this layer exists to fix.
 _FRAGMENT_RE = re.compile(r"^\s*(?:\*\*|[-*]\s|\d+\)\s|[a-z])")
 
+# Label/value bullets are the OTHER non-prose shape that leaked through the
+# first guard: a Key-Figures line whose subject is a label and whose body is a
+# value or title list, e.g. "SWE-bench Verified frontier performance: 60%
+# rising to near 100% within a single year [2]." or "Organizational AI
+# adoption: 88%; university students using generative AI: four in five [2]."
+# They start uppercase and end with a period, so the fragment check above
+# misses them, and the refinement pass then spliced move clauses into nearly
+# every Key-Figures bullet in live reports (AGENTS.md: adaptive-moves
+# boilerplate corruption). The discriminator is a colon-delimited label with NO
+# finite verb before the delimiter — a sentence ("The defining choice is
+# subtractive: …") has one, a label ("Frontier performance: …") does not.
+_LABEL_DELIM_RE = re.compile(r"[:—]")
+
+
+def _has_finite_verb(text: str) -> bool:
+    """Conservative test for a finite (tensed) verb in a LABEL HEAD.
+
+    Only copulas/auxiliaries/modals count. A label/value head is a bare noun
+    phrase ("frontier performance", "risk scores", "survey base"); a real
+    sentence's head carries a tensed form ("the choice is subtractive"). Being
+    strict here is correct: a head with no auxiliary is a label, and refining a
+    label is exactly the corruption this guard prevents. A genuine sentence
+    without a colon never reaches this check.
+    """
+    return any(
+        word.lower() in _AUXILIARY_VERBS
+        for word in re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", text or "")
+    )
+
+
+# Copulas / auxiliaries / modals: their presence alone is a finite clause.
+_AUXILIARY_VERBS: Set[str] = {
+    "is", "are", "was", "were", "be", "been", "being", "am",
+    "has", "have", "had", "do", "does", "did",
+    "will", "would", "shall", "should", "can", "could", "may", "might",
+    "must", "cannot", "isn't", "aren't", "wasn't", "weren't", "doesn't",
+    "don't", "didn't", "hasn't", "haven't", "hadn't",
+}
+
+# The opening of a refined sentence: the deterministic post-condition is that a
+# refinement begins with one of these transitions, so a sentence already
+# carrying one must never be refined again (Bug: double-appending the move
+# clause to an already-refined line).
+_TRANSITION_MARKERS: Tuple[str, ...] = tuple(
+    phrase for phrases in _TRANSITION_BY_MOVE.values() for phrase in phrases
+)
+
+
+def _is_already_refined(sentence: str) -> bool:
+    """True when the sentence already carries a refinement transition.
+
+    Checks the first twelve words only: the transition opens the sentence, so a
+    genuine prose sentence that happens to contain similar words later is not
+    mistaken for an already-refined line. This is the no-double-append guard.
+    """
+    head = " ".join((sentence or "").split()[:12]).lower()
+    if not head:
+        return False
+    return any(marker.lower() in head for marker in _TRANSITION_MARKERS)
+
+
+def _is_label_bullet(sentence: str) -> bool:
+    """True when the line is a label/value or title fragment, not prose.
+
+    Rejects a colon- or em-dash-delimited label whose head carries no finite
+    verb ("Frontier performance: 60% …", "Survey base: 7,000 firms") and a very
+    short unit that cannot carry a full clause. A real sentence with a colon
+    ("The choice is subtractive: …") has a finite verb in its head and passes.
+    """
+    stripped = (sentence or "").strip()
+    if not stripped:
+        return False
+    # A bold-only label line, or a value line led by a number/bullet glyph.
+    if _FRAGMENT_RE.match(stripped):
+        return True
+    # Too few content words to be a full prose sentence.
+    if len(stripped.split()) < 6:
+        return True
+    delim = _LABEL_DELIM_RE.search(stripped)
+    if delim is not None:
+        head = stripped[: delim.start()].strip()
+        # The label lives before the first delimiter; if there is no finite verb
+        # there, the line is a label/value fragment.
+        if head and not _has_finite_verb(head):
+            return True
+    return False
+
 
 def _is_refinable_sentence(sentence: str) -> bool:
-    """True when `sentence` is a full prose sentence worth transforming."""
+    """True when `sentence` is a full prose sentence worth transforming.
+
+    Only genuine PROSE restatements qualify. Label bullets, title/value
+    fragments, short units, and lines that already carry a move clause are left
+    intact — refining them splices an analytical clause onto a label and
+    corrupts the report (the live Key-Figures failure this guard exists for).
+    """
     stripped = (sentence or "").strip()
     if not stripped:
         return False
@@ -843,7 +936,13 @@ def _is_refinable_sentence(sentence: str) -> bool:
         return False
     if not stripped[-1:] in ".!?":
         return False
-    return len(stripped.split()) >= 6
+    if len(stripped.split()) < 6:
+        return False
+    if _is_already_refined(stripped):
+        return False
+    if _is_label_bullet(stripped):
+        return False
+    return True
 
 
 def _is_sentence_unit(line: str) -> bool:
