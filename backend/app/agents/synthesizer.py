@@ -103,9 +103,13 @@ _REASONING_DEPTH_INSTRUCTION = (
     "- Do NOT open with, or repeat, a fact already given in plain form. A fact "
     "may be re-used ONLY to add something new about it: the mechanism behind "
     "it, its implication or trade-off, a comparison, or why it is uncertain.\n"
-    "- State each fact once, then spend the section on what it means. If you "
-    "have nothing new to add about a fact, omit it entirely rather than repeat "
-    "it — a shorter section that reasons beats a longer one that recites.\n"
+    "- If a fact must reappear for the section's argument, EXPAND it in place: "
+    "keep its number and context, and attach the new meaning — never restate "
+    "it bare and never open a section on a restatement.\n"
+    "- State each fact once in its plain form, then spend the section on what "
+    "it means. A repeat that carries no new analysis is a defect: a "
+    "deterministic refinement pass will rewrite it into a transition, and the "
+    "section will read as boilerplate rather than argument.\n"
     "- Never drop or renumber a [n] marker attached to a fact you keep."
 )
 
@@ -580,11 +584,11 @@ async def synthesize(
         contradictions=contradictions,
         cited_facts=cited_facts,
     )
-    # Cross-section repetition pass (deterministic; no LLM). Runs AFTER the
+    # Cross-section refinement pass (deterministic; no LLM). Runs AFTER the
     # required sections exist (so Key Findings is registered as a recap) and
-    # BEFORE the trim (so removed restatements free word budget). Retained
-    # sentences keep their exact [n] markers; removed ones take theirs away.
-    answer, _si_report = apply_synthesis_intelligence_pass(answer)
+    # BEFORE the trim. A bare restatement is transformed into a transition +
+    # analysis sentence (never deleted) and keeps its exact [n] markers.
+    answer, _si_report = apply_synthesis_intelligence_pass(answer, ctx)
     answer = _trim_to_band(answer, mode)
     audit = audit_citations(answer, numbered, cited_facts)
 
@@ -615,24 +619,36 @@ def _normalize_heading(text: str) -> str:
 
 def apply_synthesis_intelligence_pass(
     answer: str,
+    ctx: Dict[str, Any] | None = None,
 ) -> tuple[str, SynthesisIntelligenceReport]:
-    """Run the deterministic cross-section repetition layer on an assembled draft.
+    """Run the deterministic cross-section refinement layer on an assembled draft.
 
     Protected (machine-appended) sections are left whole — they describe
     measured state. Executive Summary and Key Findings are RECAP sections:
     their own text is preserved, but their claims are registered so deep-dive
-    sections cannot restate them. Every other writer section is compressed
-    against the ledger (first occurrence keeps its citation; a repeat survives
-    only with a new analytical dimension). No LLM; never empties the report.
+    sections cannot restate them. Every other writer section is refined
+    against the ledger: the first occurrence keeps its citation, an expansion
+    with a new analytical dimension is kept intact, and a bare restatement is
+    REWRITTEN into a contextual transition + analysis sentence (never deleted),
+    so a section opening can never dangle. Evidence signals from `ctx`
+    (contradictions, corroboration, primary share) select the analytical
+    dimension; the transformation runs with no LLM and never empties a section.
     """
     from app.agents.sources import MACHINE_SECTIONS
 
     protected = tuple(MACHINE_SECTIONS) + ("## Limitations", "## Evidence & Confidence")
     recap = ("## Executive Summary", "## Key Findings")
+    ctx = ctx or {}
+    signals = {
+        "contradicted": bool(ctx.get("contradictions")),
+        "corroborated": bool(ctx.get("corroborated")),
+        "primary": bool(ctx.get("primary_share")),
+    }
     return apply_synthesis_intelligence(
         answer,
         protect_headings=protected,
         recap_headings=recap,
+        signals=signals,
     )
 
 
@@ -1026,8 +1042,9 @@ async def _synthesize_sectioned(
     )
     # Section-wise reports are exactly where cross-section restatement lives
     # (each section was written blind to its siblings): run the deterministic
-    # repetition pass before the trim, preserving every [n] on kept facts.
-    answer, _si_report = apply_synthesis_intelligence_pass(answer)
+    # refinement pass before the trim — a repeated opening becomes a transition,
+    # never a deleted sentence, and every [n] marker is preserved.
+    answer, _si_report = apply_synthesis_intelligence_pass(answer, ctx)
     answer = _trim_to_band(answer, mode)
     audit = audit_citations(answer, numbered, cited_facts)
     if audit.invalid_markers:

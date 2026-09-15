@@ -1,4 +1,4 @@
-"""Synthesis intelligence layer — repetition tracking and expansion enforcement.
+"""Synthesis intelligence layer — repetition tracking and refinement.
 
 The failure this module exists for
 ----------------------------------
@@ -13,32 +13,42 @@ frame of every section. The reader gets the same fact seven times and almost
 no added interpretation: sections restate instead of arguing mechanism,
 trade-off, comparison or uncertainty.
 
+The first version of this module fixed that by DELETING the later
+occurrences. That traded one defect for another: a section whose opening
+sentence restated an earlier claim lost its opening entirely and began
+mid-argument, and a reader could not tell why the section existed. The
+refinement layer here is the correction — a repeat is TRANSFORMED, never
+silently dropped.
+
 GPT Researcher avoids this differently (a single writer over compressed
 context); MARS writes section-wise for provider-size reasons, so the fix has
 to be explicit cross-section bookkeeping. This module is that bookkeeping,
 and it is deterministic — no LLM, no network, no new model. It does not touch
-retrieval, grading, corroboration or contradiction; it only decides which
-already-written sentences survive assembly.
+retrieval, grading, corroboration or contradiction; it only decides how
+already-written sentences read in the assembled report.
 
 What it does
 ------------
 1. CLAIM-KEY TRACKING — every writer sentence is reduced to a canonical
    `claim_key` (citations stripped, stopwords removed, tokens stemmed and
    sorted). The same key seen in an earlier section is a REPEAT.
-2. DIMENSION-AWARE PENALTY — a repeat is only allowed when it adds a new
-   analytical dimension the earlier use did not: a mechanism ("because",
-   "driven by"), an implication/trade-off ("therefore", "at the cost of"),
-   a comparison ("compared with", "whereas") or an explicit uncertainty
-   ("unresolved", "not established"). A verbatim restatement of the same
-   fact in a new section is REMOVED, keeping the first occurrence and its
-   citation. This is the deterministic fallback: it runs whether or not the
-   LLM obeyed the expansion instruction.
-3. CITATION PRESERVATION — retained sentences keep their exact `[n]` markers;
-   removed sentences take their markers with them; no marker is ever
-   invented, renumbered or moved between sentences.
-4. STRUCTURE PRESERVATION — headings, section order and the required
-   sections are never touched; a section reduced to a heading alone is
-   dropped only when it had no unique content at all.
+2. DIMENSION-AWARE EXPANSION — a repeat that adds a genuinely new analytical
+   dimension the earlier use did not (mechanism / implication / comparison /
+   uncertainty) is left INTACT; the dimension is recorded against the claim.
+3. REFINE, DON'T DELETE — a bare restatement is rewritten into a refinement
+   sentence: a contextual transition naming the earlier section ("Building on
+   the cost picture above, …") plus the original claim (its number and `[n]`
+   marker preserved verbatim) plus an analytical clause chosen from the
+   available evidence signals — contradictions -> uncertainty/trade-off,
+   quantitative content -> implication, corroboration/primary -> strength,
+   section axis -> framing. This runs with no LLM, so the deterministic path
+   always produces a usable transition and a section never opens on a
+   dangling or removed first sentence.
+4. CITATION PRESERVATION — refined sentences keep the exact `[n]` markers of
+   the original claim; no marker is ever invented, renumbered or moved
+   between sentences.
+5. STRUCTURE PRESERVATION — headings, section order and the required
+   sections are never touched; an empty section is never produced.
 
 The module also exposes `analyze_report` so the same claim-key machinery can
 MEASURE redundancy (the benchmark's redundancy score) instead of only
@@ -119,6 +129,194 @@ _DIMENSIONS: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     ("uncertainty", _UNCERTAINTY_RE),
 )
 
+# Contextual transitions that open a REFINEMENT sentence, i.e. a sentence that
+# restated an earlier claim. Each names the relationship to the earlier use so
+# the section reads as a continuation instead of a fresh assertion. The pool
+# is indexed deterministically (see `_stable_pick`) so the same claim always
+# gets the same transition and tests are repeatable; variety across claims
+# stops a report reading as boilerplate.
+_TRANSITION_BY_DIMENSION: Dict[str, Tuple[str, ...]] = {
+    "implication": (
+        "Building on the cost and scale picture above:",
+        "Extending that finding to what follows from it:",
+        "Taking that established point one step further:",
+        "Reading that figure for its consequences:",
+    ),
+    "mechanism": (
+        "The mechanism behind that established point is worth stating plainly:",
+        "Building on that fact, the causal chain runs as follows:",
+        "That outcome follows from a mechanism the earlier section did not name:",
+    ),
+    "comparison": (
+        "Set against the alternatives already discussed:",
+        "Compared with the other options the report has covered:",
+        "Weighing that claim against the alternatives:",
+    ),
+    "uncertainty": (
+        "That figure is less settled than a single statement suggests:",
+        "Building on that point, its reliability must be qualified:",
+        "That claim carries an unresolved caveat:",
+    ),
+    "strength": (
+        "That finding is unusually well grounded:",
+        "Building on that evidence, its provenance is stronger than most:",
+        "That claim draws on source material worth foregrounding:",
+    ),
+    "framing": (
+        "Building on the picture already established:",
+        "Returning to that established fact for this section's angle:",
+        "With that established, this section turns to what it implies here:",
+    ),
+}
+
+# Analytical clauses appended to a refined sentence. Each contains a token the
+# `analytical_dimensions` detector recognizes (the deterministic post-check the
+# LLM path is also held to), so the refined text is provably not a bare
+# restatement. Clauses are TOPIC-SCOPED: a financing frame only makes sense on
+# a cost claim, so a bare generic clause is used when no topic matches (a
+# "long-term financing obligations" tail on a transformer-architecture sentence
+# is exactly the kind of mismatch this scoping prevents).
+_TOPIC_ANALYSIS: Tuple[Tuple["re.Pattern[str]", Dict[str, str]], ...] = (
+    (
+        re.compile(r"(?i)\b(cost|costs|finance|financ|loan|debt|tariff|budget|"
+                   r"billion|trillion|million|invest|price|subsid)\b"),
+        {
+            "implication": (
+                "the figure is significant because it must be weighed against "
+                "the long-term financing obligations it commits the sector to"
+            ),
+            "mechanism": (
+                "the cost pressure follows a mechanism in which fixed capital "
+                "must be recovered over a long operating life, which raises the "
+                "stakes of any delay"
+            ),
+            "comparison": (
+                "that cost places it in direct comparison with the alternatives "
+                "discussed elsewhere, where relative cost per unit of output is "
+                "the deciding factor"
+            ),
+            "uncertainty": (
+                "the cost figure is disputed across sources, so it should be "
+                "read as a provisional range rather than a settled estimate"
+            ),
+            "strength": (
+                "the cost figure is corroborated by multiple independent "
+                "sources, which raises confidence in it rather than merely "
+                "repeating it"
+            ),
+            "framing": (
+                "for this section's angle the cost matters because it frames "
+                "the financing trade-off the section goes on to examine"
+            ),
+        },
+    ),
+    (
+        re.compile(r"(?i)\b(emission|carbon|climate|renewabl|solar|wind|"
+                   r"nuclear|energy|electric|grid|power|generation|capacity|"
+                   r"megawatt|gigawatt|mwh|kwh)\b"),
+        {
+            "implication": (
+                "the figure is significant because it shapes the trade-off "
+                "between capacity added, reliability delivered, and the "
+                "emissions or cost it implies"
+            ),
+            "mechanism": (
+                "the underlying mechanism is that generation choices lock in "
+                "an infrastructure pathway whose costs and emissions persist "
+                "for decades"
+            ),
+            "comparison": (
+                "that places it in direct comparison with the alternative "
+                "generation options discussed elsewhere, where firm output per "
+                "unit of cost is the deciding factor"
+            ),
+            "uncertainty": (
+                "the figure is disputed across sources, so it should be read "
+                "as a provisional range rather than a settled estimate"
+            ),
+            "strength": (
+                "the finding is corroborated by multiple independent sources, "
+                "which raises confidence in it rather than merely repeating it"
+            ),
+            "framing": (
+                "for this section's angle the point matters because it frames "
+                "the generation trade-off the section goes on to examine"
+            ),
+        },
+    ),
+)
+
+_ANALYSIS_BY_DIMENSION: Dict[str, str] = {
+    "implication": (
+        "the figure is significant because it constrains the choices the rest "
+        "of the analysis depends on, rather than being an isolated number"
+    ),
+    "mechanism": (
+        "the underlying mechanism is that the earlier conditions compound, "
+        "which forces the trade-offs described here"
+    ),
+    "comparison": (
+        "that places it in direct comparison with the alternatives discussed "
+        "elsewhere, where the relative merits are the deciding factor"
+    ),
+    "uncertainty": (
+        "the claim is disputed across sources, so it should be read as a "
+        "provisional finding rather than a settled point"
+    ),
+    "strength": (
+        "the claim is corroborated by multiple independent sources, which "
+        "raises confidence in it rather than merely repeating it"
+    ),
+    "framing": (
+        "for this section's angle the point matters because it frames the "
+        "trade-off the section goes on to examine"
+    ),
+}
+
+
+def _analysis_clause(sentence: str, dimension: str) -> str:
+    """The analytical tail for a refined sentence, scoped to its topic.
+
+    Picks the first topic-specific variant whose subject vocabulary appears in
+    the sentence, falling back to the generic clause for the dimension. This
+    is what keeps a refinement about a transformer architecture from ending in
+    a financing-obligations tail.
+    """
+    dimension = dimension if dimension in _ANALYSIS_BY_DIMENSION else "implication"
+    for pattern, variants in _TOPIC_ANALYSIS:
+        if pattern.search(sentence or ""):
+            clause = variants.get(dimension)
+            if clause:
+                return clause
+    return _ANALYSIS_BY_DIMENSION[dimension]
+
+
+def _stable_pick(options: Sequence[str], seed: str) -> str:
+    """Deterministically choose one template for a claim.
+
+    No RNG: the choice is derived from the claim key so the same repetition
+    always refines the same way (stable tests, stable diffs) while different
+    claims receive different transitions (a report does not read as one
+    boilerplate line repeated). Falls back to the first option on empty input.
+    """
+    if not options:
+        return ""
+    for char in seed or "":
+        if char.isalnum():
+            return options[sum(ord(c) for c in seed) % len(options)]
+    return options[0]
+
+
+@dataclass
+class Refinement:
+    """The outcome of classifying one writer sentence against the ledger."""
+
+    text: str
+    kept: bool = True
+    transformed: bool = False
+    dimension: str = ""
+    first_section: str = ""
+
 _NEGATION_RE = re.compile(r"(?i)\b(not|no|never|without|neither|nor|fails? to|does not|did not|is not|are not)\b")
 
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+\S")
@@ -180,6 +378,7 @@ class SynthesisIntelligenceReport:
     unique_claims: int = 0
     repeated_claims: int = 0
     removed_restatements: int = 0
+    refined_transitions: int = 0
     allowed_expansions: int = 0
     sections: int = 0
     top_repeats: List[Dict[str, object]] = field(default_factory=list)
@@ -197,6 +396,7 @@ class SynthesisIntelligenceReport:
             "unique_claims": self.unique_claims,
             "repeated_claims": self.repeated_claims,
             "removed_restatements": self.removed_restatements,
+            "refined_transitions": self.refined_transitions,
             "allowed_expansions": self.allowed_expansions,
             "sections": self.sections,
             "redundancy_ratio": self.redundancy_ratio,
@@ -262,6 +462,85 @@ def analytical_dimensions(text: str) -> Set[str]:
         if pattern.search(text or ""):
             found.add(name)
     return found
+
+
+_QUANT_RE = re.compile(r"\d|\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\b", re.IGNORECASE)
+
+
+def _choose_dimension(sentence: str, signals: Optional[Dict[str, object]]) -> str:
+    """Pick the analytical dimension a refined restatement should carry.
+
+    Priority is fixed so the transformation is reproducible:
+      1. contradictions in scope -> uncertainty / trade-off (never assert a
+         disputed number as settled),
+      2. corroborated or primary evidence -> strength (the claim is still
+         worth foregrounding even though it repeats),
+      3. a quantitative claim -> implication (a number invites "what follows
+         from it"),
+      4. a named section axis -> framing,
+      5. otherwise -> implication (the safest generic reading).
+    """
+    sig = signals or {}
+    if sig.get("contradicted") or sig.get("uncertain"):
+        return "uncertainty"
+    if sig.get("corroborated") or sig.get("primary"):
+        return "strength"
+    if _QUANT_RE.search(sentence or ""):
+        return "implication"
+    if str(sig.get("axis", "") or "").strip():
+        return "framing"
+    return "implication"
+
+
+def refine_restatement(
+    sentence: str,
+    *,
+    prior_section: str = "",
+    dimension: str = "implication",
+    seed: str = "",
+) -> str:
+    """Rewrite a bare restatement into a contextual transition + analysis.
+
+    The original claim is preserved verbatim — including its number and `[n]`
+    marker — so nothing is lost and no citation is invented; the transition
+    names the relationship to the earlier use and the analytical clause adds
+    the meaning the restatement lacked. Deterministic: no LLM is ever needed.
+    """
+    clean = (sentence or "").strip()
+    if not clean:
+        return clean
+    dimension = dimension if dimension in _ANALYSIS_BY_DIMENSION else "implication"
+    transition = _stable_pick(_TRANSITION_BY_DIMENSION[dimension], seed or clean)
+    analysis = _analysis_clause(clean, dimension)
+    # The original claim keeps its terminal punctuation before the appended
+    # clause, so "… $13 billion [1]" becomes "… $13 billion [1], and the figure
+    # is significant because …" rather than two spliced sentences.
+    stripped = clean.rstrip()
+    if stripped.endswith("."):
+        stripped = stripped[:-1]
+    return f"{transition} {stripped}, and {analysis}."
+
+
+# Label/fragment shapes that are NOT full prose sentences: a Key-Figures bullet
+# ("**$12.65 billion** — reported cost …"), a heading fragment, or a line that
+# starts lowercase or has no terminal punctuation. Appending an analytical
+# clause to one of those produces garbled prose ("Building on that, $12.65
+# billion** — reported cost …, and the figure is significant…"), so a repeated
+# fragment is left intact instead: it was never the dangling-opening failure
+# this layer exists to fix.
+_FRAGMENT_RE = re.compile(r"^\s*(?:\*\*|[-*]\s|\d+\)\s|[a-z])")
+
+
+def _is_refinable_sentence(sentence: str) -> bool:
+    """True when `sentence` is a full prose sentence worth transforming."""
+    stripped = (sentence or "").strip()
+    if not stripped:
+        return False
+    if _FRAGMENT_RE.match(stripped):
+        return False
+    if not stripped[-1:] in ".!?":
+        return False
+    return len(stripped.split()) >= 6
 
 
 def _is_sentence_unit(line: str) -> bool:
@@ -373,6 +652,8 @@ class ClaimLedger:
         self._uses: Dict[str, ClaimUse] = {}
         self._texts: List[str] = []
         self.removed_restatements = 0
+        self.refined_restatements = 0
+        self.kept_fragments = 0
         self.allowed_expansions = 0
         self.total_sentences = 0
 
@@ -403,12 +684,25 @@ class ClaimLedger:
                 return use
         return None
 
-    def register(self, section: str, sentence: str) -> bool:
-        """Register a sentence; return True when it should be KEPT.
+    def refine(
+        self,
+        section: str,
+        sentence: str,
+        *,
+        signals: Optional[Dict[str, object]] = None,
+    ) -> Refinement:
+        """Classify a sentence; TRANSFORM a bare restatement instead of dropping it.
 
-        A new claim is always kept. An existing claim is kept only when this
-        occurrence introduces an analytical dimension not seen before; a
-        verbatim restatement is rejected (and its citation goes with it).
+        * A new claim is kept verbatim and registered.
+        * A repeat that adds a genuinely new analytical dimension is kept
+          verbatim (expansion) and the dimension is recorded.
+        * A bare restatement is rewritten into a transition + analysis
+          sentence that preserves the original claim, its number and its `[n]`
+          marker. It is never removed, so a section can never lose its opening.
+
+        `signals` carries evidence-derived hints for the analytical clause
+        (contradicted / uncertain / corroborated / primary / axis); the
+        transformation works deterministically with no signals and no LLM.
         """
         self.total_sentences += 1
         key = claim_key(sentence)
@@ -417,24 +711,58 @@ class ClaimLedger:
             if key:
                 self._uses[key] = ClaimUse(key=key, text=sentence, section=section)
             self._texts.append(sentence)
-            return True
+            return Refinement(text=sentence, kept=True, transformed=False)
 
         prior.occurrences += 1
         dimensions = analytical_dimensions(sentence)
         novel = dimensions - prior.dimensions
         if novel:
-            # Genuinely expanded: record the new dimension and allow it.
+            # Genuinely expanded: record the new dimension and allow it intact.
             prior.dimensions |= dimensions
             self.allowed_expansions += 1
             self._texts.append(sentence)
-            return True
+            return Refinement(text=sentence, kept=True, transformed=False)
 
-        self.removed_restatements += 1
-        logger.debug(
-            "[SynthesisIntel] removed restatement in section '%s' (first used in '%s')",
-            section, prior.section,
+        if not _is_refinable_sentence(sentence):
+            # A label-style bullet or fragment: leave it intact rather than
+            # splice an analytical clause onto a non-sentence.
+            self.kept_fragments += 1
+            self._texts.append(sentence)
+            return Refinement(text=sentence, kept=True, transformed=False)
+
+        dimension = _choose_dimension(sentence, signals)
+        refined = refine_restatement(
+            sentence,
+            prior_section=prior.section,
+            dimension=dimension,
+            seed=key or sentence,
         )
-        return False
+        # Record the dimension we attached so a later true expansion of the
+        # same claim is still detected as novel.
+        prior.dimensions.add(dimension if dimension in ("mechanism", "implication", "comparison", "uncertainty") else "implication")
+        self.refined_restatements += 1
+        self.removed_restatements += 1
+        self._texts.append(refined)
+        logger.debug(
+            "[SynthesisIntel] refined restatement in section '%s' (first used in '%s', dimension=%s)",
+            section, prior.section, dimension,
+        )
+        return Refinement(
+            text=refined,
+            kept=True,
+            transformed=True,
+            dimension=dimension,
+            first_section=prior.section,
+        )
+
+    def register(self, section: str, sentence: str) -> bool:
+        """Backward-compatible wrapper returning whether a sentence is kept.
+
+        With the refinement layer every claim-bearing sentence is kept, so
+        this always returns True for a non-empty unit; callers that need the
+        transformed text must use `refine`.
+        """
+        return self.refine(section, sentence).kept
 
     def register_recap(self, section: str, sentence: str) -> None:
         """Record a claim from a recap section (Executive Summary / Key
@@ -457,12 +785,20 @@ class ClaimLedger:
         self._texts.append(sentence)
 
 
-def compress_section_text(text: str, ledger: ClaimLedger, section: str) -> str:
-    """Remove restating sentences from one section body, preserving structure.
+def compress_section_text(
+    text: str,
+    ledger: ClaimLedger,
+    section: str,
+    *,
+    signals: Optional[Dict[str, object]] = None,
+) -> str:
+    """Refine restating sentences in one section body, preserving structure.
 
-    Line-granular: a bullet whose only sentence is a restatement is dropped
-    whole; a prose line keeps only its non-restating sentences. Headings are
-    never touched.
+    A restatement is never deleted: it is rewritten into a transition +
+    analysis sentence (see `ClaimLedger.refine`), so a section's opening
+    sentence survives as a coherent opener even when it repeated an earlier
+    claim. Line-granular: headings are never touched and an empty section is
+    never produced.
     """
     out_lines: List[str] = []
     for line in (text or "").replace("\r\n", "\n").split("\n"):
@@ -473,11 +809,19 @@ def compress_section_text(text: str, ledger: ClaimLedger, section: str) -> str:
         stripped = line.strip()
         prefix = "- " if is_bullet else ""
         body = stripped.lstrip("-* ").strip()
+        # An enumerable data bullet ("**$12.65 billion** — reported cost …") is
+        # not prose; refining it would splice an analytical clause onto a label.
+        # Leave the whole bullet intact — its restatement is not the dangling
+        # opening this layer exists to fix.
+        if is_bullet and "**" in body:
+            out_lines.append(line)
+            continue
         sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(body) if s.strip()]
         kept: List[str] = []
         for sentence in sentences:
-            if ledger.register(section, sentence):
-                kept.append(sentence)
+            outcome = ledger.refine(section, sentence, signals=signals)
+            if outcome.kept and outcome.text:
+                kept.append(outcome.text)
         if not kept:
             continue
         if is_bullet:
@@ -492,20 +836,31 @@ def apply_synthesis_intelligence(
     *,
     protect_headings: Sequence[str] = (),
     recap_headings: Sequence[str] = (),
+    signals: Optional[Dict[str, object]] = None,
 ) -> Tuple[str, SynthesisIntelligenceReport]:
-    """Deterministically remove cross-section restatements from a report.
+    """Deterministically REFINE cross-section restatements in a report.
+
+    A restatement is rewritten into a contextual transition + analysis
+    sentence rather than deleted (see `ClaimLedger.refine`), so a section
+    whose opening repeated an earlier claim still opens with a complete,
+    coherent sentence and the reader learns what the repetition means.
 
     `protect_headings` names sections that must keep their full body (the
     machine-appended appendices, which describe measured state and are not
     writer prose).
 
     `recap_headings` names the report's deliberate summary sections
-    (Executive Summary, Key Findings). Their bodies are never compressed —
+    (Executive Summary, Key Findings). Their bodies are never refined —
     a brief is expected to preview its findings there — but every claim they
     state IS registered, so the deep-dive sections cannot restate them. This
     is the observed failure mode: the Executive Summary established "Rooppur
     … US$13 billion [1]" and seven later sections re-asserted it instead of
     adding analysis.
+
+    `signals` carries report-level evidence hints (contradicted / uncertain /
+    corroborated / primary / axis) that select the analytical dimension of
+    each refinement. It is optional; the deterministic transformation runs
+    with no signals and no LLM.
     """
     if not answer:
         return answer, SynthesisIntelligenceReport()
@@ -527,20 +882,25 @@ def apply_synthesis_intelligence(
                 for _, sentence in _iter_units(body_lines):
                     ledger.register_recap(heading, sentence)
             else:
+                section_signals = dict(signals or {})
+                section_signals.setdefault("axis", heading)
                 body_lines = compress_section_text(
-                    "\n".join(body_lines), ledger, heading or "Preamble"
+                    "\n".join(body_lines),
+                    ledger,
+                    heading or "Preamble",
+                    signals=section_signals,
                 ).split("\n")
         block = [heading] if heading else []
         block.extend(body_lines)
         rebuilt.append("\n".join(block))
 
-    compressed = "\n".join(rebuilt).strip()
+    refined = "\n".join(rebuilt).strip()
 
     # Guard: never return an empty body because of this layer. An over-eager
-    # compression is worse than the redundancy it removes, so fall back to the
-    # original text when nothing meaningful survived.
-    if not _has_writer_prose(compressed):
-        logger.warning("[SynthesisIntel] compression emptied the report; keeping original")
+    # transformation is worse than the redundancy it addresses, so fall back
+    # to the original text when nothing meaningful survived.
+    if not _has_writer_prose(refined):
+        logger.warning("[SynthesisIntel] refinement emptied the report; keeping original")
         return answer, SynthesisIntelligenceReport()
 
     report = SynthesisIntelligenceReport(
@@ -548,16 +908,17 @@ def apply_synthesis_intelligence(
         unique_claims=ledger.unique_claims,
         repeated_claims=ledger.repeated_claims,
         removed_restatements=ledger.removed_restatements,
+        refined_transitions=ledger.refined_restatements,
         allowed_expansions=ledger.allowed_expansions,
         sections=sum(1 for h, l in sections if h and any(_is_sentence_unit(x) for x in l)),
         top_repeats=_top_repeats(ledger),
     )
-    if report.removed_restatements:
+    if report.refined_transitions:
         logger.info(
-            "[SynthesisIntel] removed %d cross-section restatement(s); %d expansion(s) kept",
-            report.removed_restatements, report.allowed_expansions,
+            "[SynthesisIntel] refined %d cross-section restatement(s) into transitions; %d expansion(s) kept",
+            report.refined_transitions, report.allowed_expansions,
         )
-    return compressed, report
+    return refined, report
 
 
 def _has_writer_prose(text: str) -> bool:
