@@ -73,6 +73,75 @@ def test_good_answer_passes_the_gate():
     assert report.relevance >= 60
 
 
+def test_machine_appendix_does_not_penalize_evidence_density():
+    """Regression: the evidence sub-score measured citation density over the
+    WHOLE answer, including the machine-generated confidence panel, limitations,
+    contradiction ranges and source ledger. Those sections carry no [n] markers
+    by construction, so a report whose own prose was well cited was scored as
+    if most of its sentences were unsupported — pinning evidence near 45/100.
+    Density must measure the writer's body only."""
+    answer = (
+        "## Executive Summary\n\n"
+        "The transformer is a neural network architecture built on attention [1].\n\n"
+        "## Key Findings\n\n"
+        "- Attention weighs every input token against every other [1].\n"
+        "- Self-attention removes the recurrence bottleneck of earlier models [2].\n\n"
+        "## Evidence & Confidence\n\n"
+        "Well-supported: 3 verified facts feed this report; every claim above "
+        "traces to a cited source and the panel records the measured counts.\n\n"
+        "## Limitations & Unknowns\n\n"
+        "- 2 claim(s) are single-source or unverified and should be treated as "
+        "provisional pending a second independent publisher.\n\n"
+        "## Source ledger\n\n"
+        "- Documents read: 2 across 2 independent domain(s)\n"
+        "- Claims verified against their cited source: 3/3\n\n"
+        "## Sources\n\n"
+        "[1] arxiv.org (preprint, primary) — https://arxiv.org/abs/1706.03762\n\n"
+        "[2] aclanthology.org (peer_reviewed, primary) — https://aclanthology.org/x"
+    )
+    details = {
+        "rate": 1.0, "cited": 3, "supported": 3, "uncited": 0, "numeric_rate": None,
+        "sentences": 9,
+        "sentence_details": [
+            {"sentence": "The transformer is a neural network architecture built on attention [1].",
+             "markers": [1], "status": "supported", "support": 0.8},
+            {"sentence": "- Attention weighs every input token against every other [1].",
+             "markers": [1], "status": "supported", "support": 0.7},
+            {"sentence": "- Self-attention removes the recurrence bottleneck of earlier models [2].",
+             "markers": [2], "status": "supported", "support": 0.6},
+        ],
+    }
+    report = evaluate_answer(
+        "What is the transformer architecture?",
+        intent=INTENT_ML, answer=answer, facts=FACTS,
+        answer_support=details, mode="quick", threshold=70,
+    )
+    assert report.details["citation_density"] == 1.0
+    assert report.evidence >= 55, report.details
+
+
+def test_appendix_without_prose_does_not_manufacture_density():
+    """A report that is ONLY a well-cited body scores 1.0; an all-appendix
+    answer (no writer prose) falls back to 0.0 rather than dividing by the
+    machine sections it must ignore."""
+    answer = (
+        "## Evidence & Confidence\n\n"
+        "Well-supported: 3 verified facts feed this report and every claim "
+        "above traces to a cited source in the ledger below.\n\n"
+        "## Source ledger\n\n"
+        "- Documents read: 2 across 2 independent domain(s)\n"
+        "- Claims verified against their cited source: 3/3"
+    )
+    details = {"rate": 1.0, "cited": 0, "supported": 0, "uncited": 0,
+               "numeric_rate": None, "sentences": 4, "sentence_details": []}
+    report = evaluate_answer(
+        "What is the transformer architecture?",
+        intent=INTENT_ML, answer=answer, facts=FACTS,
+        answer_support=details, mode="quick", threshold=70,
+    )
+    assert report.details["citation_density"] == 0.0
+
+
 def test_offtopic_answer_fails_relevance():
     """The exact reported failure: "What is transformer?" answered with
     electrical-transformer content. The query resolves ambiguous, so the

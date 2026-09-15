@@ -216,7 +216,14 @@ def find_contradictions(
                 }
 
             # ---- temporal (period mismatch explains the value spread) -----
-            if found is None:
+            # Requires the same topical floor as the numeric band. Without it,
+            # ANY two claims carrying different 4-digit years and a shared-unit
+            # number were reported as a period conflict: a live run paired a
+            # Rooppur cost claim with "38 countries endorsed the tripling
+            # declaration" and "100 reactors in the US" (topical similarity
+            # 0.02-0.25) purely because both contained a year. Real temporal
+            # pairs — same measure, different reporting years — score 0.51+.
+            if found is None and similarity >= SIMILARITY_LOW:
                 years_a, years_b = _years_in(claim_a), _years_in(claim_b)
                 if years_a and years_b and set(years_a) != set(years_b):
                     temporal = numeric_conflict(

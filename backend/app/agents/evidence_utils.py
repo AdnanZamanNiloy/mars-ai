@@ -165,8 +165,10 @@ _NUMBER_RE = re.compile(
     r"\s*"
     r"(?P<unit>%|percentage points?|percent|bps|"
     r"trillion|billion|million|thousand|bn|mn|"
+    r"crore|lakh|lakhs|"
     r"twh|gwh|mwh|kwh|tw|gw|mw|kw|"
     r"usd|eur|gbp|jpy|inr|bdt|"
+    r"dollars?|euros?|pounds?|yen|rupees?|taka|"
     r"years?|months?|days?|hours?|"
     r"tonnes?|tons?|kg|km|cm|mm)?",
     re.IGNORECASE,
@@ -175,12 +177,19 @@ _NUMBER_RE = re.compile(
 _SCALE: Dict[str, float] = {
     "trillion": 1e12, "billion": 1e9, "bn": 1e9,
     "million": 1e6, "mn": 1e6, "thousand": 1e3,
+    # Indian numbering system, ubiquitous in South-Asian fiscal reporting:
+    # "73,746.06 crore Bangladeshi taka". Without these, the amount parsed as a
+    # scale-free dimensionless count and could be "compared" against an
+    # unrelated count (38 countries) as if they measured the same thing.
+    "crore": 1e7, "lakh": 1e5, "lakhs": 1e5,
 }
 
 _UNIT_ALIASES: Dict[str, str] = {
     "percent": "%", "percentage point": "%", "percentage points": "%",
     "tons": "tonne", "ton": "tonne", "tonnes": "tonne", "tonne": "tonne",
     "years": "year", "months": "month", "days": "day", "hours": "hour",
+    "dollar": "usd", "dollars": "usd", "euro": "eur", "euros": "eur",
+    "pound": "gbp", "pounds": "gbp", "rupee": "inr", "rupees": "inr",
 }
 
 _CURRENCY_RE = re.compile(r"[$€£¥₹৳]")

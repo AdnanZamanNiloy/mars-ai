@@ -30,7 +30,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
-from app.agents.sources import primary_source_share
+from app.agents.sources import primary_source_share, strip_machine_sections
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -337,11 +337,24 @@ def evaluate_answer(
         )
 
     # ---- Evidence: citation density, verified share, primary share, health ----
+    # Density is measured over the WRITER's prose only. The report's trailing
+    # sections (confidence panel, limitations, contradiction ranges, source
+    # ledger) are appended from measured pipeline state and carry no [n]
+    # markers by construction; counting them as uncited factual sentences
+    # penalized a report whose own body was ~68% cited down to a 38% "density"
+    # and pinned the evidence sub-score near 45 regardless of writer quality.
+    # audit_citations already strips these sections; the two now share one
+    # canonical list (sources.MACHINE_SECTIONS) so they cannot drift apart.
+    writer_body = strip_machine_sections(answer)
     disambig_free_units = [
-        d for d in usable_units
-        if str(d.get("sentence", "")).strip() and len(str(d.get("sentence", "")).split()) >= 8
+        s.strip()
+        for s in re.split(r"(?<=[.!?])\s+|\n+", writer_body)
+        if s.strip()
+        and len(s.strip().split()) >= 8
+        and not _DISAMBIG_LINE_RE.match(s.strip())
+        and not _FOCUS_LINE_RE.match(s.strip())
     ]
-    cited_n = sum(1 for d in disambig_free_units if d.get("markers"))
+    cited_n = sum(1 for s in disambig_free_units if re.search(r"\[\d+\]", s))
     density = cited_n / len(disambig_free_units) if disambig_free_units else 0.0
     urls = [str(f.get("source", "")) for f in facts if isinstance(f, dict) and f.get("source")]
     primary = primary_source_share(urls)

@@ -696,3 +696,46 @@ def evidence_freshness(
         for item in items or []
     ]
     return round(sum(scores) / len(scores), 4) if scores else 0.45
+
+
+# ---------------------------------------------------------------------------
+# Machine-generated report sections
+# ---------------------------------------------------------------------------
+# These headings are appended AFTER the writer finishes, from measured pipeline
+# state (counts, confidence panels, contradiction ranges, source ledger). They
+# describe the pipeline, not the evidence, so by design they carry no [n]
+# citation markers. Any metric that measures "share of sentences cited" MUST
+# exclude them or it measures the accounting as if it were unsupported prose —
+# exactly the miscalibration that held the evidence sub-score near 45 while the
+# writer's own body was 68% cited. The authoritative list lives here (a pure,
+# offline module imported by both synthesizer and answer_quality) so the
+# auditor and the quality gate can never disagree about what is machine-written.
+MACHINE_SECTIONS: Tuple[str, ...] = (
+    "## Evidence & Confidence",
+    "## Evidence Strength",
+    "## Limitations",
+    "## Limitations & Unknowns",
+    "## Counterarguments & Disputed Points",
+    "## Evidence integrity",
+    "## Source ledger",
+    "## Standing objections",
+    "## What Would Change Our Mind",
+    "## Sources",
+)
+
+
+def strip_machine_sections(text: str) -> str:
+    """Drop appended machine-generated sections, keeping the writer's prose.
+
+    Splits on the canonical headings so a heading buried mid-document is
+    handled the same as a trailing appendix. Case-sensitive on the exact
+    heading text the synthesizer emits, so ordinary prose containing the word
+    "Limitations" is never truncated by accident.
+    """
+    body = text or ""
+    cut = len(body)
+    for heading in MACHINE_SECTIONS:
+        match = re.search(rf"(?m)^\s*{re.escape(heading)}\s*$", body)
+        if match and match.start() < cut:
+            cut = match.start()
+    return body[:cut]
