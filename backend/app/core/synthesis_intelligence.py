@@ -921,16 +921,21 @@ def _is_label_bullet(sentence: str) -> bool:
     return False
 
 
-def _is_refinable_sentence(sentence: str) -> bool:
+def _is_refinable_sentence(sentence: str, *, is_bullet: bool = False) -> bool:
     """True when `sentence` is a full prose sentence worth transforming.
 
-    Only genuine PROSE restatements qualify. Label bullets, title/value
-    fragments, short units, and lines that already carry a move clause are left
-    intact — refining them splices an analytical clause onto a label and
-    corrupts the report (the live Key-Figures failure this guard exists for).
+    Only genuine PROSE restatements qualify. An enumerable bullet — even when
+    its value happens to be a full sentence, as in Key Figures ("The first mRNA
+    vaccines … [6].") — is a data item, not an argument restatement, so it is
+    left intact. Title/value fragments, short units, and lines that already
+    carry a move clause are likewise left intact: refining them splices an
+    analytical clause onto a label and corrupts the report (the live
+    Key-Figures boilerplate failure this guard exists for).
     """
     stripped = (sentence or "").strip()
     if not stripped:
+        return False
+    if is_bullet:
         return False
     if _FRAGMENT_RE.match(stripped):
         return False
@@ -1092,6 +1097,7 @@ class ClaimLedger:
         sentence: str,
         *,
         signals: Optional[Dict[str, object]] = None,
+        is_bullet: bool = False,
     ) -> Refinement:
         """Classify a sentence; TRANSFORM a bare restatement instead of dropping it.
 
@@ -1101,6 +1107,9 @@ class ClaimLedger:
         * A bare restatement is rewritten into a transition + analysis
           sentence that preserves the original claim, its number and its `[n]`
           marker. It is never removed, so a section can never lose its opening.
+        * An enumerable BULLET restatement (`is_bullet`) is kept verbatim: a
+          bullet is a data item, not a prose argument, and refining it spliced
+          move clauses into Key Figures in live reports.
 
         `signals` carries evidence-derived hints for the analytical clause
         (contradicted / uncertain / corroborated / primary / axis); the
@@ -1125,9 +1134,9 @@ class ClaimLedger:
             self._texts.append(sentence)
             return Refinement(text=sentence, kept=True, transformed=False)
 
-        if not _is_refinable_sentence(sentence):
-            # A label-style bullet or fragment: leave it intact rather than
-            # splice an analytical clause onto a non-sentence.
+        if not _is_refinable_sentence(sentence, is_bullet=is_bullet):
+            # A bullet, label-style line or fragment: leave it intact rather
+            # than splice an analytical clause onto a data item or non-sentence.
             self.kept_fragments += 1
             self._texts.append(sentence)
             return Refinement(text=sentence, kept=True, transformed=False)
@@ -1216,17 +1225,13 @@ def compress_section_text(
         stripped = line.strip()
         prefix = "- " if is_bullet else ""
         body = stripped.lstrip("-* ").strip()
-        # An enumerable data bullet ("**$12.65 billion** — reported cost …") is
-        # not prose; refining it would splice an analytical clause onto a label.
-        # Leave the whole bullet intact — its restatement is not the dangling
-        # opening this layer exists to fix.
-        if is_bullet and "**" in body:
-            out_lines.append(line)
-            continue
         sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(body) if s.strip()]
         kept: List[str] = []
         for sentence in sentences:
-            outcome = ledger.refine(section, sentence, signals=signals)
+            # `is_bullet` forbids transformation (an enumerable item is not a
+            # prose restatement) but still registers the claim, so a later
+            # prose section cannot restate a figure the list already stated.
+            outcome = ledger.refine(section, sentence, signals=signals, is_bullet=is_bullet)
             if outcome.kept and outcome.text:
                 kept.append(outcome.text)
         if not kept:

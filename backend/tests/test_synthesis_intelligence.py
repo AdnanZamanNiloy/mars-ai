@@ -576,6 +576,41 @@ def test_label_bullets_are_not_corrupted_end_to_end():
         assert clause not in compressed.lower(), clause
 
 
+def test_enumerable_bullet_is_never_refined_even_when_full_sentence():
+    """Bug 1 acceptance (live mRNA/transformer case): a Key Figures bullet whose
+    value is a full sentence is a data item, not a prose restatement, and must
+    be left verbatim. This was the exact residual corruption after the label
+    guard landed: 'The first mRNA vaccines … in 2020 [6]' inside a figure list
+    received a move clause because it parsed as a sentence."""
+    fact = "The first mRNA vaccines authorized in humans were the COVID-19 vaccines in 2020 [6]."
+    answer = _report(
+        ("Executive Summary", fact),
+        ("History", f"- {fact}"),
+        ("Key Figures", f"- {fact}"),
+    )
+    compressed, report = apply_synthesis_intelligence(
+        answer, protect_headings=MACHINE, recap_headings=RECAP
+    )
+    # The bullet itself is never rewritten.
+    assert f"- {fact}" in compressed
+    assert report.refined_transitions == 0
+    for clause in _CORRUPT_CLAUSES:
+        assert clause not in compressed.lower(), clause
+
+
+def test_prose_paragraph_restatement_is_still_refined_not_bullet():
+    """The refinement layer still transforms genuine prose paragraphs (the
+    feature it exists for) — the bullet rule must not disable it entirely."""
+    answer = _report(
+        ("Executive Summary", "Rooppur is Bangladesh's first nuclear plant [1]."),
+        ("Cost", "Rooppur is Bangladesh's first nuclear plant [1]. Financing terms shape the tariff."),
+    )
+    compressed, report = apply_synthesis_intelligence(
+        answer, protect_headings=MACHINE, recap_headings=RECAP
+    )
+    assert report.refined_transitions == 1
+
+
 def test_genuine_prose_restatement_is_still_refined():
     """Bug 1 guard must not over-reject: a real prose restatement is refined."""
     from app.core.synthesis_intelligence import _is_refinable_sentence
