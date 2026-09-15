@@ -170,4 +170,73 @@ def test_dynamic_dimension_axes_get_readable_section_titles():
     assert "grid_firming_requirements" in dims
     rendered = render_outline(outline)
     assert "grid_firming_requirements" not in rendered  # no slug leak
-    assert "How much firming does solar need?" in rendered
+    # The heading is label-shaped: either the humanized slug or a shortened
+    # question works. What must NOT happen is shipping the raw multi-clause
+    # planner question as a `## ` heading (the answer-quality regression).
+    assert ("Grid firming requirements" in rendered) or ("How much firming does solar need?" in rendered)
+    assert "## How much firming does solar need?" not in rendered
+
+
+def test_raw_planner_question_is_never_a_section_heading():
+    """Regression: dynamic-planning dimensions carry a full question as their
+    `question` text, and the outline emitted it verbatim — live reports shipped
+    '## What was the causal chain of the 2023 US regional banking crisis: how
+    did the March 2022-July 2023 ...' as a heading, duplicating the query and
+    padding the answer. A heading must be a concise label, never the question."""
+    facts = [
+        {"claim": "SVB failed after a deposit run.",
+         "axis": "causal_chain", "source": "https://a.example/x",
+         "confidence": 0.8},
+        {"claim": "Rising rates created unrealized bond losses.",
+         "axis": "causal_chain", "source": "https://b.example/y",
+         "confidence": 0.7},
+    ]
+    question = (
+        "What was the causal chain of the 2023 US regional banking crisis: how "
+        "did the March 2022-July 2023 rate hikes produce unrealized losses?"
+    )
+    outline = build_outline(
+        "What caused the 2023 regional banking crisis?",
+        facts,
+        [{"question": question, "axis": "causal_chain", "coverage_goal": "trace causes"}],
+    )
+    for section in outline.sections:
+        assert question not in section.title
+        assert len(section.title.split()) <= 10
+        assert "?" not in section.title
+
+
+def test_colliding_axis_titles_merge_into_one_section():
+    """Multiple dynamic axes that humanize to the same label must not create
+    duplicate sections that restate the same evidence."""
+    facts = [
+        {"claim": "Solar firm capacity costs rise with storage duration.",
+         "axis": "grid_firming_requirements", "source": "https://a.example/x",
+         "confidence": 0.8},
+        {"claim": "Nuclear provides firm baseload capacity.",
+         "axis": "grid_firming_reqs", "source": "https://b.example/y",
+         "confidence": 0.7},
+    ]
+    # Force both axes to a shared readable title via their question text.
+    sub_questions = [
+        {"question": "Grid integration", "axis": "grid_integration", "coverage_goal": ""},
+        {"question": "Grid integration", "axis": "grid_integration_2", "coverage_goal": ""},
+    ]
+    outline = build_outline("Compare solar vs nuclear", facts, sub_questions)
+    titles = [s.title for s in outline.sections]
+    assert len(titles) == len(set(titles)), titles
+
+
+def test_empty_axis_sections_dropped_when_others_have_evidence():
+    facts = [
+        {"claim": "Solar is intermittent.", "axis": "criticism",
+         "source": "https://a.example/x", "confidence": 0.8},
+    ]
+    sub_questions = [
+        {"question": "cost?", "axis": "cost", "coverage_goal": ""},
+        {"question": "risks?", "axis": "criticism", "coverage_goal": ""},
+    ]
+    outline = build_outline("Compare solar vs nuclear", facts, sub_questions)
+    # The cost axis has no facts, so it must not become a heading bullet.
+    assert all(s.facts for s in outline.sections)
+    assert "cost" not in outline_dimensions(outline)

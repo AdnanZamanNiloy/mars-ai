@@ -132,19 +132,66 @@ def _sense_match(fact_sense: str, label: str) -> bool:
     return a in b or b in a
 
 
+# A heading is a label, not a question. The planner's dynamic dimensions carry
+# a full multi-clause question as their `question` text, and `_section_title`
+# fell back to emitting it verbatim — so live reports shipped headings like
+# "## What was the causal chain of the 2023 US regional banking crisis: how did
+# the March 2022-July 2023 ...". That is a duplicate of the query, not a
+# section; the section writer then restated the same evidence under it, padding
+# the report and diluting the answer. Cap the title, strip the interrogative
+# frame, and use the axis slug when the question cannot be reduced cleanly.
+_TITLE_MAX_CHARS = 64
+_TITLE_MAX_WORDS = 9
+_INTERROGATIVE_LEAD_RE = re.compile(
+    r"^\s*(?:what|how|why|when|where|which|who|does|did|is|are|can|could|"
+    r"should|will|would)\b[\s:,]*",
+    re.IGNORECASE,
+)
+
+
+def _short_title(text: str, max_words: int = _TITLE_MAX_WORDS) -> str:
+    """Reduce a clause/question to a heading-sized noun phrase.
+
+    Deterministic and total: takes the first clause (up to a colon/dash/`?`),
+    drops a leading interrogative, and truncates on a word boundary. Returns ""
+    when nothing useful survives, so callers fall through to the axis slug.
+    """
+    cleaned = re.sub(r"\s+", " ", (text or "").strip())
+    if not cleaned:
+        return ""
+    clause = re.split(r"[?:—–]|\s+-\s+", cleaned, maxsplit=1)[0].strip(" ?.!,")
+    clause = _INTERROGATIVE_LEAD_RE.sub("", clause).strip(" ?.!,")
+    if not clause:
+        return ""
+    words = clause.split(" ")
+    if len(words) > max_words:
+        clause = " ".join(words[:max_words]).rstrip(",;:")
+    clause = clause.strip(" ?.!,")
+    if len(clause) > _TITLE_MAX_CHARS:
+        clause = clause[: _TITLE_MAX_CHARS + 1].rsplit(" ", 1)[0].strip(" ?.!,")
+    return clause
+
+
+def _normalize_title(text: str) -> str:
+    """Comparison key for section titles: casefolded, alnum-only."""
+    return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+
+
 def _section_title(axis: str, question: str) -> str:
     known = _AXIS_TITLES.get(axis)
     if known:
         return known
-    text = (question or "").strip()
-    if not text:
-        # A dynamic-planning dimension slug ("capacity_factor_and_reliability")
-        # has no question text yet: render it as a readable title instead of
-        # leaking the underscore slug into the report.
-        text = (axis or "").replace("_", " ").strip()
-    if not text:
-        return "Key Findings"
-    return text[0].upper() + text[1:]
+    # Prefer a concise, humanized axis slug — always label-shaped, never a
+    # question. Only fall back to the question text when the slug is empty.
+    slug = (axis or "").replace("_", " ").strip()
+    if slug and slug not in ("general", "answer"):
+        return slug[0].upper() + slug[1:]
+    shortened = _short_title(question)
+    if shortened:
+        return shortened[0].upper() + shortened[1:]
+    if slug:
+        return slug[0].upper() + slug[1:]
+    return "Key Findings"
 
 
 def build_outline(
@@ -256,20 +303,45 @@ def build_outline(
         str(s.get("domain", "") or "").strip().lower() for s in senses[:2]
     } if ambiguous else set()
 
+    # Distinct axes whose short titles collide (a plan with 15 dynamic
+    # dimensions can map several axes onto one label) would otherwise produce
+    # two sections that repeat the same evidence. Merge on the normalized
+    # title so each dimension is written once; the first section keeps its
+    # facts, later colliding axes contribute only their extra facts.
+    seen_titles: Dict[str, int] = {}
+    for section in sections:
+        seen_titles[_normalize_title(section.title)] = len(sections) - 1
+
     for axis in ordered:
         if ambiguous and axis in sense_axes:
             continue
         if len(sections) >= 8:
             break
-        sections.append(
-            OutlineSection(
-                axis=axis,
-                title=_section_title(axis, axis_question.get(axis, "")),
-                question=axis_question.get(axis, ""),
-                facts=by_axis.get(axis, []),
-                coverage_goal=coverage_goal.get(axis, ""),
-            )
+        facts_for_axis = by_axis.get(axis, [])
+        title = _section_title(axis, axis_question.get(axis, ""))
+        key = _normalize_title(title)
+        if key in seen_titles:
+            # Title already used by a sense section or an earlier axis: fold
+            # this axis's evidence into that section instead of restating the
+            # same dimension under a second heading.
+            existing = sections[seen_titles[key]]
+            existing_ids = {id(f) for f in existing.facts}
+            existing.facts.extend(f for f in facts_for_axis if id(f) not in existing_ids)
+            continue
+        section = OutlineSection(
+            axis=axis,
+            title=title,
+            question=axis_question.get(axis, ""),
+            facts=facts_for_axis,
+            coverage_goal=coverage_goal.get(axis, ""),
         )
+        seen_titles[key] = len(sections)
+        sections.append(section)
+
+    # An axis section with no evidence writes nothing but still consumes a
+    # writer call and a heading; drop it when other sections carry evidence.
+    if any(s.facts for s in sections):
+        sections = [s for s in sections if s.facts]
 
     if not sections:
         sections = [

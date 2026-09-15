@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from app.core.degradation import record_fallback
 from app.core.llm import AllProvidersFailedError, LLMClient, PromptTooLargeError
@@ -544,18 +544,18 @@ async def synthesize(
     answer = _sanitize_answer_text(answer, query)
     answer = _scrub_pipeline_telemetry(answer)
     answer = _ensure_disambiguation(answer, ctx)
-    answer = _trim_to_band(answer, mode)
-    audit = audit_citations(answer, numbered, cited_facts)
-
-    # Out-of-range markers are removed (they resolve to nothing), but unlike the
-    # old silent strip we record them and say so in the report.
-    if audit.invalid_markers:
-        answer = _drop_invalid_markers(answer, len(numbered))
 
     # Mandatory sections, enforced post-assembly: the writer cannot omit
     # Limitations/unknowns or Counterarguments (or any of the other three) and
     # ship a report that hides them. Missing sections are added deterministically
     # from measured state, before the appendix/legend.
+    #
+    # ORDER MATTERS: mandatory sections are added BEFORE the deterministic
+    # length trim. The old order trimmed the writer's draft to the band and
+    # THEN appended ~1000 words of required-section/appendix boilerplate, so
+    # every deep report overshot the band by 50-80% (live: 2609 words against
+    # a 1500 cap). Trimming last makes the band an enforced contract instead of
+    # a pre-appendix suggestion.
     answer = ensure_required_sections(
         answer,
         ctx=ctx,
@@ -563,6 +563,13 @@ async def synthesize(
         contradictions=contradictions,
         cited_facts=cited_facts,
     )
+    answer = _trim_to_band(answer, mode)
+    audit = audit_citations(answer, numbered, cited_facts)
+
+    # Out-of-range markers are removed (they resolve to nothing), but unlike the
+    # old silent strip we record them and say so in the report.
+    if audit.invalid_markers:
+        answer = _drop_invalid_markers(answer, len(numbered))
 
     integrity = _integrity_note(audit)
     if integrity:
@@ -576,6 +583,63 @@ async def synthesize(
 def _normalize_heading(text: str) -> str:
     """Comparison key for headings: casefolded, punctuation/space-insensitive."""
     return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+
+
+def _shorten_heading(text: str) -> str:
+    """Reduce a question-shaped heading to a concise label.
+
+    The section writer is told the question to answer; it sometimes emits that
+    question as its own `## ` heading ("## How did the FDIC's systemic risk
+    exception ... extend deposit protection?"). Live deep reports shipped 3
+    such headings on one query, each duplicating the query and padding the
+    report. Deterministic, no LLM; a heading already label-shaped is returned
+    unchanged.
+    """
+    cleaned = re.sub(r"\s+", " ", (text or "").strip()).strip(" ?.!,")
+    if not cleaned:
+        return text
+    words = cleaned.split(" ")
+    limit = 60
+    if "?" not in text and len(words) <= 10 and len(cleaned) <= limit:
+        return cleaned
+    clause = re.split(r"[?:—–]|\s+-\s+", cleaned, maxsplit=1)[0].strip(" ?.!,")
+    if clause.lower().startswith("what are "):
+        clause = clause[9:]
+    elif clause.lower().startswith("what is "):
+        clause = clause[8:]
+    elif clause.lower().startswith("what was "):
+        clause = clause[9:]
+    elif clause.lower().startswith("how did "):
+        clause = clause[8:]
+    elif clause.lower().startswith("how does "):
+        clause = clause[9:]
+    elif clause.lower().startswith("how "):
+        clause = clause[4:]
+    elif clause.lower().startswith("why "):
+        clause = clause[4:]
+    words = clause.split(" ")
+    if len(words) > 9:
+        clause = " ".join(words[:9]).rstrip(",;:")
+    clause = clause.strip(" ?.!,")
+    if not clause:
+        return text
+    return clause[0].upper() + clause[1:]
+
+
+def _dedupe_heading(answer: str) -> str:
+    """Shorten any remaining question-shaped H2/H3 heading post-assembly."""
+    out: List[str] = []
+    for line in (answer or "").split("\n"):
+        match = re.match(r"^(\s{0,3}#{1,6}\s+)(.*\S)\s*$", line)
+        if not match:
+            out.append(line)
+            continue
+        title = match.group(2)
+        if title.endswith("?") or len(title.split()) > 12:
+            out.append(match.group(1) + _shorten_heading(title))
+        else:
+            out.append(line)
+    return "\n".join(out)
 
 
 def _strip_duplicate_section_heading(body: str, title: str) -> str:
@@ -862,11 +926,11 @@ async def _synthesize_sectioned(
     assembled = "\n\n".join(section_bodies)
     answer = _sanitize_answer_text(assembled, query)
     answer = _scrub_pipeline_telemetry(answer)
-    answer = _trim_to_band(answer, mode)
     answer = _ensure_disambiguation(answer, ctx)
-    audit = audit_citations(answer, numbered, cited_facts)
-    if audit.invalid_markers:
-        answer = _drop_invalid_markers(answer, len(numbered))
+    # Mandatory sections and the deterministic appendix do not enforce the
+    # length band by themselves, so trim runs AFTER they are present (the old
+    # order trimmed first and then appended boilerplate, overshooting the band
+    # on every deep report).
     answer = ensure_required_sections(
         answer,
         ctx=ctx,
@@ -874,6 +938,10 @@ async def _synthesize_sectioned(
         contradictions=contradictions,
         cited_facts=cited_facts,
     )
+    answer = _trim_to_band(answer, mode)
+    audit = audit_citations(answer, numbered, cited_facts)
+    if audit.invalid_markers:
+        answer = _drop_invalid_markers(answer, len(numbered))
     integrity = _integrity_note(audit)
     if integrity:
         answer = f"{answer.rstrip()}\n\n{integrity}"
@@ -1996,6 +2064,14 @@ def _compress_to_themes(
         merged = False
         for existing in kept:
             if semantic_similarity(claim, str(existing.get("claim", ""))) >= similarity_threshold:
+                # Numeric guard: two claims that share wording but carry
+                # DIFFERENT quantities are not the same assertion. Merging them
+                # silently replaced specific evidence (e.g. "cost overrun reached
+                # $11.5bn" vs "cost overrun reached $12.7bn") with one generic
+                # representative, which is exactly the "distinct specifics become
+                # generic merged text" failure. Keep them separate.
+                if _distinct_quantities(str(existing.get("claim", "")), claim):
+                    continue
                 # Same assertion restated: keep the better-supported copy and
                 # count the rest as corroboration rather than discarding them.
                 try:
@@ -2013,6 +2089,29 @@ def _compress_to_themes(
         if not merged:
             kept.append(dict(fact))
     return kept
+
+
+def _quantity_signature(text: str) -> Set[Tuple[float, str]]:
+    """(value, unit) pairs in a claim, unit-normalized for comparison."""
+    out: Set[Tuple[float, str]] = set()
+    for q in extract_numbers(text, limit=12):
+        out.add((round(q.value, 4), str(q.unit or "").lower()))
+    return out
+
+
+def _distinct_quantities(a: str, b: str) -> bool:
+    """True when two claims carry non-overlapping quantity sets.
+
+    Worded near-identically but quantifying differently (a different figure,
+    year, or unit) means they are DIFFERENT evidence, not a restatement. Only
+    claims with no numbers on either side, or with a shared quantity, are safe
+    to merge.
+    """
+    sig_a = _quantity_signature(a)
+    sig_b = _quantity_signature(b)
+    if not sig_a or not sig_b:
+        return False
+    return not (sig_a & sig_b)
 
 
 def _section_title(sub_question: str) -> str:
@@ -2181,5 +2280,9 @@ def _sanitize_answer_text(answer: str, query: str) -> str:
 
     # Collapse immediate repeated clause: "X is ... X is ..."
     text = re.sub(r"(?i)(\b[A-Z][A-Za-z\s\-]{2,40}\s+is\b[^.]*\.)\s+\1", r"\1", text)
+
+    # Question-shaped headings are not labels: shorten them so a raw planner
+    # question or writer-emitted question never becomes a section heading.
+    text = _dedupe_heading(text)
 
     return text.strip()

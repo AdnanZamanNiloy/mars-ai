@@ -233,3 +233,84 @@ def test_trim_to_band_leaves_in_band_draft_untouched():
 
     body = "## Answer\n\nA short, in-band answer [1]."
     assert _trim_to_band(body, "deep") == body
+
+
+def test_compression_never_merges_claims_with_distinct_numbers():
+    """Regression: near-identical wording with DIFFERENT quantities is not a
+    restatement. Merging '$11.5bn overrun' with '$12.7bn overrun' replaced
+    specific evidence with one generic representative and silently dropped a
+    figure the report should have reported as a range."""
+    facts = [
+        {"claim": "The Rooppur project cost overrun reached 11.5 billion dollars.",
+         "source": "https://a.example/1"},
+        {"claim": "The Rooppur project cost overrun reached 12.7 billion dollars.",
+         "source": "https://b.example/2"},
+        {"claim": "The Rooppur project cost overrun reached 11.5 billion dollars in 2025.",
+         "source": "https://c.example/3"},
+    ]
+    compressed = _compress_to_themes(facts, similarity_threshold=0.6)
+    claims = [f["claim"] for f in compressed]
+    # Two distinct figures survive...
+    assert any("11.5" in c for c in claims)
+    assert any("12.7" in c for c in claims)
+    # ...and the genuine restatement (same figure) is merged into one entry.
+    assert len(compressed) == 2
+
+
+def test_required_sections_added_before_length_trim_keeps_band():
+    """Regression: mandatory sections and the appendix were appended AFTER the
+    deterministic trim, so every deep report overshot the 1500-word band
+    (live: 2274-2750 words). The ordering must be ensure_required_sections →
+    trim, and the required headings must survive the trim."""
+    from app.agents.answer_quality import length_band
+    from app.agents.synthesizer import (
+        _count_words, _trim_to_band, ensure_required_sections,
+    )
+
+    para = " ".join(["word"] * 200)
+    writer_draft = "\n\n".join([
+        "## Executive Summary", para,
+        "## What It Is", para, para, para,
+        "## How It Works", para, para, para,
+    ])
+    _, hi = length_band("deep")
+
+    # Reproduce the pipeline order: add required sections, then trim.
+    body = ensure_required_sections(
+        writer_draft,
+        ctx={"evidence_distribution": {"A": 1, "B": 1, "C": 1, "D": 0}},
+        usable_facts=_facts(),
+        contradictions=[],
+    )
+    assert _count_words(body) > hi
+    trimmed = _trim_to_band(body, "deep")
+
+    for heading in ("## Executive Summary", "## Key Findings", "## Evidence Strength",
+                    "## Limitations & Unknowns", "## Counterarguments & Disputed Points"):
+        assert heading in trimmed
+    assert _count_words(trimmed) <= hi
+
+
+def test_question_shaped_headings_are_shortened():
+    """Regression: live deep reports shipped raw questions as headings
+    ("## How did the FDIC's systemic risk exception ... ?"), duplicating the
+    query and padding the answer. A heading must be a concise label."""
+    from app.agents.synthesizer import _dedupe_heading, _shorten_heading
+
+    assert _shorten_heading(
+        "How did the FDIC's systemic risk exception for SVB and Signature "
+        "(March 12, 2023) extend deposit protection?"
+    ) != "How did the FDIC's systemic risk exception for SVB and Signature (March 12, 2023) extend deposit protection?"
+    assert len(_shorten_heading("What Are Bangladesh's Projected Electricity Demand and Generation Requirements?").split()) <= 10
+    assert "?" not in _shorten_heading("What caused the 2023 crisis?")
+
+    body = (
+        "## How did the FDIC extend deposit protection beyond the insured limit?\n\n"
+        "FDIC used a systemic risk exception [1].\n\n"
+        "## Key Findings\n\n- A finding [1].\n"
+    )
+    out = _dedupe_heading(body)
+    heads = [ln for ln in out.splitlines() if ln.startswith("#")]
+    assert all(not h.endswith("?") for h in heads)
+    # A normal short heading is untouched.
+    assert "## Key Findings" in out
