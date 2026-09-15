@@ -57,6 +57,7 @@ from app.agents.outline import (
     group_facts_by_section,
     render_outline,
 )
+from app.core.section_context import build_section_candidate_pool, select_section_facts
 from app.agents.answer_quality import length_band
 from app.agents.evidence_utils import (
     dedupe_semantic_facts,
@@ -734,6 +735,37 @@ def _trim_to_band(body: str, mode: str) -> str:
     return _render()
 
 
+def _ranked_section_groups(
+    outline: AnswerOutline,
+    usable_facts: Sequence[Dict[str, Any]],
+) -> List[Tuple[Any, List[Dict[str, Any]]]]:
+    """Pair each section with its ranked per-section context.
+
+    Candidate pool for a section is its axis-grouped facts PLUS a BOUNDED,
+    relevance-pre-ranked slice of the global pool, so the section can recover a
+    relevant claim the coarse grouping placed under another axis without every
+    section seeing every fact. The section's own facts are reserved a slot, and
+    each section falls back to its axis-grouped facts on any failure, so a
+    section is never empty when it had evidence.
+    """
+    pool = [f for f in (usable_facts or []) if isinstance(f, dict)]
+    out: List[Tuple[Any, List[Dict[str, Any]]]] = []
+    for section, own in group_facts_by_section(outline):
+        candidates, own_ids = build_section_candidate_pool(section, own, pool)
+        if not candidates:
+            out.append((section, []))
+            continue
+        selected = select_section_facts(
+            section, candidates, reserved_ids=own_ids
+        )
+        # If selection somehow dropped every axis-grouped fact, fall back to
+        # the raw group so the section keeps its own evidence.
+        if not selected:
+            selected = list(own)
+        out.append((section, selected))
+    return out
+
+
 async def _synthesize_sectioned(
     llm: LLMClient,
     query: str,
@@ -751,11 +783,15 @@ async def _synthesize_sectioned(
     evidence appendix, source legend) are applied to the assembled text
     exactly as in the single-pass path.
     """
-    groups = [
-        (section, facts)
-        for section, facts in group_facts_by_section(outline)
-        if facts
-    ]
+    # Per-section context selection (GPT Researcher adaptation): the section's
+    # own axis-grouped facts are ALWAYS candidates, and the rest of the global
+    # pool is added so a section can draw a relevant claim the coarse axis
+    # grouping put elsewhere. The selector then ranks the union by combined
+    # relevance + evidence quality + corroboration + authority with a bounded
+    # diversity bonus and a high-impact floor, instead of handing the writer
+    # the axis pool in acquisition order. On any failure it returns the
+    # axis-grouped pool (never an empty section — AGENTS.md 4.7).
+    groups = _ranked_section_groups(outline, usable_facts)
     if len(groups) < 2:
         return None
 
