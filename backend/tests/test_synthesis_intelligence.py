@@ -221,8 +221,10 @@ def test_recap_sections_are_kept_but_registered():
 
 
 def test_compression_never_empties_the_report():
-    """A pathological draft (everything a restatement) is refined in place
-    rather than emptied or collapsed to its first section."""
+    """A pathological draft (everything a restatement) is neither emptied nor
+    collapsed to its first section. When no topic-specific move applies the
+    repeated sentence is left byte-for-byte unchanged — the layer must not
+    invent a generic topic-agnostic tail to justify a transformation."""
     body = "The same fact is stated here in the opening [1]."
     answer = _report(("A", body), ("B", body), ("C", body))
     compressed, report = apply_synthesis_intelligence(answer, protect_headings=MACHINE)
@@ -230,7 +232,9 @@ def test_compression_never_empties_the_report():
     assert "The same fact is stated here" in compressed
     for heading in ("## A", "## B", "## C"):
         assert heading in compressed
-    assert report.refined_transitions == 2
+    # No topic-specific clause exists for this claim, so nothing was appended.
+    assert report.refined_transitions == 0
+    assert compressed.count("The same fact is stated here in the opening [1].") == 3
 
 
 def test_analyze_report_measures_redundancy_without_mutating():
@@ -307,8 +311,9 @@ def test_contradiction_signal_selects_uncertainty_dimension():
 
 
 def test_analysis_clause_is_scoped_to_the_claim_topic():
-    """A generic financing tail must not be stapled onto a non-financial claim;
-    the clause is scoped to the sentence's subject vocabulary."""
+    """A generic financing tail must never be stapled onto a non-financial
+    claim. A topic-specific claim is refined with its own scoped clause; a claim
+    with NO applicable topic clause is left byte-for-byte unchanged."""
     transformer = refine_restatement(
         "The transformer removes recurrence from the sequence model [1].",
         dimension="implication",
@@ -317,10 +322,12 @@ def test_analysis_clause_is_scoped_to_the_claim_topic():
         "The plant costs about $13 billion [1].",
         dimension="implication",
     )
+    # No topic-specific clause matches the transformer claim: unchanged, and
+    # certainly no generic financing tail.
+    assert transformer == "The transformer removes recurrence from the sequence model [1]."
     assert "financing" not in transformer.lower()
+    # The cost claim has its own topic-scoped clause.
     assert "financing" in cost.lower()
-    # Both still carry an analytical marker and the original citation.
-    assert analytical_dimensions(transformer) and "[1]" in transformer
     assert analytical_dimensions(cost) and "[1]" in cost
 
 
@@ -513,6 +520,79 @@ def test_move_phrasing_matches_move_not_generic_template():
 
 
 # ---------------------------------------------------------------------------
+# Generic-fallback removal — leave the sentence unchanged when no topic-specific
+# move clause applies
+# ---------------------------------------------------------------------------
+# Live pilot evidence: on the mRNA query a genuine prose restatement about LNP
+# delivery received the topic-agnostic tail "…, and the underlying mechanism is
+# that the earlier conditions compound, which forces the trade-offs described
+# here." Fewer generic clauses were appended to label bullets by the earlier
+# guard, but the generic-fallback path itself was never removed. The refinement
+# layer must only ever transform a sentence when it has a concrete,
+# topic-scoped move for that claim; otherwise the sentence stays byte-for-byte
+# unchanged.
+
+_NO_TOPIC_SENTENCE = "The transformer removes recurrence from the sequence model [1]."
+
+
+def test_prose_restatement_without_topic_move_is_byte_for_byte_unchanged():
+    """No topic-specific clause matches this claim, so nothing is appended."""
+    assert refine_restatement(
+        _NO_TOPIC_SENTENCE, prior_section="What It Is", dimension="implication"
+    ) == _NO_TOPIC_SENTENCE
+
+
+def test_generic_fallback_clause_is_never_appended_end_to_end():
+    """A repeated prose claim with no topic-specific move keeps its exact text;
+    the old generic mechanism/implication tails never appear."""
+    answer = _report(
+        ("What It Is", _NO_TOPIC_SENTENCE),
+        ("How It Works", _NO_TOPIC_SENTENCE),
+    )
+    compressed, report = apply_synthesis_intelligence(answer, protect_headings=MACHINE)
+    assert compressed.count(_NO_TOPIC_SENTENCE) == 2
+    assert report.refined_transitions == 0
+    for clause in _CORRUPT_CLAUSES:
+        assert clause not in compressed.lower(), clause
+    # Specifically the generic implication/mechanism tails of _ANALYSIS_BY_MOVE.
+    assert "constrains the choices the rest of the analysis depends on" not in compressed.lower()
+
+
+def test_prose_restatement_with_topic_move_is_still_refined():
+    """A claim WITH an applicable topic-scoped move is still transformed."""
+    answer = _report(
+        ("Cost", "The project costs about US$13 billion [1]."),
+        ("Outlook", "The project costs about US$13 billion [1]."),
+    )
+    compressed, report = apply_synthesis_intelligence(answer, protect_headings=MACHINE)
+    assert report.refined_transitions == 1
+    assert compressed.count("[1]") == 2
+    outlook = compressed.split("## Outlook", 1)[1].strip()
+    assert "financing" in outlook.lower()
+    assert outlook.split("\n")[0].strip().endswith(".")
+
+
+def test_bullets_and_fragments_still_untouched_without_topic_move():
+    """The no-generic-fallback change must not start refining bullets or
+    fragments: they remain verbatim even when no topic-specific move exists."""
+    bullet_prose = (
+        "The first mRNA vaccines authorized in humans were the COVID-19 vaccines "
+        "in 2020 [6]."
+    )
+    answer = _report(
+        ("History", f"- {bullet_prose}"),
+        ("Key Figures", f"- {bullet_prose}"),
+        ("Notes", "A label fragment with no finite verb: reported by the lab [7]."),
+    )
+    compressed, report = apply_synthesis_intelligence(answer, protect_headings=MACHINE)
+    assert f"- {bullet_prose}" in compressed
+    assert "A label fragment with no finite verb: reported by the lab [7]." in compressed
+    assert report.refined_transitions == 0
+    for clause in _CORRUPT_CLAUSES:
+        assert clause not in compressed.lower(), clause
+
+
+# ---------------------------------------------------------------------------
 # Bug 1 regression — adaptive-moves boilerplate injected into label bullets
 # ---------------------------------------------------------------------------
 # Live pilot evidence: on 4/6 queries the refinement pass appended generic move
@@ -612,12 +692,15 @@ def test_prose_paragraph_restatement_is_still_refined_not_bullet():
 
 
 def test_genuine_prose_restatement_is_still_refined():
-    """Bug 1 guard must not over-reject: a real prose restatement is refined."""
+    """Bug 1 guard must not over-reject: a real prose restatement WITH a
+    topic-specific move available is still refined. A prose restatement with no
+    applicable topic clause is instead left byte-for-byte unchanged (see the
+    generic-fallback removal test below)."""
     from app.core.synthesis_intelligence import _is_refinable_sentence
 
     prose = (
-        "The defining architectural choice is subtractive: the Transformer relies "
-        "entirely on attention mechanisms [1]."
+        "The project costs about US$13 billion and the financing shapes the "
+        "tariff for decades [1]."
     )
     assert _is_refinable_sentence(prose) is True
     ledger = ClaimLedger()

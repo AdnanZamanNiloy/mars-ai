@@ -400,10 +400,14 @@ def _analysis_clause(sentence: str, move: str) -> str:
     """The analytical tail for a refined sentence, scoped to its topic and move.
 
     Picks the first topic-specific variant whose subject vocabulary appears in
-    the sentence, falling back to the generic clause for the move. This is what
-    keeps a refinement about a transformer architecture from ending in a
-    financing-obligations tail, and keeps the tail's REASONING SHAPE (mechanism,
-    trade-off, uncertainty, …) matching the move the signals selected.
+    the sentence. There is deliberately NO generic fallback: a move clause that
+    is not scoped to the claim's own topic reads as topic-agnostic boilerplate
+    ("the underlying mechanism is that the earlier conditions compound…" stapled
+    onto an mRNA-delivery sentence). When no topic-specific variant applies the
+    empty string is returned, and the caller leaves the sentence unchanged.
+
+    The tail's REASONING SHAPE (mechanism, trade-off, uncertainty, …) still
+    matches the move the signals selected; only the topic scoping changed.
     """
     move = move if move in _ANALYSIS_BY_MOVE else "implication"
     for pattern, variants in _TOPIC_ANALYSIS:
@@ -411,7 +415,7 @@ def _analysis_clause(sentence: str, move: str) -> str:
             clause = variants.get(move)
             if clause:
                 return clause
-    return _ANALYSIS_BY_MOVE[move]
+    return ""
 
 
 def _stable_pick(options: Sequence[str], seed: str) -> str:
@@ -804,8 +808,15 @@ def refine_restatement(
         return clean
     chosen = move or dimension or "implication"
     chosen = chosen if chosen in _ANALYSIS_BY_MOVE else "implication"
-    transition = _stable_pick(_TRANSITION_BY_MOVE[chosen], seed or clean)
     analysis = _analysis_clause(clean, chosen)
+    if not analysis:
+        # No topic-specific clause applies to this claim. The adaptive layer
+        # only ever transforms a sentence when it has a concrete, topic-scoped
+        # move for it; a generic topic-agnostic tail is exactly the boilerplate
+        # corruption this module must not introduce (AGENTS.md: adaptive-moves
+        # boilerplate corruption). Leave the sentence byte-for-byte unchanged.
+        return clean
+    transition = _stable_pick(_TRANSITION_BY_MOVE[chosen], seed or clean)
     appended = f"{transition} {analysis}"
     if len(appended.split()) > MAX_APPENDED_WORDS:
         # Defensive bound; current clauses are all well under it, but a future
@@ -1148,6 +1159,13 @@ class ClaimLedger:
             move=move,
             seed=key or sentence,
         )
+        if refined == sentence.strip():
+            # No topic-specific move clause applied, so the sentence is left
+            # exactly as written. Treat it as kept-verbatim rather than a
+            # refinement: nothing was transformed and no generic tail invented.
+            self.kept_fragments += 1
+            self._texts.append(sentence)
+            return Refinement(text=sentence, kept=True, transformed=False)
         # Record the dimension the move maps onto so a later true expansion of
         # the same claim is still detected as novel. `analytical_dimensions`
         # keeps its narrow vocabulary; trade-off/causal/strategic moves are
