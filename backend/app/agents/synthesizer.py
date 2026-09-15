@@ -588,7 +588,7 @@ async def synthesize(
     # required sections exist (so Key Findings is registered as a recap) and
     # BEFORE the trim. A bare restatement is transformed into a transition +
     # analysis sentence (never deleted) and keeps its exact [n] markers.
-    answer, _si_report = apply_synthesis_intelligence_pass(answer, ctx)
+    answer, _si_report = apply_synthesis_intelligence_pass(answer, ctx, query=query)
     answer = _trim_to_band(answer, mode)
     audit = audit_citations(answer, numbered, cited_facts)
 
@@ -620,6 +620,8 @@ def _normalize_heading(text: str) -> str:
 def apply_synthesis_intelligence_pass(
     answer: str,
     ctx: Dict[str, Any] | None = None,
+    *,
+    query: str = "",
 ) -> tuple[str, SynthesisIntelligenceReport]:
     """Run the deterministic cross-section refinement layer on an assembled draft.
 
@@ -639,10 +641,19 @@ def apply_synthesis_intelligence_pass(
     protected = tuple(MACHINE_SECTIONS) + ("## Limitations", "## Evidence & Confidence")
     recap = ("## Executive Summary", "## Key Findings")
     ctx = ctx or {}
+    intent = ctx.get("intent") or {}
     signals = {
         "contradicted": bool(ctx.get("contradictions")),
         "corroborated": bool(ctx.get("corroborated")),
         "primary": bool(ctx.get("primary_share")),
+        # Adaptive move-selection signals (additive; the layer works without
+        # them). The classified query + its type let a "should … invest"
+        # question resolve to a strategic move, a "what caused …" question to
+        # a causal one, and a "compare …" question to a comparison — so the
+        # refinement answers the question that was asked, not a generic one.
+        "query": str(query or ""),
+        "query_type": str(intent.get("query_type", "") or ctx.get("query_type", "") or ""),
+        "domain": str(intent.get("domain", "") or ""),
     }
     return apply_synthesis_intelligence(
         answer,
@@ -1044,7 +1055,7 @@ async def _synthesize_sectioned(
     # (each section was written blind to its siblings): run the deterministic
     # refinement pass before the trim — a repeated opening becomes a transition,
     # never a deleted sentence, and every [n] marker is preserved.
-    answer, _si_report = apply_synthesis_intelligence_pass(answer, ctx)
+    answer, _si_report = apply_synthesis_intelligence_pass(answer, ctx, query=query)
     answer = _trim_to_band(answer, mode)
     audit = audit_citations(answer, numbered, cited_facts)
     if audit.invalid_markers:

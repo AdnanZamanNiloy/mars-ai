@@ -14,6 +14,7 @@ The layer is deterministic (claim-key tracking + a fuzzy anchor match), so
 these tests exercise it with no LLM at all — the fallback IS the mechanism.
 """
 from app.core.synthesis_intelligence import (
+    MOVES,
     ClaimLedger,
     analytical_dimensions,
     analyze_report,
@@ -21,6 +22,7 @@ from app.core.synthesis_intelligence import (
     claim_key,
     claim_polarity,
     refine_restatement,
+    reasoning_moves,
 )
 
 MACHINE = ("## Sources", "## Evidence integrity", "## Source ledger")
@@ -320,3 +322,191 @@ def test_analysis_clause_is_scoped_to_the_claim_topic():
     # Both still carry an analytical marker and the original citation.
     assert analytical_dimensions(transformer) and "[1]" in transformer
     assert analytical_dimensions(cost) and "[1]" in cost
+
+
+# ---------------------------------------------------------------------------
+# Adaptive reasoning moves
+# ---------------------------------------------------------------------------
+# The generic "the figure is significant because …" tail this layer used to
+# append is replaced by a MOVE chosen from the evidence signals. These tests
+# pin the signal -> move mapping, verify the phrasing actually expresses the
+# chosen move, and check the transformation stays deterministic, citation-safe,
+# fact-safe and length-bounded.
+
+
+def test_contradicted_claim_picks_uncertainty_or_tradeoff():
+    """A disputed claim must hedge (uncertainty) rather than assert; when it is
+    already a comparison it becomes an explicit trade-off."""
+    plain = refine_restatement(
+        "The plant cost $13 billion [1].",
+        move="uncertainty",
+    )
+    assert "uncertainty" in reasoning_moves(plain)
+    assert "disputed" in plain or "provisional" in plain
+    comparative = refine_restatement(
+        "Solar is cheaper than nuclear [1].",
+        move="tradeoff",
+    )
+    assert "tradeoff" in reasoning_moves(comparative)
+    assert "cost" in comparative.lower() or "weighed" in comparative.lower()
+
+
+def test_comparative_section_selects_comparison_move():
+    """A 'How It Compares' section restatement must be framed as a comparison."""
+    answer = _report(
+        ("What It Is", "Solar capacity grew 20% in 2023 [1]."),
+        ("How It Compares", "Solar capacity grew 20% in 2023 [1]."),
+    )
+    compressed, report = apply_synthesis_intelligence(answer, protect_headings=MACHINE)
+    assert report.refined_transitions == 1
+    section = compressed.split("## How It Compares", 1)[1].strip()
+    assert "comparison" in reasoning_moves(section), section
+
+
+def test_decision_query_policy_claim_selects_strategic_move():
+    """A decision/policy query turns a repeated policy claim into a strategic
+    consequence move."""
+    answer = _report(
+        ("What It Is", "Bangladesh should expand nuclear capacity [1]."),
+        ("Contribution", "Bangladesh should expand nuclear capacity [1]."),
+    )
+    compressed, report = apply_synthesis_intelligence(
+        answer,
+        protect_headings=MACHINE,
+        signals={
+            "query": "Should Bangladesh increase nuclear energy investment over 20 years?",
+            "query_type": "analytical",
+        },
+    )
+    assert report.refined_transitions == 1
+    section = compressed.split("## Contribution", 1)[1].strip()
+    assert "strategic" in reasoning_moves(section), section
+    assert "decision" in section.lower() or "changes the role" in section.lower()
+
+
+def test_quantitative_authoritative_claim_selects_implication():
+    """A quantitative claim from strong sourcing gets an implication move."""
+    answer = _report(
+        ("Evidence & Data", "The plant adds 1,200 MW of capacity [1]."),
+        ("Applications", "The plant adds 1,200 MW of capacity [1]."),
+    )
+    compressed, report = apply_synthesis_intelligence(
+        answer, protect_headings=MACHINE, signals={"authoritative": True}
+    )
+    assert report.refined_transitions == 1
+    section = compressed.split("## Applications", 1)[1].strip()
+    assert "implication" in reasoning_moves(section), section
+
+
+def test_causal_query_selects_causal_move():
+    """A 'what caused …' query turns a repeated fact into a causal move."""
+    answer = _report(
+        ("Evidence & Data", "Nuclear investment fell after 2011 [1]."),
+        ("Outlook & Trends", "Nuclear investment fell after 2011 [1]."),
+    )
+    compressed, report = apply_synthesis_intelligence(
+        answer,
+        protect_headings=MACHINE,
+        signals={"query": "What caused the decline in nuclear investment?"},
+    )
+    assert report.refined_transitions == 1
+    section = compressed.split("## Outlook & Trends", 1)[1].strip()
+    assert "causal" in reasoning_moves(section), section
+
+
+def test_each_move_is_reachable_and_signal_driven():
+    """Every declared move is reachable from a real signal combination, and the
+    chosen move is exactly the one the top-precedence rule implies."""
+    from app.core.synthesis_intelligence import _choose_move
+
+    cases = [
+        ("uncertainty", "Rooppur costs $13 billion [1].", {"contradicted": True}),
+        ("comparison", "Solar capacity grew 20% [1].", {"axis": "How It Compares"}),
+        (
+            "strategic",
+            "Bangladesh should expand nuclear capacity [1].",
+            {"query": "Should Bangladesh invest over 20 years?"},
+        ),
+        ("implication", "The plant adds 1,200 MW [1].", {"authoritative": True}),
+        ("mechanism", "The reactor uses a water design [1].", {"axis": "How It Works"}),
+        ("causal", "Investment fell in 2011 [1].", {"query": "What caused the fall?"}),
+        ("tradeoff", "The plant adds 1,200 MW [1].", {}),
+        ("comparison", "Solar is cheaper than nuclear [1].", {}),
+    ]
+    seen = set()
+    for expected, sentence, signals in cases:
+        move = _choose_move(sentence, signals)
+        seen.add(move)
+        assert move == expected, (sentence, signals, move)
+    assert seen <= set(MOVES)
+    assert "strategic" in seen and "mechanism" in seen and "causal" in seen
+
+
+def test_adaptive_move_deterministic_without_llm_and_citations_preserved():
+    """With no LLM and no signals the layer still produces a valid move; the
+    citation survives and no new number or [n] marker is invented."""
+    ledger = ClaimLedger()
+    source = "Rooppur costs about $13 billion [1]."
+    ledger.register("S1", source)
+    outcome = ledger.refine("S2", source)
+    assert outcome.transformed and outcome.move in MOVES
+    assert "[1]" in outcome.text
+    assert outcome.text.count("[1]") == 1
+    assert "[2]" not in outcome.text and "[0]" not in outcome.text
+    # No new figure appears: the only number in the refined text is the one
+    # the source sentence carried.
+    import re as _re
+
+    src_numbers = set(_re.findall(r"\d[\d,\.]*", source))
+    out_numbers = set(_re.findall(r"\d[\d,\.]*", outcome.text))
+    assert out_numbers <= src_numbers, (src_numbers, out_numbers)
+    # And determinism: the same inputs refine identically.
+    again = ClaimLedger()
+    again.register("S1", source)
+    assert again.refine("S2", source).text == outcome.text
+
+
+def test_no_person_or_entity_is_invented():
+    """The move only reorganizes the claim; it never introduces a named entity
+    that was not in the source sentence."""
+    source = "The reactor design was licensed in 2017 [4]."
+    refined = refine_restatement(source, move="mechanism")
+    for invented in ("Rosatom", "IAEA", "Westinghouse", "Fukushima"):
+        assert invented not in refined
+    assert "[4]" in refined
+
+
+def test_refinement_is_length_bounded():
+    """A transformation must not inflate the sentence beyond a fixed bound over
+    the source claim + a short clause."""
+    from app.core.synthesis_intelligence import MAX_APPENDED_WORDS
+
+    source = "Nuclear plants have high capacity factors."
+    for move in MOVES:
+        refined = refine_restatement(source, move=move)
+        appended = len(refined.split()) - len(source.split())
+        assert appended <= MAX_APPENDED_WORDS, (move, refined)
+        assert refined.endswith(".")
+
+
+def test_acceptance_class_strategic_transform_is_achievable():
+    """The acceptance example class: a reliability claim from a nuclear plan is
+    reframed as a strategic consequence (role change), not a generic clause."""
+    source = "Nuclear plants have high capacity factors."
+    refined = refine_restatement(source, move="strategic")
+    assert "Nuclear plants have high capacity factors" in refined
+    lowered = refined.lower()
+    assert "changes" in lowered and "role" in lowered
+    assert "dispatchable" in lowered and "stabilizer" in lowered
+    # It is NOT the old templated tail.
+    assert "the figure is significant because" not in lowered
+
+
+def test_move_phrasing_matches_move_not_generic_template():
+    """Different moves must produce different phrasings for the same claim."""
+    source = "Rooppur costs about $13 billion [1]."
+    outputs = {move: refine_restatement(source, move=move) for move in MOVES}
+    assert len(set(outputs.values())) == len(MOVES)
+    # The chosen move is actually present in each phrasing.
+    for move, text in outputs.items():
+        assert move in reasoning_moves(text), (move, text)

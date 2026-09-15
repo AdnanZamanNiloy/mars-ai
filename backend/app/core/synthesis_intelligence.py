@@ -38,12 +38,15 @@ What it does
 3. REFINE, DON'T DELETE — a bare restatement is rewritten into a refinement
    sentence: a contextual transition naming the earlier section ("Building on
    the cost picture above, …") plus the original claim (its number and `[n]`
-   marker preserved verbatim) plus an analytical clause chosen from the
-   available evidence signals — contradictions -> uncertainty/trade-off,
-   quantitative content -> implication, corroboration/primary -> strength,
-   section axis -> framing. This runs with no LLM, so the deterministic path
-   always produces a usable transition and a section never opens on a
-   dangling or removed first sentence.
+   marker preserved verbatim) plus an ADAPTIVE REASONING MOVE chosen from the
+   available evidence signals — contradiction -> uncertainty/trade-off, a
+   comparison section or comparative query -> comparison, a causal query ->
+   causal explanation, a decision/policy query -> strategic consequence,
+   quantitative content -> implication/trade-off, a mechanism claim/section ->
+   mechanism, authoritative sourcing -> strength framing. The move (not a
+   fixed template) is signal-driven, and its phrasing fits the move; this runs
+   with no LLM, so the deterministic path always produces a usable transition
+   and a section never opens on a dangling or removed first sentence.
 4. CITATION PRESERVATION — refined sentences keep the exact `[n]` markers of
    the original claim; no marker is ever invented, renumbered or moved
    between sentences.
@@ -96,7 +99,7 @@ _SUFFIXES = ("ings", "ing", "ies", "ied", "es", "ed", "s")
 _MECHANISM_RE = re.compile(
     r"(?i)\b(because|driven by|as a result of|mechanism|results? in|leads? to|"
     r"caused by|gives? rise to|due to|stems? from|the reason|so that|thereby|"
-    r"which forces|forcing|trigger(?:s|ed|ing)?|explains? why|"
+    r"which forces|forcing|trigger(?:s|ed|ing)?|explains? why|follows? from|"
     r"the driver|is driven|arises? from|comes? from|"
     r"which (?:removed|eliminated|enabled|allowed|reduced|caused|created|"
     r"introduced|replaced|made))\b"
@@ -129,23 +132,97 @@ _DIMENSIONS: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     ("uncertainty", _UNCERTAINTY_RE),
 )
 
-# Contextual transitions that open a REFINEMENT sentence, i.e. a sentence that
-# restated an earlier claim. Each names the relationship to the earlier use so
-# the section reads as a continuation instead of a fresh assertion. The pool
-# is indexed deterministically (see `_stable_pick`) so the same claim always
-# gets the same transition and tests are repeatable; variety across claims
-# stops a report reading as boilerplate.
-_TRANSITION_BY_DIMENSION: Dict[str, Tuple[str, ...]] = {
+# ---------------------------------------------------------------------------
+# Adaptive reasoning moves
+# ---------------------------------------------------------------------------
+# The templated analytical clauses this module shipped with appended the same
+# generic tail ("the figure is significant because …") to every restatement,
+# regardless of what the claim was or what the evidence around it said. That
+# reads as boilerplate because it IS boilerplate: the phrase does not depend on
+# the claim. This layer replaces it with a MOVE chosen from the evidence
+# signals, each with phrasing that fits the move.
+#
+# The seven moves are the reasoning relations a repeated claim can usefully be
+# turned into:
+#   implication  — what follows from the claim
+#   mechanism    — the process that produces it
+#   causal       — why it happened / what caused it
+#   tradeoff     — what it costs or gives up
+#   uncertainty  — how settled it is
+#   comparison   — how it ranks against the alternatives
+#   strategic    — what it means for a decision or plan
+#
+# Selection is an ORDERED, DETERMINISTIC precedence over real signals (never
+# RNG, never a hash): contradiction, query intent, section axis, then claim
+# type. The move — not a random template — is signal-driven; within a move a
+# small pool of phrasings is indexed deterministically via `_stable_pick` so
+# the same claim always refines the same way and tests stay repeatable.
+MOVES: Tuple[str, ...] = (
+    "implication",
+    "mechanism",
+    "causal",
+    "tradeoff",
+    "uncertainty",
+    "comparison",
+    "strategic",
+)
+
+# Phrases that mark each move in text. A move is verifiable: `reasoning_moves`
+# detects it, and the deterministic post-condition is that the chosen move is
+# actually present in the refined sentence. `_DIMENSIONS` above still maps onto
+# the expansion vocabulary, so attaching a move neither weakens nor re-labels
+# the existing expansion detection.
+_MOVE_MARKERS: Dict[str, "re.Pattern[str]"] = {
+    "mechanism": _MECHANISM_RE,
+    "causal": re.compile(
+        r"(?i)\b(caused|the cause|because|driven by|arose from|stems from|"
+        r"origint|root cause|triggered|explains why|as a result of|gave rise|"
+        r"follows? from|did not appear by chance)\b"
+    ),
+    "tradeoff": re.compile(
+        r"(?i)\b(trade-?offs?|at the cost of|at the expense of|gives? up|"
+        r"in exchange|the price of|must be weighed|buys? .{0,20}at|"
+        r"offset by|no free lunch|costs? (?:reliability|flexibility|"
+        r"dispatchability|speed))\b"
+    ),
+    "comparison": _COMPARISON_RE,
+    "uncertainty": _UNCERTAINTY_RE,
+    "strategic": re.compile(
+        r"(?i)\b(changes? the role|shifts? the (?:role|balance|decision)|"
+        r"for a (?:policymaker|planner|decision|grid|government)|"
+        r"the strategic|what it means for|decides? whether|commits? the|"
+        r"the decision (?:hinges|turns)|tilts? the choice|"
+        r"the planning question|long-run (?:strategic|decision))\b"
+    ),
+    "implication": _IMPLICATION_RE,
+}
+
+# Transitions that open a REFINEMENT sentence, keyed by MOVE. Each names the
+# relationship to the earlier use so the section reads as a continuation
+# instead of a fresh assertion. Pools are indexed deterministically (see
+# `_stable_pick`); the wording is shared across topics because a transition is
+# discourse glue, while the analytical tail (below) carries the topic.
+_TRANSITION_BY_MOVE: Dict[str, Tuple[str, ...]] = {
     "implication": (
-        "Building on the cost and scale picture above:",
+        "Building on the picture above:",
         "Extending that finding to what follows from it:",
         "Taking that established point one step further:",
         "Reading that figure for its consequences:",
     ),
     "mechanism": (
+        "Building on that fact, the mechanism runs as follows:",
         "The mechanism behind that established point is worth stating plainly:",
-        "Building on that fact, the causal chain runs as follows:",
         "That outcome follows from a mechanism the earlier section did not name:",
+    ),
+    "causal": (
+        "Building on that fact, the causal chain is worth naming:",
+        "That outcome did not arise by accident:",
+        "The cause behind that established point runs as follows:",
+    ),
+    "tradeoff": (
+        "Building on that established point, it carries a trade-off:",
+        "That gain is not free:",
+        "Weighing that claim against what it costs:",
     ),
     "comparison": (
         "Set against the alternatives already discussed:",
@@ -157,6 +234,12 @@ _TRANSITION_BY_DIMENSION: Dict[str, Tuple[str, ...]] = {
         "Building on that point, its reliability must be qualified:",
         "That claim carries an unresolved caveat:",
     ),
+    "strategic": (
+        "Building on that established point, the strategic reading is this:",
+        "For the decision the report is answering, that changes the calculus:",
+        "Extending that finding to the plan it informs:",
+    ),
+    # Legacy move names mapped onto the adaptive set for backward compatibility.
     "strength": (
         "That finding is unusually well grounded:",
         "Building on that evidence, its provenance is stronger than most:",
@@ -182,22 +265,36 @@ _TOPIC_ANALYSIS: Tuple[Tuple["re.Pattern[str]", Dict[str, str]], ...] = (
                    r"billion|trillion|million|invest|price|subsid)\b"),
         {
             "implication": (
-                "the figure is significant because it must be weighed against "
-                "the long-term financing obligations it commits the sector to"
+                "which means the long-term financing obligations it commits the "
+                "sector to constrain the choices the rest of the analysis depends on"
             ),
             "mechanism": (
                 "the cost pressure follows a mechanism in which fixed capital "
                 "must be recovered over a long operating life, which raises the "
                 "stakes of any delay"
             ),
+            "causal": (
+                "that cost level did not appear by chance: it follows from the "
+                "capital structure and construction timeline the project entails, "
+                "which is why it recurs"
+            ),
+            "tradeoff": (
+                "that financing buys capacity at the cost of locking the budget "
+                "into one pathway for decades"
+            ),
             "comparison": (
-                "that cost places it in direct comparison with the alternatives "
-                "discussed elsewhere, where relative cost per unit of output is "
-                "the deciding factor"
+                "that cost stands out compared with the alternatives discussed "
+                "elsewhere, where relative cost per unit of output is the "
+                "deciding factor"
             ),
             "uncertainty": (
                 "the cost figure is disputed across sources, so it should be "
                 "read as a provisional range rather than a settled estimate"
+            ),
+            "strategic": (
+                "for the budgeting decision that changes the role the cost "
+                "plays, which means the sector is committed to one financing "
+                "profile"
             ),
             "strength": (
                 "the cost figure is corroborated by multiple independent "
@@ -216,23 +313,36 @@ _TOPIC_ANALYSIS: Tuple[Tuple["re.Pattern[str]", Dict[str, str]], ...] = (
                    r"megawatt|gigawatt|mwh|kwh)\b"),
         {
             "implication": (
-                "the figure is significant because it shapes the trade-off "
-                "between capacity added, reliability delivered, and the "
-                "emissions or cost it implies"
+                "which means the value of firm output shifts, so the flexibility "
+                "the system can rely on is what shapes the grid's real choices"
             ),
             "mechanism": (
-                "the underlying mechanism is that generation choices lock in "
-                "an infrastructure pathway whose costs and emissions persist "
-                "for decades"
+                "the mechanism is that generation choices lock in an "
+                "infrastructure pathway whose costs and emissions persist for "
+                "decades"
+            ),
+            "causal": (
+                "that outcome follows from how the technology converts its fuel "
+                "or resource into dispatchable output, not from its headline "
+                "nameplate size"
+            ),
+            "tradeoff": (
+                "that strength is bought at the cost of slow build times and "
+                "high upfront capital, which is the trade-off the comparison turns on"
             ),
             "comparison": (
-                "that places it in direct comparison with the alternative "
-                "generation options discussed elsewhere, where firm output per "
-                "unit of cost is the deciding factor"
+                "that firm output stands out compared with the alternative "
+                "generation options discussed elsewhere, where output per unit "
+                "of cost is the deciding factor"
             ),
             "uncertainty": (
                 "the figure is disputed across sources, so it should be read "
                 "as a provisional range rather than a settled estimate"
+            ),
+            "strategic": (
+                "for a grid balancing variable renewables, that changes its "
+                "role from bulk energy producer to dispatchable system "
+                "stabilizer, which means flexibility sets its value"
             ),
             "strength": (
                 "the finding is corroborated by multiple independent sources, "
@@ -246,22 +356,34 @@ _TOPIC_ANALYSIS: Tuple[Tuple["re.Pattern[str]", Dict[str, str]], ...] = (
     ),
 )
 
-_ANALYSIS_BY_DIMENSION: Dict[str, str] = {
+_ANALYSIS_BY_MOVE: Dict[str, str] = {
     "implication": (
-        "the figure is significant because it constrains the choices the rest "
-        "of the analysis depends on, rather than being an isolated number"
+        "which means it constrains the choices the rest of the analysis "
+        "depends on, rather than being an isolated number"
     ),
     "mechanism": (
         "the underlying mechanism is that the earlier conditions compound, "
         "which forces the trade-offs described here"
     ),
+    "causal": (
+        "that outcome follows from the conditions named above, which is why it "
+        "recurs across the evidence rather than standing alone"
+    ),
+    "tradeoff": (
+        "the gain comes at the expense of a competing objective, so it must be "
+        "weighed rather than treated as strictly better"
+    ),
     "comparison": (
-        "that places it in direct comparison with the alternatives discussed "
-        "elsewhere, where the relative merits are the deciding factor"
+        "that stands out compared with the alternatives discussed elsewhere, "
+        "where the relative merits are the deciding factor"
     ),
     "uncertainty": (
         "the claim is disputed across sources, so it should be read as a "
         "provisional finding rather than a settled point"
+    ),
+    "strategic": (
+        "for the decision at hand that changes the role it can play, which "
+        "means the repeated figure is decision-relevant"
     ),
     "strength": (
         "the claim is corroborated by multiple independent sources, which "
@@ -274,21 +396,22 @@ _ANALYSIS_BY_DIMENSION: Dict[str, str] = {
 }
 
 
-def _analysis_clause(sentence: str, dimension: str) -> str:
-    """The analytical tail for a refined sentence, scoped to its topic.
+def _analysis_clause(sentence: str, move: str) -> str:
+    """The analytical tail for a refined sentence, scoped to its topic and move.
 
     Picks the first topic-specific variant whose subject vocabulary appears in
-    the sentence, falling back to the generic clause for the dimension. This
-    is what keeps a refinement about a transformer architecture from ending in
-    a financing-obligations tail.
+    the sentence, falling back to the generic clause for the move. This is what
+    keeps a refinement about a transformer architecture from ending in a
+    financing-obligations tail, and keeps the tail's REASONING SHAPE (mechanism,
+    trade-off, uncertainty, …) matching the move the signals selected.
     """
-    dimension = dimension if dimension in _ANALYSIS_BY_DIMENSION else "implication"
+    move = move if move in _ANALYSIS_BY_MOVE else "implication"
     for pattern, variants in _TOPIC_ANALYSIS:
         if pattern.search(sentence or ""):
-            clause = variants.get(dimension)
+            clause = variants.get(move)
             if clause:
                 return clause
-    return _ANALYSIS_BY_DIMENSION[dimension]
+    return _ANALYSIS_BY_MOVE[move]
 
 
 def _stable_pick(options: Sequence[str], seed: str) -> str:
@@ -316,6 +439,10 @@ class Refinement:
     transformed: bool = False
     dimension: str = ""
     first_section: str = ""
+    # The adaptive reasoning move chosen for a transformed restatement
+    # (implication / mechanism / causal / tradeoff / uncertainty / comparison /
+    # strategic). Empty for kept-verbatim sentences.
+    move: str = ""
 
 _NEGATION_RE = re.compile(r"(?i)\b(not|no|never|without|neither|nor|fails? to|does not|did not|is not|are not)\b")
 
@@ -466,30 +593,193 @@ def analytical_dimensions(text: str) -> Set[str]:
 
 _QUANT_RE = re.compile(r"\d|\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\b", re.IGNORECASE)
 
+# Section-axis vocabulary. The axis signal is the section heading (the outline
+# title or the writer's own heading), so the match is on the human words a
+# heading uses, not a model-invented slug.
+_COMPARISON_AXIS_RE = re.compile(
+    r"(?i)\b(compar|versus|\bvs\b|alternative|how it compares|benchmark|"
+    r"trade-?off|weigh)"
+)
+_MECHANISM_AXIS_RE = re.compile(
+    r"(?i)\b(how it works|mechanism|internal|process|architecture|"
+    r"how .{0,20}works|technical)"
+)
+_CAUSAL_AXIS_RE = re.compile(
+    r"(?i)\b(causal|cause|why|root|origins?|history|background|drivers?)"
+)
+_STRATEGIC_AXIS_RE = re.compile(
+    r"(?i)\b(strateg|decision|recommend|outlook|policy|future|plan|"
+    r"implication|what it means|over \d+ years)"
+)
 
-def _choose_dimension(sentence: str, signals: Optional[Dict[str, object]]) -> str:
-    """Pick the analytical dimension a refined restatement should carry.
+# Query-intent vocabulary read from the (already-classified) query text.
+_DECISION_QUERY_RE = re.compile(
+    r"(?i)\b(should|recommend|strategy|strategic|policy|policymaker|"
+    r"decide|decision|choice|prioriti|over \d+ ?(?:years|decades)|"
+    r"government|regulat|plan for|roadmap|most (?:effective|viable|economical))\b"
+)
+_CAUSAL_QUERY_RE = re.compile(
+    r"(?i)\b(cause[ds]?|why|explain (?:what|how)|what led to|what drove|"
+    r"origins?|how did .{0,30}happen|reason)\b"
+)
+_COMPARISON_QUERY_RE = re.compile(
+    r"(?i)\b(compare|comparison|versus|\bvs\b|better|which .{0,20}(?:better|"
+    r"cheaper|safer)|trade-?off|alternatives?)\b"
+)
+_MECHANISM_QUERY_RE = re.compile(
+    r"(?i)\b(how does|how do|how it works|mechanism|process|work internally|"
+    r"explain how)\b"
+)
 
-    Priority is fixed so the transformation is reproducible:
-      1. contradictions in scope -> uncertainty / trade-off (never assert a
-         disputed number as settled),
-      2. corroborated or primary evidence -> strength (the claim is still
-         worth foregrounding even though it repeats),
-      3. a quantitative claim -> implication (a number invites "what follows
-         from it"),
-      4. a named section axis -> framing,
-      5. otherwise -> implication (the safest generic reading).
+# Claim-type vocabulary (the sentence's own shape).
+_MECHANISM_CLAIM_RE = re.compile(
+    r"(?i)\b(process|mechanism|works? by|functions?|operates?|reacts?|"
+    r"converts?|transfers?|pipeline|architecture|algorithm|protocol|"
+    r"how .{0,20}works|enables?|allows? .{0,20}to)\b"
+)
+_CAUSAL_CLAIM_RE = re.compile(
+    r"(?i)\b(because|due to|as a result|driven by|caused|led to|triggered|"
+    r"stemmed|arose|resulted from)\b"
+)
+
+# The deterministic precedence over signals: (rule_name, move). Evaluated in
+# order; the first matching rule wins. Keeping this as data (not a chain of
+# ifs) makes the precedence inspectable and gives tests a stable target.
+_MOVE_RULES: Tuple[Tuple[str, str], ...] = (
+    ("contradicted_comparative", "tradeoff"),
+    ("contradicted", "uncertainty"),
+    ("decision_query", "strategic"),
+    ("comparison_query", "comparison"),
+    ("causal_query", "causal"),
+    ("mechanism_query", "mechanism"),
+    ("comparison_axis", "comparison"),
+    ("mechanism_axis", "mechanism"),
+    ("causal_axis", "causal"),
+    ("strategic_axis", "strategic"),
+    ("causal_claim", "causal"),
+    ("mechanism_claim", "mechanism"),
+    ("comparative_claim", "comparison"),
+    ("quantitative_authoritative", "implication"),
+    ("quantitative", "tradeoff"),
+    ("authoritative", "implication"),
+    ("default", "implication"),
+)
+
+
+def reasoning_moves(text: str) -> Set[str]:
+    """Which adaptive reasoning moves a sentence carries.
+
+    This is the move-level sibling of `analytical_dimensions`: it recognizes
+    all seven moves (the expansion detector deliberately keeps its narrower
+    vocabulary so attaching a move never re-labels an expansion). Used to
+    verify that a refinement actually expresses the move the signals chose.
+    """
+    found: Set[str] = set()
+    for name, pattern in _MOVE_MARKERS.items():
+        if pattern.search(text or ""):
+            found.add(name)
+    return found
+
+
+def _is_comparative(sentence: str, sig: Dict[str, object]) -> bool:
+    return bool(_COMPARISON_RE.search(sentence or "")) or bool(
+        _COMPARISON_RE.search(_axis_text(sig))
+    ) or bool(_COMPARISON_QUERY_RE.search(_query_text(sig)))
+
+
+def _axis_text(sig: Dict[str, object]) -> str:
+    return str(sig.get("axis", "") or "").strip()
+
+
+def _query_text(sig: Dict[str, object]) -> str:
+    return str(sig.get("query", "") or sig.get("query_text", "") or "").strip()
+
+
+def _is_authoritative(sig: Dict[str, object]) -> bool:
+    return bool(
+        sig.get("authoritative")
+        or sig.get("corroborated")
+        or sig.get("primary")
+        or sig.get("primary_source")
+    )
+
+
+def _choose_move(sentence: str, signals: Optional[Dict[str, object]]) -> str:
+    """Choose the adaptive reasoning move for a refined restatement.
+
+    Reads only signals that are actually available on the evidence record /
+    report context — contradiction count, source authority, query intent, and
+    the section axis — plus the claim's own shape. The precedence in
+    `_MOVE_RULES` is fixed and ordered, so the same claim in the same context
+    always receives the same move (no RNG, no hash, no LLM).
+
+    Signals consumed (all optional):
+      contradicted / uncertain  -> the claim is disputed
+      comparative / comparison  -> claim or axis or query is a comparison
+      authoritative / primary / corroborated -> stronger provenance
+      query / query_text, query_type          -> classified intent
+      axis                                     -> section heading
     """
     sig = signals or {}
-    if sig.get("contradicted") or sig.get("uncertain"):
-        return "uncertainty"
-    if sig.get("corroborated") or sig.get("primary"):
-        return "strength"
-    if _QUANT_RE.search(sentence or ""):
-        return "implication"
-    if str(sig.get("axis", "") or "").strip():
-        return "framing"
+    sentence = sentence or ""
+    contradicted = bool(sig.get("contradicted") or sig.get("uncertain"))
+    axis = _axis_text(sig)
+    query = _query_text(sig)
+    query_type = str(sig.get("query_type", "") or "").strip().lower()
+    comparative = _is_comparative(sentence, sig)
+    # Strip citation markers before reading a quantity: "[1]" is a source
+    # pointer, not a figure, and treating it as one made every cited sentence
+    # look quantitative.
+    quant = bool(_QUANT_RE.search(_CITATION_RE.sub(" ", sentence)))
+    authoritative = _is_authoritative(sig)
+
+    is_causal_query = bool(_CAUSAL_QUERY_RE.search(query)) or query_type in ("causal", "analytical")
+    is_decision_query = bool(_DECISION_QUERY_RE.search(query)) or bool(sig.get("decision_query"))
+    is_comparison_query = query_type == "comparative" or bool(_COMPARISON_QUERY_RE.search(query))
+    is_mechanism_query = bool(_MECHANISM_QUERY_RE.search(query)) or query_type == "exploratory"
+
+    for rule, move in _MOVE_RULES:
+        if rule == "contradicted_comparative" and contradicted and comparative:
+            return move
+        if rule == "contradicted" and contradicted:
+            return move
+        if rule == "decision_query" and is_decision_query:
+            return move
+        if rule == "comparison_query" and is_comparison_query:
+            return move
+        if rule == "causal_query" and is_causal_query:
+            return move
+        if rule == "mechanism_query" and is_mechanism_query:
+            return move
+        if rule == "comparison_axis" and _COMPARISON_AXIS_RE.search(axis):
+            return move
+        if rule == "mechanism_axis" and _MECHANISM_AXIS_RE.search(axis):
+            return move
+        if rule == "causal_axis" and _CAUSAL_AXIS_RE.search(axis):
+            return move
+        if rule == "strategic_axis" and _STRATEGIC_AXIS_RE.search(axis):
+            return move
+        if rule == "causal_claim" and _CAUSAL_CLAIM_RE.search(sentence):
+            return move
+        if rule == "mechanism_claim" and _MECHANISM_CLAIM_RE.search(sentence):
+            return move
+        if rule == "comparative_claim" and comparative:
+            return move
+        if rule == "quantitative_authoritative" and quant and authoritative:
+            return move
+        if rule == "quantitative" and quant:
+            return move
+        if rule == "authoritative" and authoritative:
+            return move
+        if rule == "default":
+            return move
     return "implication"
+
+
+# The refined sentence must stay bounded: a transformation that doubles the
+# word count would harm readability more than the redundancy it fixes. The
+# transition + analysis appended to the claim is capped at this many words.
+MAX_APPENDED_WORDS = 38
 
 
 def refine_restatement(
@@ -497,28 +787,41 @@ def refine_restatement(
     *,
     prior_section: str = "",
     dimension: str = "implication",
+    move: str = "",
     seed: str = "",
 ) -> str:
     """Rewrite a bare restatement into a contextual transition + analysis.
 
     The original claim is preserved verbatim — including its number and `[n]`
     marker — so nothing is lost and no citation is invented; the transition
-    names the relationship to the earlier use and the analytical clause adds
-    the meaning the restatement lacked. Deterministic: no LLM is ever needed.
+    names the relationship to the earlier use and the move-specific analytical
+    clause adds the reasoning the restatement lacked. `move` (preferred) or the
+    legacy `dimension` names the reasoning relation; the phrase is chosen to
+    fit it. Deterministic: no LLM is ever needed.
     """
     clean = (sentence or "").strip()
     if not clean:
         return clean
-    dimension = dimension if dimension in _ANALYSIS_BY_DIMENSION else "implication"
-    transition = _stable_pick(_TRANSITION_BY_DIMENSION[dimension], seed or clean)
-    analysis = _analysis_clause(clean, dimension)
+    chosen = move or dimension or "implication"
+    chosen = chosen if chosen in _ANALYSIS_BY_MOVE else "implication"
+    transition = _stable_pick(_TRANSITION_BY_MOVE[chosen], seed or clean)
+    analysis = _analysis_clause(clean, chosen)
+    appended = f"{transition} {analysis}"
+    if len(appended.split()) > MAX_APPENDED_WORDS:
+        # Defensive bound; current clauses are all well under it, but a future
+        # template must not silently inflate every refined sentence. Trim the
+        # analysis (never the transition, which carries the discourse link).
+        keep = max(0, MAX_APPENDED_WORDS - len(transition.split()))
+        analysis = " ".join(analysis.split()[:keep]).rstrip(",;:") if keep else ""
     # The original claim keeps its terminal punctuation before the appended
     # clause, so "… $13 billion [1]" becomes "… $13 billion [1], and the figure
     # is significant because …" rather than two spliced sentences.
     stripped = clean.rstrip()
     if stripped.endswith("."):
         stripped = stripped[:-1]
-    return f"{transition} {stripped}, and {analysis}."
+    if analysis:
+        return f"{transition} {stripped}, and {analysis}."
+    return f"{transition} {stripped}."
 
 
 # Label/fragment shapes that are NOT full prose sentences: a Key-Figures bullet
@@ -730,29 +1033,34 @@ class ClaimLedger:
             self._texts.append(sentence)
             return Refinement(text=sentence, kept=True, transformed=False)
 
-        dimension = _choose_dimension(sentence, signals)
+        move = _choose_move(sentence, signals)
         refined = refine_restatement(
             sentence,
             prior_section=prior.section,
-            dimension=dimension,
+            move=move,
             seed=key or sentence,
         )
-        # Record the dimension we attached so a later true expansion of the
-        # same claim is still detected as novel.
-        prior.dimensions.add(dimension if dimension in ("mechanism", "implication", "comparison", "uncertainty") else "implication")
+        # Record the dimension the move maps onto so a later true expansion of
+        # the same claim is still detected as novel. `analytical_dimensions`
+        # keeps its narrow vocabulary; trade-off/causal/strategic moves are
+        # recorded as the implication dimension they express.
+        prior.dimensions.add(
+            move if move in ("mechanism", "implication", "comparison", "uncertainty") else "implication"
+        )
         self.refined_restatements += 1
         self.removed_restatements += 1
         self._texts.append(refined)
         logger.debug(
-            "[SynthesisIntel] refined restatement in section '%s' (first used in '%s', dimension=%s)",
-            section, prior.section, dimension,
+            "[SynthesisIntel] refined restatement in section '%s' (first used in '%s', move=%s)",
+            section, prior.section, move,
         )
         return Refinement(
             text=refined,
             kept=True,
             transformed=True,
-            dimension=dimension,
+            dimension=move,
             first_section=prior.section,
+            move=move,
         )
 
     def register(self, section: str, sentence: str) -> bool:
@@ -858,9 +1166,10 @@ def apply_synthesis_intelligence(
     adding analysis.
 
     `signals` carries report-level evidence hints (contradicted / uncertain /
-    corroborated / primary / axis) that select the analytical dimension of
-    each refinement. It is optional; the deterministic transformation runs
-    with no signals and no LLM.
+    corroborated / primary / authoritative / query / query_type) that select
+    the adaptive reasoning move of each refinement; the section axis is added
+    per section from its heading. It is optional; the deterministic
+    transformation runs with no signals and no LLM.
     """
     if not answer:
         return answer, SynthesisIntelligenceReport()
