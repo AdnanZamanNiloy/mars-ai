@@ -58,6 +58,10 @@ from app.agents.outline import (
     render_outline,
 )
 from app.core.section_context import build_section_candidate_pool, select_section_facts
+from app.core.synthesis_intelligence import (
+    SynthesisIntelligenceReport,
+    apply_synthesis_intelligence,
+)
 from app.agents.answer_quality import length_band
 from app.agents.evidence_utils import (
     dedupe_semantic_facts,
@@ -92,7 +96,17 @@ _REASONING_DEPTH_INSTRUCTION = (
     "- Name the section's limitation or open question when the evidence does "
     "not settle it. An honest gap beats a confident assertion.\n"
     "- Do NOT invent a mechanism, cause, or number that is not in the "
-    "evidence. If the evidence only establishes correlation, say so."
+    "evidence. If the evidence only establishes correlation, say so.\n"
+    "\n"
+    "EXPAND, DON'T RESTATE — this section is ONE part of a larger report and "
+    "other sections have already stated the evidence above:\n"
+    "- Do NOT open with, or repeat, a fact already given in plain form. A fact "
+    "may be re-used ONLY to add something new about it: the mechanism behind "
+    "it, its implication or trade-off, a comparison, or why it is uncertain.\n"
+    "- State each fact once, then spend the section on what it means. If you "
+    "have nothing new to add about a fact, omit it entirely rather than repeat "
+    "it — a shorter section that reasons beats a longer one that recites.\n"
+    "- Never drop or renumber a [n] marker attached to a fact you keep."
 )
 
 # The same contract, appended to the monolithic writer's prompt so the
@@ -302,6 +316,7 @@ class SynthesisResult:
     audit: CitationAudit = field(default_factory=CitationAudit)
     used_fallback: bool = False
     angles: List[str] = field(default_factory=list)
+    synthesis_intelligence: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -310,6 +325,7 @@ class SynthesisResult:
             "audit": self.audit.to_dict(),
             "used_fallback": self.used_fallback,
             "angles": list(self.angles),
+            "synthesis_intelligence": dict(self.synthesis_intelligence),
         }
 
 
@@ -564,6 +580,11 @@ async def synthesize(
         contradictions=contradictions,
         cited_facts=cited_facts,
     )
+    # Cross-section repetition pass (deterministic; no LLM). Runs AFTER the
+    # required sections exist (so Key Findings is registered as a recap) and
+    # BEFORE the trim (so removed restatements free word budget). Retained
+    # sentences keep their exact [n] markers; removed ones take theirs away.
+    answer, _si_report = apply_synthesis_intelligence_pass(answer)
     answer = _trim_to_band(answer, mode)
     audit = audit_citations(answer, numbered, cited_facts)
 
@@ -578,12 +599,41 @@ async def synthesize(
 
     answer = _append_evidence_appendix(answer, ctx, usable_facts, contradictions)
     answer = _append_source_legend(answer, numbered)
-    return SynthesisResult(answer=answer, sources=numbered, audit=audit, angles=angles)
+    return SynthesisResult(
+        answer=answer,
+        sources=numbered,
+        audit=audit,
+        angles=angles,
+        synthesis_intelligence=_si_report.to_dict(),
+    )
 
 
 def _normalize_heading(text: str) -> str:
     """Comparison key for headings: casefolded, punctuation/space-insensitive."""
     return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+
+
+def apply_synthesis_intelligence_pass(
+    answer: str,
+) -> tuple[str, SynthesisIntelligenceReport]:
+    """Run the deterministic cross-section repetition layer on an assembled draft.
+
+    Protected (machine-appended) sections are left whole — they describe
+    measured state. Executive Summary and Key Findings are RECAP sections:
+    their own text is preserved, but their claims are registered so deep-dive
+    sections cannot restate them. Every other writer section is compressed
+    against the ledger (first occurrence keeps its citation; a repeat survives
+    only with a new analytical dimension). No LLM; never empties the report.
+    """
+    from app.agents.sources import MACHINE_SECTIONS
+
+    protected = tuple(MACHINE_SECTIONS) + ("## Limitations", "## Evidence & Confidence")
+    recap = ("## Executive Summary", "## Key Findings")
+    return apply_synthesis_intelligence(
+        answer,
+        protect_headings=protected,
+        recap_headings=recap,
+    )
 
 
 def _shorten_heading(text: str) -> str:
@@ -974,6 +1024,10 @@ async def _synthesize_sectioned(
         contradictions=contradictions,
         cited_facts=cited_facts,
     )
+    # Section-wise reports are exactly where cross-section restatement lives
+    # (each section was written blind to its siblings): run the deterministic
+    # repetition pass before the trim, preserving every [n] on kept facts.
+    answer, _si_report = apply_synthesis_intelligence_pass(answer)
     answer = _trim_to_band(answer, mode)
     audit = audit_citations(answer, numbered, cited_facts)
     if audit.invalid_markers:
@@ -991,7 +1045,13 @@ async def _synthesize_sectioned(
     # Preserve order, drop duplicates.
     angles = list(dict.fromkeys(angles))
     logger.info("[Synthesizer] section-wise report: %d sections assembled", len(section_bodies))
-    return SynthesisResult(answer=answer, sources=numbered, audit=audit, angles=angles)
+    return SynthesisResult(
+        answer=answer,
+        sources=numbered,
+        audit=audit,
+        angles=angles,
+        synthesis_intelligence=_si_report.to_dict(),
+    )
 
 
 # ---------------------------------------------------------------------------
