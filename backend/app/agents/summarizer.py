@@ -560,6 +560,12 @@ async def summarizer_agent(
         # and NEVER after a provider timeout / outage / oversize rejection:
         # those are transport failures a format-tightening retry cannot fix and
         # would only re-spend the wall-clock the timeout rule protects.
+        #
+        # It ALSO fires on a valid-but-empty `{"facts": []}`: a model that
+        # emits the wrapper with no claims is often failing format adherence,
+        # not reporting a genuinely empty source, and the stricter ask
+        # recovers real claims (see test_summarizer_tightened_retry_*). That
+        # recovery value is why this is NOT skipped by a "valid JSON" check.
         if not facts and fallback_reason not in (
             "provider_timeout", "providers_unavailable", "payload_too_large",
         ):

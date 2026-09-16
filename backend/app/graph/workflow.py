@@ -85,6 +85,14 @@ class ResearchState(TypedDict, total=False):
     corroboration_registry: Dict[str, Dict[str, Any]]
     # Fix B: hard per-run cap on expansion search passes actually issued.
     expansion_passes: int
+    # Executed-query memory: the normalized text of every search query this run
+    # has actually issued (contract questions, variants, corroboration and
+    # primary-source follow-ups). search_node enforces it so an identical query
+    # can never be re-issued across passes — a repeat returns the same evidence
+    # at full cost. Also mirrored into `coverage_searched`, the key the depth
+    # controller's _searched_queries() reader already consults.
+    executed_queries: List[str]
+    coverage_searched: List[str]
 
 
 class PlannerUpdate(TypedDict):
@@ -102,6 +110,8 @@ class SearchUpdate(TypedDict, total=False):
     counter_evidence_attempted: bool
     expansion_passes: int
     facts: List[Dict[str, Any]]
+    executed_queries: List[str]
+    coverage_searched: List[str]
 
 
 class SummarizerUpdate(TypedDict):
@@ -1122,11 +1132,50 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             if not fallback:
                 return {"search_results": previous}
             fresh = [(fallback, "")]
+
         # Fix B.3 — hard per-run expansion wall. Count the expansion passes and
         # the extra searches they issue; once either cap is hit, stop issuing
         # NEW expansion searches (the evidence already gathered still flows on).
         prior_passes = int(state.get("expansion_passes", 0) or 0)
         is_expansion = int(state.get("iteration", 0)) > 0
+
+        # Executed-query memory (perf): an identical query text returns the
+        # same results, so re-issuing it across passes spends a full retrieval
+        # round-trip for zero new evidence. The depth controller already builds
+        # this memory (`coverage_searched` -> _searched_queries) but nothing
+        # ever WROTE it, so primary-source/corroboration follow-ups regenerated
+        # the same query every pass and were executed each time. Enforce the
+        # memory here and record what actually runs. EXACT normalized-text
+        # matching only: a differently-worded query is never dropped, so no
+        # research path or source is lost.
+        prior_executed = {
+            normalize_text(str(q))
+            for q in (state.get("executed_queries") or [])
+            if str(q).strip()
+        }
+        prior_executed |= {
+            normalize_text(str(q))
+            for q in (state.get("coverage_searched") or [])
+            if str(q).strip()
+        }
+        seen_executed = set(prior_executed)
+        deduped: List[Any] = []
+        for item in fresh:
+            text = item[0] if isinstance(item, tuple) else str(item)
+            key = normalize_text(str(text))
+            if not key or key in seen_executed:
+                continue
+            seen_executed.add(key)
+            deduped.append(item)
+        dropped_repeats = len(fresh) - len(deduped)
+        if dropped_repeats:
+            logger.info("search_queries_deduped", dropped=dropped_repeats)
+        fresh = deduped
+        # Nothing novel left to search: keep the already-gathered evidence
+        # flowing rather than re-running a query this run already issued.
+        if not fresh and previous:
+            return {"search_results": previous, "expansion_passes": prior_passes}
+
         max_passes = max(1, int(getattr(settings, "max_expansion_passes", 12) or 12))
         max_searches = max(1, int(getattr(settings, "max_expansion_searches", 48) or 48))
         expansion_passes = prior_passes + (1 if is_expansion else 0)
@@ -1259,6 +1308,13 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
                 state.get("counter_evidence_attempted") or issued_counter
             ),
             "expansion_passes": expansion_passes,
+            # Persist the executed-query memory: everything prior plus the
+            # queries this pass actually issued. Mirrored under
+            # `coverage_searched`, the key the depth controller's
+            # `_searched_queries()` reader already consumes (it was read but
+            # never written before this).
+            "executed_queries": sorted(seen_executed),
+            "coverage_searched": sorted(seen_executed),
         }
         if matched_corroboration:
             update["facts"] = updated_facts
