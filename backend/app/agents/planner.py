@@ -699,6 +699,152 @@ def _coarse_query_type(query: str) -> str:
     return classify_query_type(query)
 
 
+# =========================
+# Deterministic plan validation
+# =========================
+
+# A required angle is "covered" when any existing dimension or must_cover entry
+# carries one of these vocabulary fragments. These are the SAME words the
+# directive prompt (R3/R4) and the orchestrator classifiers already use, so the
+# validator speaks the pipeline's existing vocabulary instead of inventing a
+# parallel one. Reuse `dimension_to_axis` for the semantic half of matching.
+_REQUIRED_ANGLE_TOKENS: Dict[str, Tuple[str, ...]] = {
+    "quantitative": (
+        "quantit", "statistic", "data", "metric", "number", "figure",
+        "cost", "price", "growth", "projection", "forecast",
+    ),
+    "decision": (
+        "decision", "tradeoff", "trade-off", "option", "policy",
+        "risk", "comparison", "scenario",
+    ),
+    "contested": (
+        "critic", "counter", "limitation", "risk", "controvers",
+        "oppos", "alternative",
+    ),
+    "comparison": (
+        "comparison", "compar", "head-to-head", "versus", "vs", "tradeoff",
+    ),
+}
+
+# Injected requirement label -> the canonical axis its synthesized contract
+# takes. Used to prove a newly-appended angle is NOT already served by an
+# existing contract (`dimension_to_axis` maps the covered label the same way),
+# so the validator never adds a dimension a plan already covers.
+_REQUIRED_ANGLE_AXIS: Dict[str, str] = {
+    "quantitative": "evidence",
+    "decision": "comparison",
+    "contested": "criticism",
+    "comparison": "comparison",
+}
+
+
+def _angle_token_covered(label: str, angle: str) -> bool:
+    """Lexical coverage test or()ed with the angle's canonical-axis mapping.
+
+    "cost per unit" is a quantitative angle by vocabulary; "head-to-head
+    comparison" is served by the canonical `comparison` axis even though it
+    carries no literal "compar"/"versus" marker in every wording.
+    """
+    tokens = _REQUIRED_ANGLE_TOKENS[angle]
+    text = normalize_text(label)
+    if any(tok in text for tok in tokens):
+        return True
+    return dimension_to_axis(label) == _REQUIRED_ANGLE_AXIS[angle]
+
+
+def _dedupe_exact_dimensions(dims: Sequence[str]) -> Tuple[List[str], bool]:
+    """Collapse exactly-normalized duplicate dimensions, preserving order.
+
+    Only exact duplicates (whitespace/case-insensitive) are dropped: near
+    duplicates are left to `select_plan`/`deduplicate_semantic`, which own
+    semantic overlap and must not be second-guessed here. Order and the first
+    occurrence of each label are always preserved.
+    """
+    result: List[str] = []
+    seen: Set[str] = set()
+    duplicate_flag = False
+    for raw in dims or ():
+        name = re.sub(r"\s+", " ", str(raw or "")).strip()
+        if not name:
+            continue
+        key = normalize_text(name)
+        if key in seen:
+            duplicate_flag = True
+            continue
+        seen.add(key)
+        result.append(name)
+    return result, duplicate_flag
+
+
+def validate_plan_dimensions(
+    query: str,
+    dimensions: Sequence[str],
+    must_cover: Sequence[str],
+    *,
+    complexity: Any = None,
+) -> Tuple[List[str], List[str], Dict[str, Any]]:
+    """Validate planned dimensions against what the query actually requires.
+
+    Fully deterministic, no LLM calls (AGENTS.md 4.7): reuses the orchestrator's
+    `score_complexity` classifiers and the planner's own `dimension_to_axis`.
+    Missing required angles are APPENDED (never replace/reorder the model's
+    plan) and added to `must_cover` so `enforce_axis_coverage` turns each into a
+    real delegation contract. Non-required angles are never dropped, so a valid
+    plan comes back byte-identical. Any classifier failure skips validation
+    rather than raising — an empty plan is returned unchanged.
+    """
+    dims, duplicate_flag = _dedupe_exact_dimensions(dimensions)
+    cover, _ = _dedupe_exact_dimensions(must_cover)
+    # must_cover entries that do not name a planned dimension are dropped: every
+    # must_cover entry must correspond to a dimension that becomes a contract.
+    dim_keys = {normalize_text(d) for d in dims}
+    cover = [c for c in cover if normalize_text(c) in dim_keys]
+    if not dims:
+        return dims, cover, {"applied": False, "reason": "no_dimensions"}
+
+    try:
+        if complexity is None:
+            from app.agents.orchestrator import score_complexity
+
+            complexity = score_complexity(query)
+        required_angles: List[str] = []
+        if complexity.needs_quantitative:
+            required_angles.append("quantitative")
+        if complexity.is_decision:
+            required_angles.append("decision")
+        if complexity.is_contested:
+            required_angles.append("contested")
+        if complexity.query_type == "comparative":
+            required_angles.append("comparison")
+    except Exception as exc:
+        # Fail-safe: a classifier failure must never break planning.
+        logger.warning("[Planner] plan validation skipped (classifier failed)", exc_info=exc)
+        return dims, cover, {"applied": False, "reason": "classifier_error"}
+
+    pool = dims + cover
+    added: List[str] = []
+    for angle in required_angles:
+        if not any(_angle_token_covered(label, angle) for label in pool):
+            injected = f"{angle} evidence" if angle == "quantitative" else f"{angle} angle"
+            dims.append(injected)
+            cover.append(injected)
+            pool = dims + cover
+            added.append(injected)
+
+    meta = {
+        "applied": True,
+        "query_type": complexity.query_type,
+        "required_angles": required_angles,
+        "added": added,
+        "duplicate_dimensions": duplicate_flag,
+    }
+    if added:
+        logger.info("[Planner] plan validation added required dimensions: %s", ", ".join(added))
+    if duplicate_flag:
+        logger.warning("[Planner] plan contains overlapping dimensions (flagged, not merged)")
+    return dims, cover, meta
+
+
 async def plan_dimensions(
     llm: LLMClient,
     query: str,
@@ -751,14 +897,12 @@ async def plan_dimensions(
     except Exception as exc:
         logger.warning("[Planner] dimension directive LLM failed, using heuristic", exc_info=exc)
         record_fallback("planner_dimensions")
-        dims = _heuristic_dimensions(query, intent)
-        return dims, dims[:2], {"planned_by": "heuristic", "query_type": _coarse_query_type(query)}
+        return _validated_heuristic_dimensions(query, intent)
 
     if not isinstance(payload, dict):
         logger.warning("[Planner] dimension directive returned non-dict, using heuristic")
         record_fallback("planner_dimensions")
-        dims = _heuristic_dimensions(query, intent)
-        return dims, dims[:2], {"planned_by": "heuristic", "query_type": _coarse_query_type(query)}
+        return _validated_heuristic_dimensions(query, intent)
 
     dims: List[str] = []
     for raw in payload.get("dimensions") or []:
@@ -768,8 +912,7 @@ async def plan_dimensions(
     if not dims:
         logger.warning("[Planner] dimension directive returned no dimensions, using heuristic")
         record_fallback("planner_dimensions")
-        dims = _heuristic_dimensions(query, intent)
-        return dims, dims[:2], {"planned_by": "heuristic", "query_type": _coarse_query_type(query)}
+        return _validated_heuristic_dimensions(query, intent)
 
     must_cover: List[str] = []
     for raw in payload.get("must_cover") or []:
@@ -778,6 +921,13 @@ async def plan_dimensions(
             must_cover.append(name)
     if not must_cover:
         must_cover = dims[:2]
+
+    # Validate the model's dimensions against what the query actually requires
+    # (quantitative / decision / contested / comparative). Missing angles are
+    # APPENDED and added to must_cover, so the prompt's R3/R4 requirements are
+    # enforced deterministically instead of trusted. Reordering never happens,
+    # so an already-valid plan is returned unchanged.
+    dims, must_cover, validation_meta = validate_plan_dimensions(query, dims, must_cover)
 
     meta = {
         "planned_by": "llm",
@@ -789,9 +939,30 @@ async def plan_dimensions(
             str(s) for s in (payload.get("preferred_search_types") or [])
             if str(s) in VALID_SEARCH_TYPES
         ],
+        "plan_validation": validation_meta,
     }
     logger.info("[Planner] dynamic dimensions: %s (must_cover=%s)", dims, must_cover)
     return dims, must_cover, meta
+
+
+def _validated_heuristic_dimensions(
+    query: str, intent: Optional[Dict[str, Any]] = None
+) -> Tuple[List[str], List[str], Dict[str, Any]]:
+    """Heuristic dimensions, also run through the deterministic validator.
+
+    The second return path of `plan_dimensions`: when the directive yields no
+    dimensions the heuristic list is only a coarse starting point, so it is
+    validated (and missing required angles appended) exactly like the LLM
+    path. `must_cover` defaults to the first two dimensions and gains every
+    appended required angle, so each maps to a real contract downstream.
+    """
+    dims = _heuristic_dimensions(query, intent)
+    dims, must_cover, validation_meta = validate_plan_dimensions(query, dims, dims[:2])
+    return dims, must_cover, {
+        "planned_by": "heuristic",
+        "query_type": _coarse_query_type(query),
+        "plan_validation": validation_meta,
+    }
 
 
 # =========================
