@@ -83,6 +83,14 @@ class ResearchState(TypedDict, total=False):
     # no module-level mutable registry is needed. A claim stops being re-queried
     # once its attempt budget is spent (it stays in the gap set as a limitation).
     corroboration_registry: Dict[str, Dict[str, Any]]
+    # Per-claim INVESTIGATION state (app/core/investigation_state.py): normalized
+    # claim -> {claim, attempts, queries, status, last_outcome}. It is the
+    # OUTCOME memory the corroboration registry lacks — did a targeted attempt
+    # actually corroborate the claim? — so exhausted single-source gaps are
+    # acknowledged as limitations instead of being silently re-chased, and
+    # un-attempted gaps are funded before already-attempted ones. Run-scoped via
+    # state (no module-level store); see the module for the status vocabulary.
+    investigation_state: Dict[str, Dict[str, Any]]
     # Fix B: hard per-run cap on expansion search passes actually issued.
     expansion_passes: int
     # Executed-query memory: the normalized text of every search query this run
@@ -135,6 +143,7 @@ class CriticUpdate(TypedDict):
     facts: List[Dict[str, Any]]
     counter_evidence_attempted: bool
     corroboration_registry: Dict[str, Dict[str, Any]]
+    investigation_state: Dict[str, Dict[str, Any]]
 
 
 class SynthesizerUpdate(TypedDict):
@@ -431,6 +440,13 @@ def _corroboration_queries(
     beyond `max_corroboration_attempts` and so the caller can see which
     domains were already targeted. Deterministic fallback: if grading fails,
     returns ([], {}) — never invent queries.
+
+    Per-claim INVESTIGATION state (`state["investigation_state"]`, see
+    app/core/investigation_state.py) additionally EXCLUDES claims already
+    marked exhausted (budget spent AND still single-source) so budget is never
+    re-spent on a known dead end, and it orders un-attempted gaps ahead of
+    already-attempted ones. Absent/invalid state is a no-op, so the historical
+    behavior is preserved when the state has not been populated yet.
     """
     facts = [f for f in state.get("facts", []) or [] if isinstance(f, dict)]
     if not facts:
@@ -475,6 +491,25 @@ def _corroboration_queries(
         if isinstance(v, dict)
     }
 
+    # Investigation memory: exhausted (budget spent, still single-source) and
+    # corroborated claims are never re-queried; un-attempted gaps are funded
+    # first. A missing/invalid state is neutral (nothing excluded).
+    excluded_keys: set = set()
+    try:
+        from app.core.investigation_state import STATUS_CORROBORATED, STATUS_EXHAUSTED, sanitize_investigation_state
+
+        inv = sanitize_investigation_state(
+            state.get("investigation_state"), max_attempts=max_attempts
+        )
+        excluded_keys = {
+            k
+            for k, e in inv.items()
+            if e.get("status") in (STATUS_EXHAUSTED, STATUS_CORROBORATED)
+        }
+    except Exception as exc:
+        logger.warning("investigation_lookup_failed", error=str(exc), exc_info=exc)
+        excluded_keys = set()
+
     # Highest-impact claims first; any graded claim not in the ranked set keeps
     # its original relative order after the ranked targets.
     ordered = sorted(
@@ -498,6 +533,10 @@ def _corroboration_queries(
         if not claim:
             continue
         key = normalize_text(claim)
+        if key in excluded_keys:
+            # Exhausted/corroborated per investigation memory: stays in the gap
+            # set (surfaced as a limitation) but is not re-queried.
+            continue
         entry = registry.setdefault(
             key, {"claim": claim, "domains_queried": [], "query_keys": [], "attempts": 0}
         )
@@ -532,6 +571,9 @@ def _corroboration_queries(
         queries.append(query)
         entry["attempts"] = attempts + 1
         entry["query_keys"] = [*(entry.get("query_keys") or []), query_key]
+        # The queries actually issued THIS pass, for the investigation tracker
+        # to record as attempts (outcome memory).
+        entry["issued"] = [*(entry.get("issued") or []), query]
         if domain and domain not in (entry.get("domains_queried") or []):
             entry["domains_queried"] = [*(entry.get("domains_queried") or []), domain]
         if len(queries) >= max(1, limit):
@@ -794,6 +836,16 @@ def _measured_coverage_gaps(state: ResearchState) -> List[str]:
             gaps.extend(coverage_gaps_from_records(records))
         except Exception as exc:
             logger.warning("coverage_gaps_failed", error=str(exc), exc_info=exc)
+    # Per-claim investigation memory: a claim whose targeted corroboration
+    # attempts are exhausted and which is STILL single-source is an acknowledged
+    # limitation, named explicitly, rather than a gap the report silently
+    # re-chases. Deterministic and total.
+    try:
+        from app.core.investigation_state import exhausted_limitations
+
+        gaps.extend(exhausted_limitations(state.get("investigation_state")))
+    except Exception as exc:
+        logger.warning("investigation_limitations_failed", error=str(exc), exc_info=exc)
     return gaps[:8]
 
 
@@ -1574,6 +1626,44 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         corroboration_queries, corroboration_registry = _corroboration_queries(
             state, settings=getattr(llm, "settings", None)
         )
+        # Per-claim INVESTIGATION state (closing the adaptive loop): record this
+        # pass's targeted attempts against the claim they were issued for, then
+        # reconcile each tracked claim's OUTCOME against the (re-graded) pool —
+        # corroborated claims leave the open set, still-single-source claims
+        # with their budget spent become exhausted and are surfaced as
+        # limitations. The state is run-scoped (threaded through LangGraph) with
+        # no module-level store; any failure logs and leaves the prior state.
+        try:
+            from app.core.investigation_state import record_attempts, reconcile_outcomes
+
+            settings_for_inv = getattr(llm, "settings", None)
+            inv_max_attempts = max(
+                1, int(getattr(settings_for_inv, "max_corroboration_attempts", 2) or 2)
+            )
+            queries_by_claim = {
+                str(k): list(v.get("issued") or [])
+                for k, v in (corroboration_registry or {}).items()
+                if isinstance(v, dict) and v.get("issued")
+            }
+            # The claims that actually received a targeted query this pass are
+            # exactly the registry entries carrying `issued` text.
+            attempted_targets = [
+                {"claim": str(v.get("claim", "") or "")}
+                for v in (corroboration_registry or {}).values()
+                if isinstance(v, dict) and v.get("issued")
+            ]
+            inv_state = record_attempts(
+                state.get("investigation_state"),
+                attempted_targets,
+                queries_by_claim=queries_by_claim,
+                max_attempts=inv_max_attempts,
+            )
+            inv_state = reconcile_outcomes(
+                inv_state, state.get("facts", []), max_attempts=inv_max_attempts
+            )
+        except Exception as exc:
+            logger.warning("investigation_state_failed", error=str(exc), exc_info=exc)
+            inv_state = state.get("investigation_state") or {}
         # Primary-source completion (workstream A): a dimension whose evidence
         # is thin on primary/official publishers gets a targeted primary query
         # on the next pass. These reuse the same per-pass search channel as the
@@ -1622,6 +1712,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             "facts": enriched_facts,
             "corroboration_queries": corroboration_queries,
             "corroboration_registry": corroboration_registry,
+            "investigation_state": inv_state,
         }
 
     async def synthesizer_node(state: ResearchState) -> SynthesizerUpdate:
