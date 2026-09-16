@@ -120,12 +120,33 @@ def main() -> int:
         groq_api_key="bench-key", database_url=f"{tmp}/perf.db", _env_file=None
     )
     report = {"suite": "mars-perf-benchmark", "version": "1.0", **_run_sync(settings)}
+    report["retrieval_health"] = _retrieval_health()
     print(json.dumps(report, indent=2, default=str))
     return 0
 
 
 def _run_sync(settings: Settings) -> dict:
     return asyncio.run(_run(settings))
+
+
+def _retrieval_health() -> dict:
+    """Fold the deterministic retrieval-access health evaluator into the perf
+    artifact so a run reports retrieval-access failure separately from cost.
+
+    Network-free and bounded (the evaluator's own scenarios are small)."""
+    try:
+        from bench import eval_retrieval
+
+        report = asyncio.run(eval_retrieval.evaluate())
+        return {
+            "aggregate": report["aggregate"]["metrics"],
+            "scenarios_total": report["aggregate"]["scenarios_total"],
+            "scenarios_passed": report["aggregate"]["scenarios_passed"],
+            "retrieval_health_pass_rate": report["aggregate"]["retrieval_health_pass_rate"],
+            "threshold_failures": len(report["threshold_failures"]),
+        }
+    except Exception as exc:  # one failed component must not kill the benchmark
+        return {"error": f"{type(exc).__name__}: {exc}"[:300]}
 
 
 if __name__ == "__main__":

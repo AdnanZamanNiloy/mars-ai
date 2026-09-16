@@ -43,11 +43,12 @@ from __future__ import annotations
 
 import asyncio
 import html
+import random
 import re
 import time
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 from urllib.parse import quote
 from xml.etree import ElementTree
 
@@ -65,8 +66,17 @@ from app.agents.reliability import (
     gather_bounded,
     get_breaker,
 )
+from app.agents.retrieval_health import (
+    DomainRegistry,
+    FailedFetchLog,
+    RetrievalHealth,
+    classify_fetch_failure,
+    failure_cools_host,
+    failure_is_transient,
+)
 from app.agents.sources import (
     build_dimension_primary_query,
+    build_primary_source_query,
     canonical_url,
     classify_source,
     extract_domain as _host,
@@ -423,6 +433,9 @@ async def _fetch_content(url: str, client: httpx.AsyncClient | None = None):
 
     A shared client (connection pooling) is passed on the hot path; when None, a
     throwaway client is created so unit tests and one-off callers keep working.
+
+    Kept as the single public fetch primitive (tests and one-off callers patch
+    it); `_fetch_content_outcome` below wraps it with status/reason accounting.
     """
     try:
         if client is None:
@@ -439,16 +452,133 @@ async def _fetch_content(url: str, client: httpx.AsyncClient | None = None):
 
 
 async def _fetch_with_client(client: httpx.AsyncClient, url: str):
-    """One page fetch with redirects, type filtering and a size ceiling.
+    """One page fetch with redirects, type filtering and a size ceiling."""
+    outcome = await _fetch_once(client, url)
+    return outcome.text, outcome.last_modified
 
-    Accepting only status 200 previously discarded every redirected page,
-    because the default httpx client does not follow redirects. Both are fixed
-    here: redirects are followed and the check is `is_success`.
+
+async def _fetch_content_outcome(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    max_attempts: int = 2,
+    timeout: float = 12.0,
+    on_retry=None,
+) -> "FetchOutcome":
+    """Health-aware fetch: classify the failure, retry transients, cap attempts.
+
+    Uses `_fetch_content` as the single-fetch primitive (so the existing
+    monkeypatch seam and status-aware `_fetch_once` both work) and returns a
+    structured outcome. A fetch that returns empty text with no status and no
+    exception is reported as an unclassified failure, not a success.
     """
-    r = await client.get(url, follow_redirects=True)
+    attempts = max(1, int(max_attempts))
+    outcome = FetchOutcome(reason="other")
+    for attempt in range(1, attempts + 1):
+        # Prefer the status-aware primitive; fall back to the legacy tuple
+        # primitive (which a test or older caller may have patched in).
+        if _fetch_content is not _fetch_content_original:
+            text, last_modified = await _fetch_content(url, client)
+            retry_after = 0.0
+            reason = "ok" if text else "other"
+            status = None
+        else:
+            raw = await _fetch_once(client, url)
+            text, last_modified = raw.text, raw.last_modified
+            retry_after = raw.retry_after
+            reason = raw.reason
+            status = raw.status
+        outcome = FetchOutcome(text=text, last_modified=last_modified,
+                               status=status, reason=reason, attempts=attempt,
+                               retry_after=retry_after)
+        if outcome.ok or not failure_is_transient(outcome.reason):
+            return outcome
+        if attempt >= attempts:
+            return outcome
+        if on_retry is not None:
+            try:
+                on_retry(attempt, outcome.reason)
+            except Exception:  # pragma: no cover - observer must not break flow
+                pass
+        delay = None
+        if outcome.reason == "rate_limited" and outcome.retry_after:
+            delay = outcome.retry_after
+        if delay is None:
+            raw_delay = min(6.0, 0.5 * (2 ** (attempt - 1)))
+            delay = random.uniform(0.0, raw_delay)
+        logger.info(
+            "[Search] transient fetch failure (%s) for %s; retry %d/%d in %.2fs",
+            outcome.reason, url[:80], attempt, attempts - 1, delay,
+        )
+        await asyncio.sleep(delay)
+    return outcome
+
+
+# Capture the original primitive so `_fetch_content_outcome` can tell whether a
+# test/caller replaced it (patch seam) and use the status-aware path otherwise.
+_fetch_content_original = _fetch_content
+
+
+def _retry_after_header(response) -> float:
+    """Parse a Retry-After header (seconds form) from a response, capped.
+
+    Reuses the shared retry semantics (0-60s cap on Retry-After) so the two
+    retry paths cannot disagree about what Retry-After means.
+    """
+    try:
+        headers = getattr(response, "headers", None)
+        raw = headers.get("retry-after") if headers else None
+        if raw is None:
+            return 0.0
+        value = float(str(raw).strip())
+        return max(0.0, min(60.0, value))
+    except (TypeError, ValueError, AttributeError):
+        return 0.0
+
+
+@dataclass
+class FetchOutcome:
+    """Structured result of one page fetch.
+
+    The old `(text, last_modified)` tuple collapsed every failure — 403, 429,
+    timeout, 404 — into the same empty string, which is exactly why a blocked
+    host could not be told apart from a page with no text and why the same
+    wall was re-paid for on every pass. The status/reason travels with the
+    text so the caller can cool the host, skip the URL and count the failure.
+    """
+
+    text: str = ""
+    last_modified: str = ""
+    status: Optional[int] = None
+    reason: str = "ok"
+    attempts: int = 0
+    retry_after: float = 0.0
+
+    @property
+    def ok(self) -> bool:
+        return bool(self.text)
+
+
+async def _fetch_once(client: httpx.AsyncClient, url: str) -> FetchOutcome:
+    """One raw fetch: returns text + the HTTP status/reason that produced it.
+
+    Content-type filtering and block-page detection still yield empty text,
+    but they now carry a reason so the caller does not cool a host for
+    returning, say, an unreadable PDF.
+    """
+    try:
+        r = await client.get(url, follow_redirects=True)
+    except Exception as exc:
+        reason = classify_fetch_failure(None, exc)
+        logger.warning("[Search] fetch %s failed (%s): %s", url[:80], reason, exc)
+        return FetchOutcome(status=None, reason=reason, attempts=1)
+
+    status = int(getattr(r, "status_code", 0) or 0)
     if not r.is_success:
-        logger.debug("[Search] fetch %s returned %s", url[:80], r.status_code)
-        return "", ""
+        reason = classify_fetch_failure(status)
+        logger.debug("[Search] fetch %s returned %s (%s)", url[:80], status, reason)
+        return FetchOutcome(status=status, reason=reason, attempts=1,
+                            retry_after=_retry_after_header(r))
 
     content_type = str(r.headers.get("content-type", "") or "").lower()
     last_modified = str(r.headers.get("last-modified", "") or "")
@@ -456,7 +586,7 @@ async def _fetch_with_client(client: httpx.AsyncClient, url: str):
     is_pdf = "application/pdf" in content_type or url.lower().split("?")[0].endswith(".pdf")
     if not is_pdf and content_type and not any(t in content_type for t in _READABLE_TYPES):
         logger.debug("[Search] skipping unreadable content-type %s for %s", content_type, url[:60])
-        return "", ""
+        return FetchOutcome(status=status, reason="other", attempts=1)
 
     body = r.content
     if len(body) > MAX_FETCH_BYTES:
@@ -467,7 +597,9 @@ async def _fetch_with_client(client: httpx.AsyncClient, url: str):
         body = body[:MAX_FETCH_BYTES]
 
     if is_pdf:
-        return _extract_pdf_text(body, url), last_modified
+        return FetchOutcome(text=_extract_pdf_text(body, url),
+                            last_modified=last_modified, status=status,
+                            reason="ok", attempts=1)
 
     try:
         raw = body.decode(r.encoding or "utf-8", errors="replace")
@@ -477,8 +609,24 @@ async def _fetch_with_client(client: httpx.AsyncClient, url: str):
     text = _clean_html(raw)
     if _looks_like_block_page(text):
         logger.warning("[Search] block page detected, dropping: %s", url[:80])
-        return "", ""
-    return text, last_modified
+        return FetchOutcome(text="", last_modified=last_modified,
+                            status=status, reason="forbidden", attempts=1)
+    return FetchOutcome(text=text, last_modified=last_modified,
+                        status=status, reason="ok", attempts=1)
+
+
+def _domain_of(url: str) -> str:
+    """Registrable-domain key for cooldown/failure accounting.
+
+    Uses the shared `registrable_domain` so two hosts under one publisher
+    (blog.example.com / www.example.com) cool down together.
+    """
+    try:
+        from app.core.evidence_grade import registrable_domain
+
+        return registrable_domain(url)
+    except Exception:  # pragma: no cover - defensive
+        return _host(url)
 
 
 # =============================================================================
@@ -741,6 +889,32 @@ class SearchClient:
         )
         self.provider_stats: Dict[str, Dict[str, int]] = {}
 
+        # Retrieval access hardening (run-scoped, LRU-bounded). The domain
+        # registry cools hard-blocked/rate-limited hosts; the failed-fetch log
+        # remembers dead documents; the health counters make retrieval failure
+        # distinguishable from genuinely thin evidence.
+        self.domain_registry = DomainRegistry(
+            cooldown_sec=float(getattr(settings, "search_domain_cooldown_sec", 90.0) or 90.0),
+            failure_threshold=int(getattr(settings, "search_domain_failure_threshold", 3) or 3),
+            max_domains=int(getattr(settings, "search_domain_registry_max", 512) or 512),
+        )
+        self.failed_fetches = FailedFetchLog(
+            max_urls=int(getattr(settings, "search_failed_url_memory_max", 2048) or 2048)
+        )
+        self.health = RetrievalHealth()
+
+    def reset_run(self) -> None:
+        """Clear all run-scoped retrieval memory before a new research run.
+
+        This is the explicit cleanup path AGENTS.md 4.3 requires: without it,
+        cooldowns and failed-URL memory from one run would suppress retrieval
+        in the next. Cheap and idempotent.
+        """
+        self.domain_registry.reset()
+        self.failed_fetches.reset()
+        self.health.reset()
+        self.provider_stats = {}
+
     # -- public API --------------------------------------------------------
 
     async def run_search(
@@ -947,13 +1121,29 @@ class SearchClient:
                 continue
             collected.extend(batch or [])
         return collected
-
     async def _attach_content(self, ranked: List[SearchResult]) -> None:
-        """Download the top N pages concurrently under a fetch bulkhead."""
+        """Download the top N pages concurrently under a fetch bulkhead.
+
+        Access-hardening rules, all additive to the existing fetch bulkhead:
+          * a domain that is cooling down (403/429/timeout history this run)
+            is SKIPPED, not retried — later passes stop re-paying for a wall;
+          * a canonical URL that already failed this run is never re-fetched;
+          * TRANSIENT failures get bounded retries with jitter/Retry-After;
+            403 fails fast and cools the host;
+          * every outcome is counted in `self.health`, so a run that found
+            nothing because publishers blocked it is distinguishable from a
+            run where the evidence genuinely was not there.
+        """
         fetch_n = max(1, int(getattr(self.settings, "search_fetch_top_n", 3) or 3))
         targets = ranked[:fetch_n]
         if not targets:
             return
+
+        fetch_retries = max(1, int(getattr(self.settings, "search_fetch_retry_attempts", 2) or 2))
+        # URL -> was the host already cooling when we skipped? The fallback
+        # query below only fires when an AUTHORITATIVE host was unavailable,
+        # so we remember which domains caused a skip.
+        unavailable_domains: List[str] = []
 
         async with httpx.AsyncClient(
             timeout=12,
@@ -968,23 +1158,266 @@ class SearchClient:
                     # Crossref) must never be re-fetched.
                     r.content_length = len(r.content)
                     r.is_content_fetched = True
+                    self.health.record_success(
+                        domain=_domain_of(r.url),
+                        primary=r.is_primary or is_primary_source(r.url),
+                        url=canonical_url(r.url),
+                        authoritative=classify_source(r.url).is_primary,
+                    )
                     return
-                content, last_modified = await _fetch_content(r.url, client)
-                if content:
-                    r.content = content
-                    r.content_length = len(content)
+
+                domain = _domain_of(r.url)
+                key = canonical_url(r.url)
+
+                # Already-known-dead document: do not spend a request again.
+                if self.failed_fetches.seen(key):
+                    self.health.record_skip("duplicate_failure")
+                    logger.debug("[Search] skipping known-failed URL: %s", r.url[:80])
+                    return
+
+                # Host on cooldown: skip without a request.
+                if domain and self.domain_registry.is_cooling(domain):
+                    self.health.record_skip("cooldown")
+                    unavailable_domains.append(domain)
+                    logger.debug(
+                        "[Search] skipping cooled-down domain %s (%.0fs left)",
+                        domain, self.domain_registry.remaining(domain),
+                    )
+                    return
+
+                self.health.record_attempt()
+
+                def _note_retry(attempt: int, reason: str) -> None:
+                    # Each transient retry is itself a failed attempt against
+                    # the host, so it counts toward the cooldown streak: an
+                    # exhausted retry budget IS "repeated failure".
+                    self.health.record_retry(succeeded=False)
+                    if domain and failure_cools_host(reason):
+                        before = self.domain_registry.is_cooling(domain)
+                        self.domain_registry.record_failure(domain, reason)
+                        if not before and self.domain_registry.is_cooling(domain):
+                            self.health.record_cooldown_opened()
+                            unavailable_domains.append(domain)
+
+                outcome = await _fetch_content_outcome(
+                    client, r.url, max_attempts=fetch_retries,
+                    timeout=self._timeout, on_retry=_note_retry,
+                )
+                if outcome.ok:
+                    if outcome.attempts > 1:
+                        # A retry that did not need the observer's fail note.
+                        self.health.retries_succeeded += 1
+                    r.content = outcome.text
+                    r.content_length = len(outcome.text)
                     r.is_content_fetched = True
                     if not r.published_at:
-                        r.published_at = last_modified
+                        r.published_at = outcome.last_modified
+                    self.health.record_success(
+                        domain=domain,
+                        primary=r.is_primary or is_primary_source(r.url),
+                        url=key,
+                        authoritative=classify_source(r.url).is_primary,
+                    )
+                    if domain:
+                        self.domain_registry.record_success(domain)
+                    return
+
+                self.health.record_failure(outcome.reason)
+                if failure_cools_host(outcome.reason):
+                    if domain and not self.domain_registry.is_cooling(domain):
+                        # The retry callback above already counted each
+                        # transient attempt; only the FIRST failure of this
+                        # fetch reaches here uncooled (403 has no retries).
+                        self.domain_registry.record_failure(domain, outcome.reason)
+                        self.health.record_cooldown_opened()
+                    if outcome.reason == "forbidden" and domain not in unavailable_domains:
+                        unavailable_domains.append(domain)
+                self.failed_fetches.mark(key, outcome.reason)
+                logger.info(
+                    "[Search] fetch failed for %s (%s, %d attempt(s))",
+                    r.url[:80], outcome.reason, outcome.attempts,
+                )
 
             await gather_bounded(
                 [(lambda r=r: _attach(r)) for r in targets], self._fetch_limit
             )
 
+            if unavailable_domains:
+                await self._primary_fallback(
+                    ranked, unavailable_domains, client=client,
+                    max_attempts=fetch_retries,
+                )
+
+    async def _primary_fallback(
+        self,
+        ranked: List[SearchResult],
+        unavailable_domains: List[str],
+        *,
+        client: httpx.AsyncClient | None = None,
+        max_attempts: int = 2,
+    ) -> None:
+        """When an authoritative host is unavailable, acquire EQUIVALENT
+        evidence from a DIFFERENT authoritative/independent publisher.
+
+        This reuses the existing primary-source machinery
+        (`build_primary_source_query` + the authoritative registry): it builds
+        a `site:`-scoped query aimed at an authoritative host the run has not
+        already failed on, issues it through the SAME search providers, and
+        appends any new results to `ranked` so the caller's content-attach and
+        downstream ranking see them. It is a targeted substitution, not a new
+        search system and not a retry of the blocked host.
+
+        Bounded: at most `search_primary_fallback_max` queries per contract,
+        only when the setting is enabled, and only for results whose host is
+        actually unavailable.
+        """
+        if not bool(getattr(self.settings, "search_primary_fallback_enabled", True)):
+            return
+        blocked = {d for d in unavailable_domains if d}
+        if not blocked:
+            return
+        max_fallbacks = max(0, int(getattr(self.settings, "search_primary_fallback_max", 2) or 0))
+        if max_fallbacks <= 0:
+            return
+
+        issued = 0
+        acquired_urls = {canonical_url(r.url) for r in ranked}
+        for result in ranked[: max(1, int(getattr(self.settings, "search_fetch_top_n", 3) or 3))]:
+            if issued >= max_fallbacks:
+                break
+            host = _domain_of(result.url)
+            if host not in blocked:
+                continue
+            question = result.sub_question or result.matched_query or result.title
+            fallback_query = build_primary_source_query(
+                question, result.search_type or "general", domain="general", max_sites=2
+            )
+            if not fallback_query:
+                # No registered authoritative hint for this shape: fall back to
+                # the deterministic suffix-scoped query so a substituted
+                # publisher is still targeted.
+                fallback_query = build_dimension_primary_query(
+                    question, result.search_type or "general", "general"
+                )
+            fallback_query = (fallback_query or "").strip()
+            if not fallback_query:
+                continue
+            issued += 1
+            try:
+                batches = await self._providers_for(fallback_query, result.search_type or "general")
+            except Exception as exc:
+                logger.warning(
+                    "[Search] primary fallback query failed (%s): %s",
+                    type(exc).__name__, exc, exc_info=exc,
+                )
+                self.health.record_fallback_query(0)
+                continue
+            new_hits = 0
+            for candidate in batches or []:
+                candidate_domain = _domain_of(candidate.url)
+                key = canonical_url(candidate.url)
+                if not candidate.url or key in acquired_urls:
+                    continue
+                # Never substitute with another host that is also unavailable.
+                if candidate_domain and (
+                    candidate_domain in blocked
+                    or self.domain_registry.is_cooling(candidate_domain)
+                ):
+                    continue
+                acquired_urls.add(key)
+                candidate.is_primary = is_primary_source(candidate.url)
+                candidate.reliability_score = _score_result(
+                    candidate, result.sub_question or result.matched_query
+                )
+                ranked.append(candidate)
+                new_hits += 1
+                if new_hits >= max_fallbacks:
+                    break
+            self.health.record_fallback_query(new_hits)
+            logger.info(
+                "[Search] primary fallback for %s: query=%s new_hits=%d",
+                ",".join(sorted(blocked))[:80], fallback_query[:80], new_hits,
+            )
+        # Re-rank so substituted primary hits compete on the existing score,
+        # not on insertion position. Pure function of the same scorer.
+        if issued:
+            ranked.sort(key=lambda r: r.reliability_score, reverse=True)
+            await self._attach_fallback_content(
+                ranked, acquired_urls, client=client, max_attempts=max_attempts
+            )
+
+    async def _attach_fallback_content(
+        self,
+        ranked: List[SearchResult],
+        acquired_urls: set,
+        *,
+        client: httpx.AsyncClient | None = None,
+        max_attempts: int = 2,
+    ) -> None:
+        """Fetch content for the substituted primary hits so a fallback
+        acquisition is equivalent evidence, not a bare snippet. Bounded to the
+        substituted results only; failures are counted like any other fetch."""
+        if client is None:
+            return
+        targets = [r for r in ranked if canonical_url(r.url) in acquired_urls and not r.content]
+        if not targets:
+            return
+
+        async def _attach(r: SearchResult) -> None:
+            domain = _domain_of(r.url)
+            key = canonical_url(r.url)
+            if self.failed_fetches.seen(key) or (
+                domain and self.domain_registry.is_cooling(domain)
+            ):
+                self.health.record_skip(
+                    "cooldown" if domain and self.domain_registry.is_cooling(domain)
+                    else "duplicate_failure"
+                )
+                return
+            self.health.record_attempt()
+            outcome = await _fetch_content_outcome(
+                client, r.url, max_attempts=max_attempts, timeout=self._timeout,
+            )
+            if outcome.ok:
+                r.content = outcome.text
+                r.content_length = len(outcome.text)
+                r.is_content_fetched = True
+                if not r.published_at:
+                    r.published_at = outcome.last_modified
+                self.health.record_success(
+                    domain=domain, primary=r.is_primary,
+                    url=key, authoritative=classify_source(r.url).is_primary,
+                )
+                if domain:
+                    self.domain_registry.record_success(domain)
+                return
+            self.health.record_failure(outcome.reason)
+            if failure_cools_host(outcome.reason) and domain:
+                self.domain_registry.record_failure(domain, outcome.reason)
+            self.failed_fetches.mark(key, outcome.reason)
+
+        await gather_bounded(
+            [(lambda r=r: _attach(r)) for r in targets], self._fetch_limit
+        )
+
     def _count(self, provider: str, outcome: str) -> None:
         bucket = self.provider_stats.setdefault(provider, {"ok": 0, "fail": 0, "results": 0})
         if outcome in bucket:
             bucket[outcome] += 1
+        self.health.record_provider_call(succeeded=(outcome == "ok"))
+
+    def health_snapshot(self) -> Dict[str, Any]:
+        """Retrieval-health telemetry for this run (additive; read by the
+        benchmark/ledger). Includes the provider success/failure table and the
+        currently-cooling domains so a caller can attribute a thin run to
+        retrieval access rather than to absent evidence."""
+        snapshot = self.health.snapshot()
+        snapshot["providers"] = {
+            name: dict(bucket) for name, bucket in self.provider_stats.items()
+        }
+        snapshot["cooling_domains"] = self.domain_registry.cooling_domains()
+        snapshot["failed_urls_remembered"] = len(self.failed_fetches)
+        return snapshot
 
     # =========================
     # PROVIDERS

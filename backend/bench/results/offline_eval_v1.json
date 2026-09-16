@@ -1,27 +1,27 @@
 {
   "suite": "mars-golden-offline-eval",
   "version": "v1",
-  "ran_at": "2026-09-16T10:41:42.083788+00:00",
+  "ran_at": "2026-09-16T15:00:29.350341+00:00",
   "golden_path": "bench/golden/queries_v1.json",
   "thresholds_path": "bench/golden/thresholds_v1.json",
   "aggregate": {
     "queries_total": 26,
-    "queries_scored": 25,
-    "queries_failed": 1,
+    "queries_scored": 26,
+    "queries_failed": 0,
     "metrics": {
       "query_type_accuracy": 1.0,
-      "dimension_hit_rate": 0.88,
+      "dimension_hit_rate": 0.8846,
       "forbidden_clean_rate": 1.0,
       "section_presence_rate": 1.0,
       "citation_resolution_rate": 1.0,
-      "verified_claims_mean": 2.52,
-      "corroborated_claims_mean": 1.8,
-      "distinct_domains_mean": 1.96,
-      "primary_share_mean": 0.8133,
+      "verified_claims_mean": 2.4615,
+      "corroborated_claims_mean": 1.5385,
+      "distinct_domains_mean": 1.9231,
+      "primary_share_mean": 0.8205,
       "grade_ab_share": 1.0,
-      "answer_quality_mean": 69.56,
-      "answer_relevance_mean": 0.4099,
-      "support_rate_mean": 0.5053,
+      "answer_quality_mean": 69.2692,
+      "answer_relevance_mean": 0.3971,
+      "support_rate_mean": 0.5051,
       "minimums_pass_rate": 1.0,
       "depth_routing_pass_rate": 1.0,
       "detection_precision": 1.0,
@@ -31,7 +31,17 @@
       "resolution_recall": 1.0,
       "resolution_f1": 1.0,
       "classification_accuracy": 1.0,
-      "provider_classification_pass_rate": 1.0
+      "provider_classification_pass_rate": 1.0,
+      "successful_fetch_rate": 0.25,
+      "forbidden_rate": 0.4167,
+      "rate_limited_rate": 0.0,
+      "timeout_rate": 0.1667,
+      "unique_authoritative_domains": 0.1667,
+      "primary_source_acquisition_rate": 0.1667,
+      "cooldown_skip_rate": 0.1389,
+      "duplicate_suppression_rate": 0.0833,
+      "fallback_acquisition_rate": 0.1667,
+      "retrieval_health_pass_rate": 1.0
     }
   },
   "per_category": {
@@ -63,7 +73,7 @@
         "section_presence_rate": 1.0,
         "citation_resolution_rate": 1.0,
         "verified_claims_mean": 2.75,
-        "corroborated_claims_mean": 1.75,
+        "corroborated_claims_mean": 1.5,
         "distinct_domains_mean": 2.25,
         "primary_share_mean": 0.875,
         "grade_ab_share": 1.0,
@@ -82,7 +92,7 @@
         "section_presence_rate": 1.0,
         "citation_resolution_rate": 1.0,
         "verified_claims_mean": 3.25,
-        "corroborated_claims_mean": 2.5,
+        "corroborated_claims_mean": 2.25,
         "distinct_domains_mean": 2.5,
         "primary_share_mean": 0.875,
         "grade_ab_share": 1.0,
@@ -96,17 +106,17 @@
       "queries": 4,
       "metrics": {
         "query_type_accuracy": 1.0,
-        "dimension_hit_rate": 0.8889,
+        "dimension_hit_rate": 0.9167,
         "forbidden_clean_rate": 1.0,
         "section_presence_rate": 1.0,
         "citation_resolution_rate": 1.0,
-        "verified_claims_mean": 2.3333,
-        "corroborated_claims_mean": 1.6667,
-        "distinct_domains_mean": 1.6667,
-        "primary_share_mean": 0.8889,
+        "verified_claims_mean": 2.0,
+        "corroborated_claims_mean": 1.25,
+        "distinct_domains_mean": 1.5,
+        "primary_share_mean": 0.9167,
         "grade_ab_share": 1.0,
-        "answer_quality_mean": 72.3333,
-        "answer_relevance_mean": 0.4468,
+        "answer_quality_mean": 69.75,
+        "answer_relevance_mean": 0.3544,
         "support_rate_mean": 0.5,
         "minimums_pass_rate": 1.0
       }
@@ -120,7 +130,7 @@
         "section_presence_rate": 1.0,
         "citation_resolution_rate": 1.0,
         "verified_claims_mean": 1.6667,
-        "corroborated_claims_mean": 1.6667,
+        "corroborated_claims_mean": 1.3333,
         "distinct_domains_mean": 1.3333,
         "primary_share_mean": 1.0,
         "grade_ab_share": 1.0,
@@ -139,7 +149,7 @@
         "section_presence_rate": 1.0,
         "citation_resolution_rate": 1.0,
         "verified_claims_mean": 3.0,
-        "corroborated_claims_mean": 2.0,
+        "corroborated_claims_mean": 1.8,
         "distinct_domains_mean": 2.4,
         "primary_share_mean": 1.0,
         "grade_ab_share": 1.0,
@@ -158,7 +168,7 @@
         "section_presence_rate": 1.0,
         "citation_resolution_rate": 1.0,
         "verified_claims_mean": 2.0,
-        "corroborated_claims_mean": 1.6667,
+        "corroborated_claims_mean": 1.3333,
         "distinct_domains_mean": 1.6667,
         "primary_share_mean": 0.8889,
         "grade_ab_share": 1.0,
@@ -260,7 +270,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.11,
+      "wall_sec": 0.283,
       "topic": "rag",
       "llm_calls": 11
     },
@@ -356,7 +366,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.042,
+      "wall_sec": 0.089,
       "topic": "mrna",
       "llm_calls": 11
     },
@@ -450,7 +460,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.051,
+      "wall_sec": 0.09,
       "topic": "transformer_ml",
       "llm_calls": 11
     },
@@ -496,14 +506,14 @@
       },
       "evidence": {
         "grade_distribution": {
-          "A": 2,
-          "B": 0,
+          "A": 1,
+          "B": 1,
           "C": 0,
           "D": 0
         },
         "grade_ab_share": 1.0,
         "verified_claims": 2,
-        "corroborated_claims": 2,
+        "corroborated_claims": 1,
         "needs_corroboration": 0,
         "distinct_domains": 2,
         "primary_share": 1.0,
@@ -544,7 +554,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.038,
+      "wall_sec": 0.072,
       "topic": "solid_state",
       "llm_calls": 11
     },
@@ -640,7 +650,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.06,
+      "wall_sec": 0.114,
       "topic": "renewables",
       "llm_calls": 11
     },
@@ -734,7 +744,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.025,
+      "wall_sec": 0.051,
       "topic": "ai_adoption",
       "llm_calls": 11
     },
@@ -742,30 +752,100 @@
       "id": "trend-storage",
       "category": "current_trend",
       "query": "What is the current state of grid-scale battery storage deployment?",
-      "error": "UnboundLocalError: cannot access local variable 'fallback_reason' where it is not associated with a value",
-      "wall_sec": 0.012,
-      "topic": "storage",
-      "minimums_ok": false,
-      "query_type_ok": false,
-      "forbidden_ok": false,
-      "section_presence_rate": 0.0,
+      "query_type": "exploratory",
+      "query_type_required": "exploratory",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "statistical",
+        "evidence",
+        "trend"
+      ],
+      "dimensions_hit": 3,
+      "dimensions_min": 3,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
       "citation": {
-        "resolution_rate": 0.0
+        "markers_total": 2,
+        "markers_resolved": 2,
+        "markers_unresolved": [],
+        "legend_entries": 1,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
       },
       "evidence": {
-        "grade_ab_share": 0.0,
-        "verified_claims": 0,
+        "grade_distribution": {
+          "A": 0,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 1,
         "corroborated_claims": 0,
-        "distinct_domains": 0,
-        "primary_share": 0.0
+        "needs_corroboration": 0,
+        "distinct_domains": 1,
+        "primary_share": 1.0,
+        "total_claims": 1
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
       },
       "answer_quality": {
-        "overall": 0.0,
-        "answer_relevance": 0.0
+        "overall": 62,
+        "passed": false,
+        "accuracy": 58,
+        "relevance": 35,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.0775,
+        "failures": [
+          "Relevance: the report's content does not match the question asked \u2014 it reads as evidence about a different topic. Restructure around the query's actual subject: 'What is the current state of grid-scale battery storage deployment?'.",
+          "Relevance: the Executive Summary does not address the query's core terms (current, state, grid, scale). Answer the asked question in the first paragraph.",
+          "Relevance 35/100 is below the 40/100 floor."
+        ]
       },
-      "support_rate": 0.0,
-      "dimensions_hit": 0,
-      "dimensions_ok": false
+      "support_rate": 0.5,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions",
+        "summarizer"
+      ],
+      "error": null,
+      "wall_sec": 0.046,
+      "topic": "storage",
+      "llm_calls": 11
     },
     {
       "id": "comparison-nuclear-solar",
@@ -859,7 +939,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.062,
+      "wall_sec": 0.126,
       "topic": "nuclear",
       "llm_calls": 11
     },
@@ -905,14 +985,14 @@
       },
       "evidence": {
         "grade_distribution": {
-          "A": 3,
-          "B": 0,
+          "A": 2,
+          "B": 1,
           "C": 0,
           "D": 0
         },
         "grade_ab_share": 1.0,
         "verified_claims": 3,
-        "corroborated_claims": 3,
+        "corroborated_claims": 2,
         "needs_corroboration": 0,
         "distinct_domains": 2,
         "primary_share": 1.0,
@@ -955,7 +1035,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.051,
+      "wall_sec": 0.117,
       "topic": "lithium",
       "llm_calls": 11
     },
@@ -1051,7 +1131,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.094,
+      "wall_sec": 0.213,
       "topic": "finetune",
       "llm_calls": 11
     },
@@ -1150,7 +1230,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.024,
+      "wall_sec": 0.051,
       "topic": "nuclear",
       "llm_calls": 11
     },
@@ -1197,14 +1277,14 @@
       },
       "evidence": {
         "grade_distribution": {
-          "A": 3,
-          "B": 0,
+          "A": 2,
+          "B": 1,
           "C": 0,
           "D": 0
         },
         "grade_ab_share": 1.0,
         "verified_claims": 3,
-        "corroborated_claims": 3,
+        "corroborated_claims": 2,
         "needs_corroboration": 0,
         "distinct_domains": 2,
         "primary_share": 1.0,
@@ -1247,7 +1327,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.038,
+      "wall_sec": 0.101,
       "topic": "carbon_policy",
       "llm_calls": 11
     },
@@ -1341,7 +1421,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.041,
+      "wall_sec": 0.081,
       "topic": "transformer_ambiguous",
       "llm_calls": 11
     },
@@ -1436,7 +1516,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.029,
+      "wall_sec": 0.056,
       "topic": "apple",
       "llm_calls": 11
     },
@@ -1529,7 +1609,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.025,
+      "wall_sec": 0.042,
       "topic": "bank",
       "llm_calls": 11
     },
@@ -1623,7 +1703,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.104,
+      "wall_sec": 0.191,
       "topic": "rag",
       "llm_calls": 11
     },
@@ -1669,14 +1749,14 @@
       },
       "evidence": {
         "grade_distribution": {
-          "A": 2,
-          "B": 1,
+          "A": 1,
+          "B": 2,
           "C": 0,
           "D": 0
         },
         "grade_ab_share": 1.0,
         "verified_claims": 3,
-        "corroborated_claims": 2,
+        "corroborated_claims": 1,
         "needs_corroboration": 0,
         "distinct_domains": 2,
         "primary_share": 1.0,
@@ -1717,7 +1797,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.037,
+      "wall_sec": 0.067,
       "topic": "lithium",
       "llm_calls": 11
     },
@@ -1815,7 +1895,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.03,
+      "wall_sec": 0.042,
       "topic": "renewables",
       "llm_calls": 11
     },
@@ -1910,7 +1990,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.051,
+      "wall_sec": 0.094,
       "topic": "renewables",
       "llm_calls": 11
     },
@@ -1955,14 +2035,14 @@
       },
       "evidence": {
         "grade_distribution": {
-          "A": 2,
-          "B": 0,
+          "A": 1,
+          "B": 1,
           "C": 0,
           "D": 0
         },
         "grade_ab_share": 1.0,
         "verified_claims": 2,
-        "corroborated_claims": 2,
+        "corroborated_claims": 1,
         "needs_corroboration": 0,
         "distinct_domains": 1,
         "primary_share": 1.0,
@@ -2003,7 +2083,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.033,
+      "wall_sec": 0.053,
       "topic": "lithium",
       "llm_calls": 11
     },
@@ -2098,7 +2178,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.024,
+      "wall_sec": 0.044,
       "topic": "ai_adoption",
       "llm_calls": 11
     },
@@ -2192,7 +2272,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.04,
+      "wall_sec": 0.07,
       "topic": "heat_pumps",
       "llm_calls": 11
     },
@@ -2286,7 +2366,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.052,
+      "wall_sec": 0.066,
       "topic": "ev",
       "llm_calls": 11
     },
@@ -2382,7 +2462,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.064,
+      "wall_sec": 0.076,
       "topic": "wind_solar",
       "llm_calls": 11
     },
@@ -2476,7 +2556,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.054,
+      "wall_sec": 0.106,
       "topic": "nuclear",
       "llm_calls": 11
     },
@@ -2574,7 +2654,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.023,
+      "wall_sec": 0.048,
       "topic": "ai_regulation",
       "llm_calls": 11
     }
@@ -2582,7 +2662,7 @@
   "depth": {
     "suite": "mars-golden-depth-eval",
     "version": "v1",
-    "ran_at": "2026-09-16T10:41:39.094715+00:00",
+    "ran_at": "2026-09-16T15:00:26.511491+00:00",
     "thresholds_path": "/home/adnan-zaman/Desktop/mars-ai/backend/bench/golden/thresholds_depth_v1.json",
     "aggregate": {
       "scenarios_total": 5,
@@ -2750,7 +2830,7 @@
   "contradictions": {
     "suite": "mars-golden-contradiction-eval",
     "version": "v1",
-    "ran_at": "2026-09-16T10:41:39.099864+00:00",
+    "ran_at": "2026-09-16T15:00:26.521612+00:00",
     "thresholds_path": "/home/adnan-zaman/Desktop/mars-ai/backend/bench/golden/thresholds_contradictions_v1.json",
     "aggregate": {
       "cases_total": 13,
@@ -3029,7 +3109,7 @@
   "provider": {
     "suite": "mars-golden-provider-eval",
     "version": "v1",
-    "ran_at": "2026-09-16T10:41:42.083751+00:00",
+    "ran_at": "2026-09-16T15:00:29.122325+00:00",
     "thresholds_path": "/home/adnan-zaman/Desktop/mars-ai/backend/bench/golden/thresholds_provider_v1.json",
     "aggregate": {
       "cases_total": 6,
@@ -3142,6 +3222,306 @@
       "description": "Regression floors for the deterministic offline provider-failure classification evaluator (bench/eval_provider.py). Every case asserts the transient-vs-hard classification and the provider-vs-evidence reason mapping; the aggregate pass rate is held at 1.0 because the mapping is deterministic and a conflation of provider failure with weak evidence is always a regression. Additive only: this file does not alter any threshold in thresholds_v1.json, thresholds_depth_v1.json or thresholds_contradictions_v1.json.",
       "provider": {
         "provider_classification_pass_rate": 1.0
+      }
+    },
+    "threshold_failures": [],
+    "passed": true
+  },
+  "retrieval": {
+    "suite": "mars-retrieval-health-eval",
+    "version": "v1",
+    "ran_at": "2026-09-16T15:00:29.350298+00:00",
+    "thresholds_path": "/home/adnan-zaman/Desktop/mars-ai/backend/bench/golden/thresholds_retrieval_v1.json",
+    "aggregate": {
+      "scenarios_total": 6,
+      "scenarios_passed": 6,
+      "scenarios_failed": 0,
+      "metrics": {
+        "successful_fetch_rate": 0.25,
+        "forbidden_rate": 0.4167,
+        "rate_limited_rate": 0.0,
+        "timeout_rate": 0.1667,
+        "unique_authoritative_domains": 0.1667,
+        "primary_source_acquisition_rate": 0.1667,
+        "cooldown_skip_rate": 0.1389,
+        "duplicate_suppression_rate": 0.0833,
+        "fallback_acquisition_rate": 0.1667,
+        "retrieval_health_pass_rate": 1.0
+      },
+      "retrieval_health_pass_rate": 1.0
+    },
+    "scenarios": [
+      {
+        "fetch_attempts": 1,
+        "fetch_successes": 0,
+        "successful_fetch_rate": 0.0,
+        "status_forbidden": 1,
+        "status_rate_limited": 0,
+        "fetch_timeouts": 0,
+        "status_server_error": 0,
+        "connection_errors": 0,
+        "other_failures": 0,
+        "forbidden_rate": 1.0,
+        "rate_limited_rate": 0.0,
+        "timeout_rate": 0.0,
+        "retries_attempted": 0,
+        "retries_succeeded": 0,
+        "skipped_cooldown": 1,
+        "skipped_duplicate_failure": 0,
+        "cooldowns_opened": 1,
+        "fallback_queries_issued": 0,
+        "fallback_acquisitions": 0,
+        "unique_success_domains": 0,
+        "unique_authoritative_domains": 0,
+        "primary_source_acquisitions": 0,
+        "provider_attempts": 0,
+        "provider_successes": 0,
+        "providers": {},
+        "cooling_domains": [
+          "britannica-like.com"
+        ],
+        "failed_urls_remembered": 1,
+        "cooldown_skip_rate": 0.5,
+        "duplicate_suppression_rate": 0.0,
+        "fallback_acquisition_rate": 0.0,
+        "primary_source_acquisition_rate": 0.0,
+        "attached_content_urls": [],
+        "ranked_urls": [
+          "https://britannica-like.com/a"
+        ],
+        "passed": true,
+        "error": null,
+        "id": "forbidden_host_cools_and_skips",
+        "description": "403 -> no retry, host cooled, second pass skips WITHOUT a request"
+      },
+      {
+        "fetch_attempts": 1,
+        "fetch_successes": 1,
+        "successful_fetch_rate": 1.0,
+        "status_forbidden": 0,
+        "status_rate_limited": 0,
+        "fetch_timeouts": 0,
+        "status_server_error": 0,
+        "connection_errors": 0,
+        "other_failures": 0,
+        "forbidden_rate": 0.0,
+        "rate_limited_rate": 0.0,
+        "timeout_rate": 0.0,
+        "retries_attempted": 1,
+        "retries_succeeded": 1,
+        "skipped_cooldown": 0,
+        "skipped_duplicate_failure": 0,
+        "cooldowns_opened": 0,
+        "fallback_queries_issued": 0,
+        "fallback_acquisitions": 0,
+        "unique_success_domains": 1,
+        "unique_authoritative_domains": 0,
+        "primary_source_acquisitions": 0,
+        "provider_attempts": 0,
+        "provider_successes": 0,
+        "providers": {},
+        "cooling_domains": [],
+        "failed_urls_remembered": 0,
+        "cooldown_skip_rate": 0.0,
+        "duplicate_suppression_rate": 0.0,
+        "fallback_acquisition_rate": 0.0,
+        "primary_source_acquisition_rate": 0.0,
+        "attached_content_urls": [
+          "https://crossref-like.org/a"
+        ],
+        "ranked_urls": [
+          "https://crossref-like.org/a"
+        ],
+        "passed": true,
+        "error": null,
+        "id": "rate_limit_retry_succeeds",
+        "description": "429 then 200 -> bounded retry recovers, host not cooled"
+      },
+      {
+        "fetch_attempts": 1,
+        "fetch_successes": 0,
+        "successful_fetch_rate": 0.0,
+        "status_forbidden": 0,
+        "status_rate_limited": 0,
+        "fetch_timeouts": 1,
+        "status_server_error": 0,
+        "connection_errors": 0,
+        "other_failures": 0,
+        "forbidden_rate": 0.0,
+        "rate_limited_rate": 0.0,
+        "timeout_rate": 1.0,
+        "retries_attempted": 1,
+        "retries_succeeded": 0,
+        "skipped_cooldown": 0,
+        "skipped_duplicate_failure": 0,
+        "cooldowns_opened": 1,
+        "fallback_queries_issued": 0,
+        "fallback_acquisitions": 0,
+        "unique_success_domains": 0,
+        "unique_authoritative_domains": 0,
+        "primary_source_acquisitions": 0,
+        "provider_attempts": 0,
+        "provider_successes": 0,
+        "providers": {},
+        "cooling_domains": [
+          "slowsite-like.com"
+        ],
+        "failed_urls_remembered": 1,
+        "cooldown_skip_rate": 0.0,
+        "duplicate_suppression_rate": 0.0,
+        "fallback_acquisition_rate": 0.0,
+        "primary_source_acquisition_rate": 0.0,
+        "attached_content_urls": [],
+        "ranked_urls": [
+          "https://slowsite-like.com/a"
+        ],
+        "passed": true,
+        "error": null,
+        "id": "timeout_exhausts_and_cools",
+        "description": "repeated timeouts -> bounded retries, then cooldown"
+      },
+      {
+        "fetch_attempts": 1,
+        "fetch_successes": 0,
+        "successful_fetch_rate": 0.0,
+        "status_forbidden": 0,
+        "status_rate_limited": 0,
+        "fetch_timeouts": 0,
+        "status_server_error": 0,
+        "connection_errors": 0,
+        "other_failures": 1,
+        "forbidden_rate": 0.0,
+        "rate_limited_rate": 0.0,
+        "timeout_rate": 0.0,
+        "retries_attempted": 0,
+        "retries_succeeded": 0,
+        "skipped_cooldown": 0,
+        "skipped_duplicate_failure": 1,
+        "cooldowns_opened": 0,
+        "fallback_queries_issued": 0,
+        "fallback_acquisitions": 0,
+        "unique_success_domains": 0,
+        "unique_authoritative_domains": 0,
+        "primary_source_acquisitions": 0,
+        "provider_attempts": 0,
+        "provider_successes": 0,
+        "providers": {},
+        "cooling_domains": [],
+        "failed_urls_remembered": 1,
+        "cooldown_skip_rate": 0.0,
+        "duplicate_suppression_rate": 0.5,
+        "fallback_acquisition_rate": 0.0,
+        "primary_source_acquisition_rate": 0.0,
+        "attached_content_urls": [],
+        "ranked_urls": [
+          "https://deadlink-like.com/a"
+        ],
+        "passed": true,
+        "error": null,
+        "id": "duplicate_failure_suppressed",
+        "description": "same dead URL is not fetched twice within a run"
+      },
+      {
+        "fetch_attempts": 2,
+        "fetch_successes": 1,
+        "successful_fetch_rate": 0.5,
+        "status_forbidden": 1,
+        "status_rate_limited": 0,
+        "fetch_timeouts": 0,
+        "status_server_error": 0,
+        "connection_errors": 0,
+        "other_failures": 0,
+        "forbidden_rate": 0.5,
+        "rate_limited_rate": 0.0,
+        "timeout_rate": 0.0,
+        "retries_attempted": 0,
+        "retries_succeeded": 0,
+        "skipped_cooldown": 1,
+        "skipped_duplicate_failure": 0,
+        "cooldowns_opened": 1,
+        "fallback_queries_issued": 1,
+        "fallback_acquisitions": 1,
+        "unique_success_domains": 1,
+        "unique_authoritative_domains": 1,
+        "primary_source_acquisitions": 1,
+        "provider_attempts": 0,
+        "provider_successes": 0,
+        "providers": {},
+        "cooling_domains": [
+          "blockedpublisher.com"
+        ],
+        "failed_urls_remembered": 1,
+        "cooldown_skip_rate": 0.3333,
+        "duplicate_suppression_rate": 0.0,
+        "fallback_acquisition_rate": 1.0,
+        "primary_source_acquisition_rate": 1.0,
+        "attached_content_urls": [
+          "https://census.gov/data/report"
+        ],
+        "ranked_urls": [
+          "https://census.gov/data/report",
+          "https://blockedpublisher.com/a"
+        ],
+        "passed": true,
+        "error": null,
+        "id": "primary_fallback_substitutes",
+        "description": "unavailable authoritative host -> alternate authoritative acquisition"
+      },
+      {
+        "fetch_attempts": 1,
+        "fetch_successes": 0,
+        "successful_fetch_rate": 0.0,
+        "status_forbidden": 1,
+        "status_rate_limited": 0,
+        "fetch_timeouts": 0,
+        "status_server_error": 0,
+        "connection_errors": 0,
+        "other_failures": 0,
+        "forbidden_rate": 1.0,
+        "rate_limited_rate": 0.0,
+        "timeout_rate": 0.0,
+        "retries_attempted": 0,
+        "retries_succeeded": 0,
+        "skipped_cooldown": 0,
+        "skipped_duplicate_failure": 0,
+        "cooldowns_opened": 1,
+        "fallback_queries_issued": 0,
+        "fallback_acquisitions": 0,
+        "unique_success_domains": 0,
+        "unique_authoritative_domains": 0,
+        "primary_source_acquisitions": 0,
+        "provider_attempts": 0,
+        "provider_successes": 0,
+        "providers": {},
+        "cooling_domains": [
+          "blockedpublisher.com"
+        ],
+        "failed_urls_remembered": 1,
+        "cooldown_skip_rate": 0.0,
+        "duplicate_suppression_rate": 0.0,
+        "fallback_acquisition_rate": 0.0,
+        "primary_source_acquisition_rate": 0.0,
+        "attached_content_urls": [],
+        "ranked_urls": [
+          "https://blockedpublisher.com/b"
+        ],
+        "passed": true,
+        "error": null,
+        "id": "evidence_not_fabricated_on_failure",
+        "description": "failed fetch yields no content and no false success"
+      }
+    ],
+    "thresholds": {
+      "version": "v1",
+      "description": "Floors for the deterministic retrieval-health evaluator (bench/eval_retrieval.py). ADDITIVE ONLY: these are new metrics introduced alongside the retrieval-access hardening and do not replace or weaken any threshold in thresholds_v1.json. Every floor is calibrated BELOW the observed offline value (headroom) so the evaluator passes while a real regression \u2014 cooldowns not applied, failed URLs re-fetched, fallback not substituting \u2014 trips it. Scenario pass/fail is asserted per-case in code; these floors guard the aggregates.",
+      "retrieval": {
+        "successful_fetch_rate": 0.2,
+        "unique_authoritative_domains": 0.1,
+        "primary_source_acquisition_rate": 0.1,
+        "cooldown_skip_rate": 0.1,
+        "duplicate_suppression_rate": 0.05,
+        "fallback_acquisition_rate": 0.1,
+        "retrieval_health_pass_rate": 1.0
       }
     },
     "threshold_failures": [],

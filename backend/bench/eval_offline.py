@@ -100,6 +100,18 @@ AGGREGATE_METRICS = (
     # Populated only when --with-provider is set: provider-failure
     # classification vs weak-evidence separation.
     "provider_classification_pass_rate",
+    # Populated only when --with-retrieval is set: retrieval-access health
+    # (additive metrics; existing thresholds are never weakened).
+    "successful_fetch_rate",
+    "forbidden_rate",
+    "rate_limited_rate",
+    "timeout_rate",
+    "unique_authoritative_domains",
+    "primary_source_acquisition_rate",
+    "cooldown_skip_rate",
+    "duplicate_suppression_rate",
+    "fallback_acquisition_rate",
+    "retrieval_health_pass_rate",
 )
 
 
@@ -693,7 +705,9 @@ async def evaluate(golden_path: Optional[str] = None,
                    with_contradictions: bool = False,
                    contradiction_thresholds_path: Optional[str] = None,
                    with_provider: bool = False,
-                   provider_thresholds_path: Optional[str] = None) -> Dict[str, Any]:
+                   provider_thresholds_path: Optional[str] = None,
+                   with_retrieval: bool = False,
+                   retrieval_thresholds_path: Optional[str] = None) -> Dict[str, Any]:
     from bench.golden.loader import load_queries, load_thresholds
 
     queries = load_queries(golden_path)
@@ -771,6 +785,24 @@ async def evaluate(golden_path: Optional[str] = None,
             status = "ok" if row["passed"] else "FAIL"
             print(f"[prov {status:>5}] {row['id']:<34} {row['description']}")
 
+    retrieval_report: Optional[Dict[str, Any]] = None
+    if with_retrieval:
+        # Retrieval-access health (cooldowns, transient-only backoff, failed-
+        # fetch suppression, authoritative fallback) lives in its own evaluator
+        # (bench/eval_retrieval.py); fold its aggregate metrics and threshold
+        # failures into THIS gate so one command remains the offline gate.
+        # These are NEW, additive metrics — no existing threshold is changed.
+        from bench import eval_retrieval
+
+        retrieval_report = await eval_retrieval.evaluate(retrieval_thresholds_path)
+        aggregate_result["metrics"].update(retrieval_report["aggregate"]["metrics"])
+        for f in retrieval_report["threshold_failures"]:
+            failures.append({"scope": "retrieval", "metric": f["metric"],
+                             "actual": f["actual"], "floor": f["floor"]})
+        for row in retrieval_report["scenarios"]:
+            status = "ok" if row.get("passed") else "FAIL"
+            print(f"[retr {status:>4}] {row['id']:<34} {row.get('description', '')}")
+
     report = {
         "suite": "mars-golden-offline-eval",
         "version": thresholds.get("version", "v1"),
@@ -783,6 +815,7 @@ async def evaluate(golden_path: Optional[str] = None,
         "depth": depth_report,
         "contradictions": contradiction_report,
         "provider": provider_report,
+        "retrieval": retrieval_report,
         "thresholds": thresholds,
         "threshold_failures": failures,
         "passed": not failures,
@@ -807,6 +840,10 @@ def main() -> int:
                         help="also run the provider-failure classification evaluator")
     parser.add_argument("--provider-thresholds", default=None,
                         help="provider thresholds JSON path")
+    parser.add_argument("--with-retrieval", action="store_true",
+                        help="also run the retrieval-access health evaluator")
+    parser.add_argument("--retrieval-thresholds", default=None,
+                        help="retrieval thresholds JSON path")
     args = parser.parse_args()
 
     try:
@@ -816,8 +853,10 @@ def main() -> int:
                                       depth_thresholds_path=args.depth_thresholds,
                                       with_contradictions=args.with_contradictions,
                                       contradiction_thresholds_path=args.contradiction_thresholds,
-                                      with_provider=args.with_provider,
-                                      provider_thresholds_path=args.provider_thresholds))
+                                       with_provider=args.with_provider,
+                                       provider_thresholds_path=args.provider_thresholds,
+                                       with_retrieval=args.with_retrieval,
+                                       retrieval_thresholds_path=args.retrieval_thresholds))
     except Exception as exc:
         print(f"golden evaluation failed to run: {type(exc).__name__}: {exc}",
               file=sys.stderr)

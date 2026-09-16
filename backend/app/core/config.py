@@ -79,6 +79,26 @@ class Settings(BaseSettings):
     max_queries_per_contract: int = 3
     # top results kept per provider search before dedup/rank
     search_max_results: int = 10
+    # Retrieval access hardening: a registrable domain that returns a hard
+    # block (403/451) or `search_domain_failure_threshold` transient failures
+    # is skipped for `search_domain_cooldown_sec`, so later passes stop
+    # re-paying for a publisher that has already refused. Run-scoped; the
+    # registry is LRU-bounded by `search_domain_registry_max`.
+    search_domain_cooldown_sec: float = 90.0
+    search_domain_failure_threshold: int = 3
+    search_domain_registry_max: int = 512
+    # Canonical URLs that already failed this run are never re-fetched.
+    search_failed_url_memory_max: int = 2048
+    # Bounded retry budget for TRANSIENT fetch failures only (429/timeout/
+    # 5xx/connection). 403 is never retried. Each retry is exponential
+    # full-jitter backoff and honours Retry-After when the host sends one.
+    search_fetch_retry_attempts: int = 2
+    # When a primary/authoritative host is unavailable, issue one targeted
+    # fallback query through the EXISTING primary-source machinery aimed at a
+    # DIFFERENT authoritative publisher, so equivalent evidence is still
+    # acquired. 0 disables the fallback (cooldown alone still applies).
+    search_primary_fallback_enabled: bool = True
+    search_primary_fallback_max: int = 2
     # Hard cap on accumulated search results across expansion passes. Raw page
     # content is blanked after verification, but the result list still grows
     # with every pass on a long deep run; the oldest entries are dropped once

@@ -1,0 +1,13 @@
+{
+  "version": "v1",
+  "description": "Floors for the deterministic retrieval-health evaluator (bench/eval_retrieval.py). ADDITIVE ONLY: these are new metrics introduced alongside the retrieval-access hardening and do not replace or weaken any threshold in thresholds_v1.json. Every floor is calibrated BELOW the observed offline value (headroom) so the evaluator passes while a real regression — cooldowns not applied, failed URLs re-fetched, fallback not substituting — trips it. Scenario pass/fail is asserted per-case in code; these floors guard the aggregates.",
+  "retrieval": {
+    "successful_fetch_rate": 0.2,
+    "unique_authoritative_domains": 0.1,
+    "primary_source_acquisition_rate": 0.1,
+    "cooldown_skip_rate": 0.1,
+    "duplicate_suppression_rate": 0.05,
+    "fallback_acquisition_rate": 0.1,
+    "retrieval_health_pass_rate": 1.0
+  }
+}
