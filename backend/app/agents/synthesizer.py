@@ -588,6 +588,10 @@ async def synthesize(
         contradictions=contradictions,
         cited_facts=cited_facts,
     )
+    # The argument structure is deterministic, so its loss must not depend on
+    # the writer surfacing it: append it when the report has no Reasoning/
+    # Argument/Conclusions section. Runs before the trim so the band holds.
+    answer = ensure_reasoning_structure(answer, ctx=ctx)
     # Cross-section refinement pass (deterministic; no LLM). Runs AFTER the
     # required sections exist (so Key Findings is registered as a recap) and
     # BEFORE the trim. A bare restatement is transformed into a transition +
@@ -1055,6 +1059,9 @@ async def _synthesize_sectioned(
         contradictions=contradictions,
         cited_facts=cited_facts,
     )
+    # Deterministic argument structure fallback (the writer's absence must not
+    # lose it), before the trim so the band holds.
+    answer = ensure_reasoning_structure(answer, ctx=ctx)
     # Section-wise reports are exactly where cross-section restatement lives
     # (each section was written blind to its siblings): run the deterministic
     # refinement pass before the trim — a repeated opening becomes a transition,
@@ -1111,6 +1118,50 @@ REQUIRED_SECTIONS: Dict[str, tuple] = {
         "conflicting evidence", "contradictions",
     ),
 }
+
+
+# Heading the deterministic reasoning fallback emits. Recognized so the
+# writer's own "Reasoning"/"Argument" section counts as present (the structure
+# is then not duplicated).
+_REASONING_HEADINGS = (
+    "reasoning", "argument", "analysis and reasoning", "reasoning structure",
+    "argument structure", "conclusions",
+)
+
+
+def _has_reasoning_section(answer: str) -> bool:
+    present = _present_section_keys(answer)
+    return any(_normalize_heading(h) in present for h in _REASONING_HEADINGS)
+
+
+def ensure_reasoning_structure(answer: str, *, ctx: Dict[str, Any]) -> str:
+    """Append the deterministic argument structure when the writer omitted it.
+
+    The ReasoningMap is the argument layer, so its loss must never depend on
+    the writer choosing to surface it. When the report already carries a
+    Reasoning/Argument/Conclusions section the writer has done the job and this
+    is a no-op; otherwise the measured structure is appended verbatim — no
+    invented content, consistent with `ensure_required_sections`. Total and
+    fail-safe: a missing/empty map or an unrenderable one leaves the answer
+    untouched.
+    """
+    if not answer:
+        return answer
+    reasoning = (ctx or {}).get("reasoning")
+    if reasoning is None or not hasattr(reasoning, "render_for_writer"):
+        return answer
+    if _has_reasoning_section(answer):
+        return answer
+    render = getattr(reasoning, "render_for_report", None) or getattr(
+        reasoning, "render_for_writer"
+    )
+    try:
+        rendered = str(render()).strip()
+    except Exception:  # noqa: BLE001
+        return answer
+    if not rendered:
+        return answer
+    return answer.rstrip() + "\n\n## Reasoning\n\n" + rendered
 
 
 def _present_section_keys(answer: str) -> Set[str]:
@@ -2101,6 +2152,22 @@ def _render_context_block(ctx: Dict[str, Any]) -> str:
             "Never present a D-grade claim or an unsupported number as established fact; "
             "soften it ('one source reports…') or omit it."
         )
+
+    # Evidence-grounded reasoning structure: the deterministic argument the
+    # evidence actually supports. The writer must state the conclusion the
+    # evidence backs, present the competing explanations where they exist,
+    # separate established from inferred from unknown, and answer the question;
+    # for a decision-shaped query it must state the implication or explicitly
+    # say the evidence is insufficient. Rendered from the ReasoningMap built in
+    # workflow.synthesizer_node (a no-op when the map is absent/empty).
+    reasoning = ctx.get("reasoning")
+    if reasoning is not None and hasattr(reasoning, "render_for_writer"):
+        try:
+            rendered_reasoning = str(reasoning.render_for_writer()).strip()
+        except Exception:  # noqa: BLE001 - never let the structure break synthesis
+            rendered_reasoning = ""
+        if rendered_reasoning:
+            parts.append(rendered_reasoning)
 
     # Surviving red-team objections belong in the brief, not only in the
     # appendix: a writer that knows the strongest counter-argument writes a

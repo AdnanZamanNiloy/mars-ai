@@ -720,6 +720,7 @@ MACHINE_SECTIONS: Tuple[str, ...] = (
     "## Source ledger",
     "## Standing objections",
     "## What Would Change Our Mind",
+    "## Reasoning",
     "## Sources",
 )
 

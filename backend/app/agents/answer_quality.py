@@ -388,7 +388,14 @@ def evaluate_answer(
             "context in prose or drop it."
         )
 
-    # ---- Reasoning: conflicts surfaced, limitations present, objections kept ----
+    # ---- Reasoning: does it CONCLUDE and ANSWER, not just summarize? ----
+    # The old measure was saturated: conflict_term/limitations/objections were
+    # 1.0 for any report that merely mentioned them, so "reasoning=100" said
+    # nothing about whether the report ever drew a conclusion or answered the
+    # question. The conclusion-present / question-answered signal below is
+    # computed from the ACTUAL answer, so a report that merely sums evidence
+    # (no conclusion, off-question) scores strictly lower than one that
+    # concludes and answers.
     if contradictions:
         conflict_term = 1.0 if any(
             t in lowered for t in ("range", "disagree", "conflict", "spread")
@@ -408,7 +415,60 @@ def evaluate_answer(
         objections = 1.0 if any(
             t in lowered for t in ("objection", "red team", "weakness", "would invalidate")
         ) else 0.4
-    reasoning = round(100 * (0.40 * conflict_term + 0.35 * limitations + 0.25 * objections))
+
+    # Explicit conclusion: a claim of what the evidence collectively supports,
+    # either as an explicit phrasing or a dedicated Reasoning/Conclusions
+    # section (the deterministic fallback emits "## Reasoning", so its presence
+    # counts). A report that only lists findings has no conclusion.
+    has_conclusion_section = bool(
+        re.search(r"^##\s+(Reasoning|Conclusions?|Argument)\b", answer or "", re.M | re.I)
+    )
+    has_conclusion_phrase = any(
+        t in lowered for t in (
+            "in conclusion", "taken together", "together, these",
+            "the evidence supports", "the evidence indicates",
+            "the evidence suggests", "the evidence shows",
+            "the findings indicate", "the findings suggest",
+            "based on the evidence", "overall, the", "we conclude",
+            "the answer is", "therefore",
+        )
+    )
+    conclusion_term = 1.0 if (has_conclusion_phrase or has_conclusion_section) else 0.0
+    if not conclusion_term:
+        failures.append(
+            "Reasoning: the report states no conclusion — say explicitly what the "
+            "evidence collectively supports, not just what each source says."
+        )
+
+    # Epistemic separation: does the answer distinguish established evidence
+    # from what is merely inferred, single-source or unknown?
+    separates = any(
+        t in lowered for t in (
+            "established", "inferred", "single-source", "single source",
+            "provisional", "uncertain", "unknown", "could not verify",
+            "cannot verify", "unresolved", "one source", "not verified",
+        )
+    )
+    separation_term = 1.0 if (separates and conclusion_term) else (0.5 if separates else 0.0)
+
+    # Question-answered: reuse the evidence-independent answer-vs-query measure
+    # already computed for relevance. >= 0.45 semantic+concept alignment counts
+    # as a direct answer to the question asked.
+    answer_question_term = min(1.0, answer_relevance / 0.45)
+    if answer_question_term < 0.5:
+        failures.append(
+            "Reasoning: the answer does not directly answer the question asked — "
+            "state the conclusion in terms of the query's own subject."
+        )
+
+    reasoning = round(100 * (
+        0.20 * conflict_term
+        + 0.15 * limitations
+        + 0.10 * objections
+        + 0.25 * conclusion_term
+        + 0.15 * separation_term
+        + 0.15 * answer_question_term
+    ))
 
     overall = round(
         0.30 * accuracy + 0.25 * relevance + 0.20 * evidence + 0.15 * clarity + 0.10 * reasoning

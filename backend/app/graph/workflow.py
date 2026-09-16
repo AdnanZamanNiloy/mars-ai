@@ -1782,6 +1782,25 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             evidence_distribution = dist
         except Exception as exc:
             logger.warning("evidence_distribution_failed", error=str(exc), exc_info=exc)
+        # Evidence-grounded reasoning structure (Feature: argument synthesis):
+        # the deterministic argument layer the writer must state a conclusion
+        # from, present competing explanations for, and separate established /
+        # inferred / unknown. Built from the same graded facts and state as the
+        # rest of the pipeline; failure-safe (the writer simply runs without it).
+        try:
+            from app.core.reasoning_engine import build_reasoning
+
+            base_context["reasoning"] = build_reasoning(
+                usable,
+                state.get("contradictions") or [],
+                query=state["query"],
+                query_type=str(intent.get("query_type", "") or ""),
+                investigation_state=state.get("investigation_state"),
+                sub_questions=state.get("sub_questions") or [],
+                depth_state=state,
+            )
+        except Exception as exc:
+            logger.warning("reasoning_build_failed", error=str(exc), exc_info=exc)
         gate_enabled = bool(getattr(llm.settings, "quality_gate_enabled", True))
         revision_enabled = bool(getattr(llm.settings, "synthesis_revision_enabled", True))
         threshold = float(getattr(llm.settings, "quality_threshold", 70.0) or 70.0)
