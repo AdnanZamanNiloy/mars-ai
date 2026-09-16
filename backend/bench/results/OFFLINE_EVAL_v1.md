@@ -1,6 +1,6 @@
 # MARS Offline Golden Evaluation (v1)
 
-*Generated 2026-09-16T10:06:30Z — deterministic, network-free.*
+*Generated 2026-09-16T10:11:02Z — deterministic, network-free.*
 
 Golden set: `bench/golden/queries_v1.json`  
 Thresholds: `bench/golden/thresholds_v1.json`  
@@ -26,6 +26,7 @@ Queries: 26 (scored 26, failed 0)
 | answer_relevance_mean | 0.3971 | 0.3000 | ok |
 | support_rate_mean | 0.5051 | 0.4000 | ok |
 | minimums_pass_rate | 1.0000 | 0.9500 | ok |
+| depth_routing_pass_rate | 1.0000 |  | ok |
 
 ## Per category
 

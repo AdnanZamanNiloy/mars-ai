@@ -1,0 +1,7 @@
+{
+  "version": "v1",
+  "description": "Regression floors for the deterministic offline adaptive-depth routing evaluator (bench/eval_depth.py). Every scenario asserts the exact routing decision and reason tokens for one adaptive-depth branch; the aggregate pass rate is held at 1.0 because the branches are deterministic and a wrong decision is always a regression. Additive only: this file does not alter any threshold in thresholds_v1.json.",
+  "depth": {
+    "depth_routing_pass_rate": 1.0
+  }
+}

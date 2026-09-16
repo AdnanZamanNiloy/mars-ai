@@ -1,0 +1,168 @@
+{
+  "suite": "mars-golden-depth-eval",
+  "version": "v1",
+  "ran_at": "2026-09-16T10:10:55.198104+00:00",
+  "thresholds_path": "/home/adnan-zaman/Desktop/mars-ai/backend/bench/golden/thresholds_depth_v1.json",
+  "aggregate": {
+    "scenarios_total": 5,
+    "scenarios_passed": 5,
+    "scenarios_failed": 0,
+    "metrics": {
+      "depth_routing_pass_rate": 1.0
+    }
+  },
+  "scenarios": [
+    {
+      "id": "depth-high-impact-uncorroborated",
+      "description": "high-impact quantitative claim on a single publisher -> expand",
+      "expected_decision": "expand",
+      "actual_decision": "expand",
+      "decision_ok": true,
+      "reason": "1 thin dimension; 1 high-impact claim uncorroborated",
+      "expected_reason_tokens": [
+        "high-impact claim",
+        "uncorroborated"
+      ],
+      "reason_tokens_present": {
+        "high-impact claim": true,
+        "uncorroborated": true
+      },
+      "reason_ok": true,
+      "expect_limitations": false,
+      "limitations": [],
+      "limitations_ok": true,
+      "hard_wall_reached": false,
+      "evidence_gaps_remain": true,
+      "triggers": [
+        "1 thin dimension",
+        "1 high-impact claim uncorroborated"
+      ],
+      "high_impact_uncorroborated": 1,
+      "severe_contradictions": 0,
+      "thin_dimensions": [
+        "what is the cost data"
+      ],
+      "passed": true
+    },
+    {
+      "id": "depth-thin-dimension",
+      "description": "planned dimension with no attributed fact -> expand",
+      "expected_decision": "expand",
+      "actual_decision": "expand",
+      "decision_ok": true,
+      "reason": "1 thin dimension",
+      "expected_reason_tokens": [
+        "thin dimension"
+      ],
+      "reason_tokens_present": {
+        "thin dimension": true
+      },
+      "reason_ok": true,
+      "expect_limitations": false,
+      "limitations": [],
+      "limitations_ok": true,
+      "hard_wall_reached": false,
+      "evidence_gaps_remain": false,
+      "triggers": [
+        "1 thin dimension"
+      ],
+      "high_impact_uncorroborated": 0,
+      "severe_contradictions": 0,
+      "thin_dimensions": [
+        "how does the mechanism work"
+      ],
+      "passed": true
+    },
+    {
+      "id": "depth-unresolved-severe-contradiction",
+      "description": "unresolved severe numeric contradiction -> expand",
+      "expected_decision": "expand",
+      "actual_decision": "expand",
+      "decision_ok": true,
+      "reason": "1 unresolved severe contradiction",
+      "expected_reason_tokens": [
+        "severe contradiction"
+      ],
+      "reason_tokens_present": {
+        "severe contradiction": true
+      },
+      "reason_ok": true,
+      "expect_limitations": false,
+      "limitations": [],
+      "limitations_ok": true,
+      "hard_wall_reached": false,
+      "evidence_gaps_remain": false,
+      "triggers": [
+        "1 unresolved severe contradiction"
+      ],
+      "high_impact_uncorroborated": 0,
+      "severe_contradictions": 1,
+      "thin_dimensions": [],
+      "passed": true
+    },
+    {
+      "id": "depth-sufficient",
+      "description": "sufficient evidence, no important gaps -> finalize",
+      "expected_decision": "finalize",
+      "actual_decision": "finalize",
+      "decision_ok": true,
+      "reason": "evidence sufficient: confidence at target and planned axes covered",
+      "expected_reason_tokens": [],
+      "reason_tokens_present": {},
+      "reason_ok": true,
+      "expect_limitations": false,
+      "limitations": [],
+      "limitations_ok": true,
+      "hard_wall_reached": false,
+      "evidence_gaps_remain": false,
+      "triggers": [],
+      "high_impact_uncorroborated": 0,
+      "severe_contradictions": 0,
+      "thin_dimensions": [],
+      "passed": true
+    },
+    {
+      "id": "depth-hard-wall",
+      "description": "iteration ceiling reached with gaps remaining -> finalize + limitations",
+      "expected_decision": "finalize",
+      "actual_decision": "finalize",
+      "decision_ok": true,
+      "reason": "hard wall: iteration/depth ceiling reached; remaining gaps recorded as limitations (1 thin dimension; 1 high-impact claim uncorroborated)",
+      "expected_reason_tokens": [
+        "hard wall",
+        "ceiling"
+      ],
+      "reason_tokens_present": {
+        "hard wall": true,
+        "ceiling": true
+      },
+      "reason_ok": true,
+      "expect_limitations": true,
+      "limitations": [
+        "Stopped at the research depth limit with outstanding evidence gaps (1 thin dimension; 1 high-impact claim uncorroborated); they are recorded below as limitations."
+      ],
+      "limitations_ok": true,
+      "hard_wall_reached": true,
+      "evidence_gaps_remain": true,
+      "triggers": [
+        "1 thin dimension",
+        "1 high-impact claim uncorroborated"
+      ],
+      "high_impact_uncorroborated": 1,
+      "severe_contradictions": 0,
+      "thin_dimensions": [
+        "what is the cost data"
+      ],
+      "passed": true
+    }
+  ],
+  "thresholds": {
+    "version": "v1",
+    "description": "Regression floors for the deterministic offline adaptive-depth routing evaluator (bench/eval_depth.py). Every scenario asserts the exact routing decision and reason tokens for one adaptive-depth branch; the aggregate pass rate is held at 1.0 because the branches are deterministic and a wrong decision is always a regression. Additive only: this file does not alter any threshold in thresholds_v1.json.",
+    "depth": {
+      "depth_routing_pass_rate": 1.0
+    }
+  },
+  "threshold_failures": [],
+  "passed": true
+}

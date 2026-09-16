@@ -239,3 +239,111 @@ def test_aggregate_is_deterministic_across_identical_runs():
 def test_golden_validation_error_is_raised_on_missing_file(tmp_path):
     with pytest.raises(GoldenValidationError):
         load_queries(tmp_path / "does_not_exist.json")
+
+
+# ---------------------------------------------------------------------------
+# Adaptive-depth routing golden coverage (bench/eval_depth.py)
+# ---------------------------------------------------------------------------
+
+def _depth_settings():
+    from app.core.config import Settings
+
+    return Settings(groq_api_key="test", _env_file=None)
+
+
+def test_depth_scenarios_all_pass_and_cover_every_branch():
+    """Every declared adaptive-depth scenario routes as expected. This is the
+    regression contract for continue/stop/hard-wall."""
+    from bench import eval_depth
+    from bench.golden import depth_fixtures_v1
+
+    settings = _depth_settings()
+    rows = [eval_depth.evaluate_scenario(s, settings)
+            for s in depth_fixtures_v1.all_scenarios()]
+    failed = [r for r in rows if not r["passed"]]
+    assert not failed, failed
+    agg = eval_depth.aggregate(rows)
+    assert agg["metrics"]["depth_routing_pass_rate"] == 1.0
+
+
+def test_depth_expand_scenarios_continue():
+    from bench import eval_depth
+    from bench.golden import depth_fixtures_v1
+
+    settings = _depth_settings()
+    for builder in (
+        depth_fixtures_v1.scenario_high_impact_uncorroborated,
+        depth_fixtures_v1.scenario_thin_dimension,
+        depth_fixtures_v1.scenario_unresolved_severe_contradiction,
+    ):
+        scenario = builder()
+        row = eval_depth.evaluate_scenario(scenario, settings)
+        assert row["actual_decision"] == "expand", scenario["id"]
+        assert row["reason_ok"], (scenario["id"], row["reason"])
+
+
+def test_depth_stop_scenarios_finalize():
+    from bench import eval_depth
+    from bench.golden import depth_fixtures_v1
+
+    settings = _depth_settings()
+    for builder in (
+        depth_fixtures_v1.scenario_sufficient,
+        depth_fixtures_v1.scenario_hard_wall,
+    ):
+        scenario = builder()
+        row = eval_depth.evaluate_scenario(scenario, settings)
+        assert row["actual_decision"] == "finalize", scenario["id"]
+
+
+def test_depth_hard_wall_records_limitations():
+    from bench import eval_depth
+    from bench.golden import depth_fixtures_v1
+
+    scenario = depth_fixtures_v1.scenario_hard_wall()
+    row = eval_depth.evaluate_scenario(scenario, _depth_settings())
+    assert row["hard_wall_reached"] is True
+    assert row["evidence_gaps_remain"] is True
+    assert row["limitations"], "hard wall must record the outstanding gaps"
+    assert "gap" in row["limitations"][0].lower()
+
+
+def test_depth_routing_gate_bites_on_a_broken_fixture():
+    """Prove the routing gate actually fails when a scenario's decision
+    regresses: flip one fixture's expected decision and assert the aggregate
+    drops below the 1.0 threshold, producing a violation."""
+    from bench import eval_depth
+    from bench.golden import depth_fixtures_v1
+
+    scenarios = depth_fixtures_v1.all_scenarios()
+    scenarios[0]["expect"]["expected_decision"] = "finalize"  # deliberately wrong
+
+    settings = _depth_settings()
+    rows = [eval_depth.evaluate_scenario(s, settings) for s in scenarios]
+    agg = eval_depth.aggregate(rows)
+    assert agg["metrics"]["depth_routing_pass_rate"] == 0.8
+    failures = eval_depth.check_thresholds(agg, {"depth": {"depth_routing_pass_rate": 1.0}})
+    assert failures and failures[0]["metric"] == "depth_routing_pass_rate"
+
+
+def test_depth_reason_token_mismatch_fails():
+    """A scenario whose expected reason token is absent must fail — a routing
+    decision with the wrong WHY is still a regression."""
+    from bench import eval_depth
+    from bench.golden import depth_fixtures_v1
+
+    scenario = depth_fixtures_v1.scenario_sufficient()
+    scenario["expect"]["reason_tokens"] = ["a token that never appears"]
+    row = eval_depth.evaluate_scenario(scenario, _depth_settings())
+    assert row["actual_decision"] == "finalize"
+    assert row["reason_ok"] is False
+    assert row["passed"] is False
+
+
+def test_depth_thresholds_file_loads_and_gates_at_one():
+    from bench import eval_depth
+
+    report = eval_depth.evaluate()
+    assert report["passed"] is True
+    assert report["threshold_failures"] == []
+    assert report["thresholds"]["depth"]["depth_routing_pass_rate"] == 1.0

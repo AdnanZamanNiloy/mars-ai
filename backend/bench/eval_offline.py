@@ -86,6 +86,9 @@ AGGREGATE_METRICS = (
     "answer_relevance_mean",
     "support_rate_mean",
     "minimums_pass_rate",
+    # Populated only when --with-depth is set; absent otherwise (the markdown
+    # writer skips metrics it has no value for).
+    "depth_routing_pass_rate",
 )
 
 
@@ -660,7 +663,9 @@ def write_markdown(report: Dict[str, Any], out_dir: Path = RESULTS_DIR) -> Path:
 
 async def evaluate(golden_path: Optional[str] = None,
                    thresholds_path: Optional[str] = None,
-                   out_dir: Optional[Path] = None) -> Dict[str, Any]:
+                   out_dir: Optional[Path] = None,
+                   with_depth: bool = False,
+                   depth_thresholds_path: Optional[str] = None) -> Dict[str, Any]:
     from bench.golden.loader import load_queries, load_thresholds
 
     queries = load_queries(golden_path)
@@ -686,6 +691,23 @@ async def evaluate(golden_path: Optional[str] = None,
     category_result = per_category(per_query)
     failures = check_thresholds(aggregate_result, category_result, thresholds)
 
+    depth_report: Optional[Dict[str, Any]] = None
+    if with_depth:
+        # Adaptive-depth routing coverage lives in its own evaluator
+        # (bench/eval_depth.py); fold its per-scenario results and threshold
+        # failures into THIS gate so one command is the whole offline gate.
+        from bench import eval_depth
+
+        depth_report = eval_depth.evaluate(depth_thresholds_path)
+        aggregate_result["metrics"].update(depth_report["aggregate"]["metrics"])
+        for f in depth_report["threshold_failures"]:
+            failures.append({"scope": "depth", "metric": f["metric"],
+                             "actual": f["actual"], "floor": f["floor"]})
+        for row in depth_report["scenarios"]:
+            status = "ok" if row["passed"] else "FAIL"
+            print(f"[depth {status:>4}] {row['id']:<42} "
+                  f"decision={row['actual_decision']:<8}")
+
     report = {
         "suite": "mars-golden-offline-eval",
         "version": thresholds.get("version", "v1"),
@@ -695,6 +717,7 @@ async def evaluate(golden_path: Optional[str] = None,
         "aggregate": aggregate_result,
         "per_category": category_result,
         "queries": per_query,
+        "depth": depth_report,
         "thresholds": thresholds,
         "threshold_failures": failures,
         "passed": not failures,
@@ -707,11 +730,17 @@ def main() -> int:
     parser.add_argument("--golden", default=None, help="golden query JSON path")
     parser.add_argument("--thresholds", default=None, help="thresholds JSON path")
     parser.add_argument("--out", default=None, help="results directory")
+    parser.add_argument("--with-depth", action="store_true",
+                        help="also run the adaptive-depth routing evaluator")
+    parser.add_argument("--depth-thresholds", default=None,
+                        help="adaptive-depth thresholds JSON path")
     args = parser.parse_args()
 
     try:
         report = asyncio.run(evaluate(args.golden, args.thresholds,
-                                      Path(args.out) if args.out else None))
+                                      Path(args.out) if args.out else None,
+                                      with_depth=args.with_depth,
+                                      depth_thresholds_path=args.depth_thresholds))
     except Exception as exc:
         print(f"golden evaluation failed to run: {type(exc).__name__}: {exc}",
               file=sys.stderr)
