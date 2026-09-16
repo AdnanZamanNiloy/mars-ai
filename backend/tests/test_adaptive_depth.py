@@ -10,6 +10,12 @@ Mirrors the fixtures in test_depth_controller_v2.py / test_research_loop.py.
 """
 from app.core import depth_controller
 from app.core.config import Settings
+from app.core.investigation_state import (
+    STATUS_ATTEMPTED,
+    STATUS_EXHAUSTED,
+    STATUS_OPEN,
+    investigation_key,
+)
 from app.core.usage import clear_run_usage, start_run_usage
 
 
@@ -406,3 +412,137 @@ def test_checks_are_per_call_not_global():
     assert clean_checks["high_impact_uncorroborated"] == 0
     # Re-reading after the other call still returns the first state's answer.
     assert depth_controller.explain(gap_state, _settings())["high_impact_uncorroborated"] == 1
+
+
+# ---------------------------------------------------------------------------
+# 8. Investigation state wiring: exhausted gaps are limitations, open gaps
+#    still drive expansion (app/core/investigation_state.py)
+# ---------------------------------------------------------------------------
+
+_HIGH_IMPACT_CLAIM = "Global spending reached 200 billion dollars in 2025"
+
+
+def _inv_entry(claim, status, attempts=0, max_attempts=2):
+    key = investigation_key(claim)
+    return {
+        key: {
+            "claim": claim,
+            "attempts": attempts,
+            "queries": [f"q{i}" for i in range(attempts)],
+            "status": status,
+            "last_outcome": "still_single_source" if status != STATUS_OPEN else "",
+            "max_attempts": max_attempts,
+        }
+    }
+
+
+def _state_primary_high_impact(**overrides):
+    """A single high-impact claim from a primary publisher (still single-source).
+
+    Primary avoids the separate `thin_dimensions` signal so these cases isolate
+    the investigation-state corroboration wiring under test.
+    """
+    state = _state_with_uncorroborated_high_impact(
+        facts=[
+            _fact(
+                _HIGH_IMPACT_CLAIM,
+                "https://blog.example.com/a",
+                "what is the cost data",
+                is_primary=True,
+            ),
+        ],
+    )
+    state.update(overrides)
+    return state
+
+
+def test_open_high_impact_gap_still_expands():
+    # Un-attempted (open) high-impact gap: a real, actionable gap -> expand.
+    state = _state_with_uncorroborated_high_impact(
+        investigation_state=_inv_entry(_HIGH_IMPACT_CLAIM, STATUS_OPEN)
+    )
+    checks = depth_controller.evaluate(state, _settings())
+    assert checks["active_high_impact_uncorroborated_count"] == 1
+    assert checks["needs_corroboration_count"] >= 1
+    assert depth_controller.decide(state, _settings()) == "expand"
+    assert any("uncorroborated" in r for r in checks["decision_reasons"])
+
+
+def test_attempted_with_budget_remaining_still_expands():
+    # Attempted once, budget (2) not yet spent -> still actionable -> expand.
+    state = _state_with_uncorroborated_high_impact(
+        investigation_state=_inv_entry(_HIGH_IMPACT_CLAIM, STATUS_ATTEMPTED, attempts=1)
+    )
+    checks = depth_controller.evaluate(state, _settings())
+    assert checks["active_high_impact_uncorroborated_count"] == 1
+    assert depth_controller.decide(state, _settings()) == "expand"
+
+
+def test_exhausted_high_impact_gap_does_not_force_expand():
+    # Exhausted gap is an acknowledged limitation, NOT a continue-reason.
+    state = _state_primary_high_impact(
+        investigation_state=_inv_entry(_HIGH_IMPACT_CLAIM, STATUS_EXHAUSTED, attempts=2),
+        critique={"is_sufficient": True, "improved_queries": [], "reason": "ok"},
+    )
+    checks = depth_controller.evaluate(state, _settings())
+    # Raw count still reports the single-source claim (backwards compat).
+    assert checks["needs_corroboration_count"] >= 1
+    assert checks["high_impact_uncorroborated_count"] == 1
+    # ... but the ACTIVE count excludes it.
+    assert checks["exhausted_gap_count"] >= 1
+    assert checks["active_high_impact_uncorroborated_count"] == 0
+    assert all("uncorroborated" not in r for r in checks["decision_reasons"])
+    assert depth_controller.decide(state, _settings()) == "finalize"
+
+
+def test_exhausted_gap_with_sufficient_evidence_finalizes():
+    # Only remaining gap is exhausted and the evidence is otherwise sufficient:
+    # a genuine sufficiency STOP, naming the exhausted gap as a limitation.
+    state = _state_primary_high_impact(
+        investigation_state=_inv_entry(_HIGH_IMPACT_CLAIM, STATUS_EXHAUSTED, attempts=2),
+        confidence=0.9,
+        confidence_history=[0.8, 0.9],
+        critique={"is_sufficient": True, "improved_queries": [], "reason": "ok"},
+    )
+    checks = depth_controller.evaluate(state, _settings())
+    assert checks["evidence_sufficient"] is True
+    assert checks["active_high_impact_uncorroborated_count"] == 0
+    decision, checks2 = depth_controller.decide_with_checks(state, _settings())
+    assert decision == "finalize"
+    assert "sufficient" in checks2["decision_reason"].lower()
+    assert "acknowledged limitation" in checks2["decision_reason"].lower()
+
+
+def test_hard_wall_wins_even_with_open_gaps():
+    # An OPEN high-impact gap cannot defeat the iteration ceiling.
+    state = _state_with_uncorroborated_high_impact(
+        investigation_state=_inv_entry(_HIGH_IMPACT_CLAIM, STATUS_OPEN),
+        iteration=4,
+        max_iterations=4,
+    )
+    checks = depth_controller.evaluate(state, _settings())
+    assert checks["active_high_impact_uncorroborated_count"] == 1
+    assert checks["ceiling_reached"] is True
+    assert depth_controller.decide(state, _settings()) == "finalize"
+
+
+def test_exhausted_gaps_are_not_continue_reasons_but_open_are():
+    exhausted = _state_with_uncorroborated_high_impact(
+        investigation_state=_inv_entry(_HIGH_IMPACT_CLAIM, STATUS_EXHAUSTED, attempts=2)
+    )
+    open_state = _state_with_uncorroborated_high_impact(
+        investigation_state=_inv_entry(_HIGH_IMPACT_CLAIM, STATUS_OPEN)
+    )
+    exhausted_reasons = depth_controller.evaluate(exhausted, _settings())["decision_reasons"]
+    open_reasons = depth_controller.evaluate(open_state, _settings())["decision_reasons"]
+    assert not any("uncorroborated" in r for r in exhausted_reasons)
+    assert any("uncorroborated" in r for r in open_reasons)
+
+
+def test_malformed_investigation_state_is_neutral():
+    # A garbage investigation state must never raise or change routing.
+    state = _state_with_uncorroborated_high_impact(investigation_state="not-a-dict")
+    checks = depth_controller.evaluate(state, _settings())
+    assert checks["exhausted_gap_count"] == 0
+    assert checks["active_high_impact_uncorroborated_count"] == 1
+    assert depth_controller.decide(state, _settings()) == "expand"

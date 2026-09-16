@@ -237,6 +237,59 @@ def _high_impact_uncorroborated(state: Dict[str, Any], limit: int = 5) -> List[D
     return out
 
 
+def _exhausted_claim_keys(state: Dict[str, Any]) -> set:
+    """Normalized keys of claims recorded as EXHAUSTED in investigation state.
+
+    An exhausted claim was already targeted for corroboration, its attempt
+    budget is spent and it is STILL single-source — it is an acknowledged
+    limitation, not an actionable gap. The depth controller must not keep
+    expanding for it. Keys reuse `investigation_state.investigation_key`
+    (= `planner.normalize_text`) so they join the high-impact claim list
+    without a parallel key scheme.
+
+    Total/fail-safe: a missing, None, garbage or empty state yields an empty
+    set; a keying/import failure is logged and also yields an empty set — so
+    routing can never be changed by a malformed state (AGENTS.md 4.4).
+    """
+    raw = state.get("investigation_state")
+    if not raw:
+        return set()
+    try:
+        from app.core.investigation_state import (
+            STATUS_EXHAUSTED,
+            investigation_key,
+            sanitize_investigation_state,
+        )
+
+        inv = sanitize_investigation_state(raw)
+        keys = set()
+        for key, entry in inv.items():
+            if not isinstance(entry, dict) or entry.get("status") != STATUS_EXHAUSTED:
+                continue
+            claim = str(entry.get("claim", "") or "")
+            keys.add(key)
+            if claim:
+                # The stored key is already the normalized claim; adding the
+                # re-derived key makes a hand-built state with a drifted key
+                # still match the claim text.
+                derived = investigation_key(claim)
+                if derived:
+                    keys.add(derived)
+        return keys
+    except Exception as exc:
+        logger.warning("depth_investigation_lookup_failed", error=str(exc), exc_info=exc)
+        return set()
+
+
+def _norm_claim_key(claim: str) -> str:
+    try:
+        from app.agents.planner import normalize_text
+
+        return normalize_text(claim)
+    except Exception:
+        return " ".join(str(claim or "").lower().split())
+
+
 def _thin_dimensions(state: Dict[str, Any], min_facts: int = 1) -> List[str]:
     """Planned research dimensions whose evidence is too thin to finalize on.
 
@@ -454,6 +507,17 @@ def evaluate(state: Dict[str, Any], settings: Settings | None = None) -> Dict[st
     high_impact = _high_impact_uncorroborated(state)
     thin = _thin_dimensions(state)
 
+    # Exhausted claims are acknowledged limitations, not actionable gaps. Only
+    # the ACTIVE (non-exhausted) high-impact gaps may drive expansion or block
+    # a sufficiency stop; an exhausted-only gap set does neither. Claims the
+    # investigation state has no entry for, or a non-exhausted entry for,
+    # remain active — an un-attempted or attempted-with-budget gap is real.
+    exhausted_keys = _exhausted_claim_keys(state)
+    active_high_impact = [
+        h for h in high_impact if _norm_claim_key(str(h.get("claim", ""))) not in exhausted_keys
+    ]
+    active_uncorroborated = len(active_high_impact)
+
     sufficiency_met = (
         confidence >= target
         and not axes_below
@@ -463,12 +527,14 @@ def evaluate(state: Dict[str, Any], settings: Settings | None = None) -> Dict[st
     # axes covered, no thin dimension, no uncorroborated important claim and no
     # unresolved severe contradiction. `sufficiency_met` keeps its historical
     # (confidence + per-axis source floor) meaning for callers that depend on
-    # it; this is the stricter measure the adaptive stop reads.
+    # it; this is the stricter measure the adaptive stop reads. Exhausted gaps
+    # are excluded from the corroboration term so a run whose only remaining
+    # gaps are exhausted can reach a genuine sufficiency stop.
     evidence_sufficient = (
         sufficiency_met
         and not uncovered
         and not thin
-        and needs_corroboration == 0
+        and active_uncorroborated == 0
         and severe_contradictions == 0
     )
 
@@ -485,10 +551,10 @@ def evaluate(state: Dict[str, Any], settings: Settings | None = None) -> Dict[st
         reasons.append(
             f"{len(thin)} thin dimension" + ("s" if len(thin) != 1 else "")
         )
-    if high_impact:
+    if active_high_impact:
         reasons.append(
-            f"{len(high_impact)} high-impact claim"
-            + ("s" if len(high_impact) != 1 else "")
+            f"{active_uncorroborated} high-impact claim"
+            + ("s" if active_uncorroborated != 1 else "")
             + " uncorroborated"
         )
     if uncovered:
@@ -516,13 +582,21 @@ def evaluate(state: Dict[str, Any], settings: Settings | None = None) -> Dict[st
         "axes_covered": axes_covered,
         # Evidence-first stopping signals (research-loop fix):
         "uncovered_axes": uncovered,
+        # `needs_corroboration_count` is the RAW count (all single-source
+        # important claims) and stays for backwards compatibility. The ACTIVE
+        # count excludes exhausted claims (acknowledged limitations); it is
+        # what evidence_sufficient and the expansion gate read.
         "needs_corroboration_count": needs_corroboration,
+        "exhausted_gap_count": len(exhausted_keys),
+        "active_high_impact_uncorroborated_count": active_uncorroborated,
         "severe_contradictions": severe_contradictions,
         # Step 3 adaptive depth: impact-ranked corroboration gaps + thin
-        # dimensions. `needs_corroboration_count` stays for backwards
-        # compatibility; these two carry the concrete targets.
+        # dimensions. `high_impact_uncorroborated` is the RAW ranked list for
+        # trace/UI; `active_high_impact_uncorroborated` is what still drives
+        # expansion.
         "high_impact_uncorroborated": high_impact,
         "high_impact_uncorroborated_count": len(high_impact),
+        "active_high_impact_uncorroborated": active_high_impact,
         "thin_dimensions": thin,
         "counter_evidence_attempted": bool(state.get("counter_evidence_attempted", False)),
         # Feature-11 signals now live:
@@ -614,8 +688,12 @@ def decide_with_checks(
             + ": " + ", ".join(checks["uncovered_axes"][:3]),
         )
 
+    # Only ACTIVE (non-exhausted) corroboration gaps block a stop or force a
+    # pass. An exhausted claim is an acknowledged limitation — re-finding the
+    # same dead end is spend, not research; the workflow already excludes it
+    # from the next corroboration pass.
     gaps_present = (
-        checks["needs_corroboration_count"] > 0
+        checks["active_high_impact_uncorroborated_count"] > 0
         or checks["severe_contradictions"] > 0
         or bool(checks["thin_dimensions"])
     )
@@ -644,10 +722,14 @@ def decide_with_checks(
     # Soft stops. Reached only when the evidence base is complete.
     # ------------------------------------------------------------------
     if checks["sufficiency_stop"]:
-        return _with_reason(
-            "finalize",
-            "evidence sufficient: confidence at target and planned axes covered",
-        )
+        reason = "evidence sufficient: confidence at target and planned axes covered"
+        if checks["exhausted_gap_count"] and not checks["active_high_impact_uncorroborated_count"]:
+            reason += (
+                f"; {checks['exhausted_gap_count']} exhausted gap"
+                + ("s" if checks["exhausted_gap_count"] != 1 else "")
+                + " recorded as acknowledged limitations"
+            )
+        return _with_reason("finalize", reason)
     if checks["marginal_gain_stop"]:
         return _with_reason(
             "finalize",
