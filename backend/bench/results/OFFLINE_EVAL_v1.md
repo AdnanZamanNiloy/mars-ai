@@ -1,6 +1,6 @@
 # MARS Offline Golden Evaluation (v1)
 
-*Generated 2026-09-16T09:46:14Z — deterministic, network-free.*
+*Generated 2026-09-16T10:06:30Z — deterministic, network-free.*
 
 Golden set: `bench/golden/queries_v1.json`  
 Thresholds: `bench/golden/thresholds_v1.json`  

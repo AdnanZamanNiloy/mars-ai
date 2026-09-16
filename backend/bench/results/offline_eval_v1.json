@@ -1,7 +1,7 @@
 {
   "suite": "mars-golden-offline-eval",
   "version": "v1",
-  "ran_at": "2026-09-16T09:46:14.325745+00:00",
+  "ran_at": "2026-09-16T10:06:30.307198+00:00",
   "golden_path": "bench/golden/queries_v1.json",
   "thresholds_path": "bench/golden/thresholds_v1.json",
   "aggregate": {
@@ -251,7 +251,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.126,
+      "wall_sec": 0.116,
       "topic": "rag",
       "llm_calls": 11
     },
@@ -347,7 +347,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.059,
+      "wall_sec": 0.063,
       "topic": "mrna",
       "llm_calls": 11
     },
@@ -441,7 +441,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.055,
+      "wall_sec": 0.053,
       "topic": "transformer_ml",
       "llm_calls": 11
     },
@@ -535,7 +535,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.041,
+      "wall_sec": 0.038,
       "topic": "solid_state",
       "llm_calls": 11
     },
@@ -725,7 +725,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.029,
+      "wall_sec": 0.023,
       "topic": "ai_adoption",
       "llm_calls": 11
     },
@@ -824,7 +824,7 @@
         "summarizer"
       ],
       "error": null,
-      "wall_sec": 0.037,
+      "wall_sec": 0.029,
       "topic": "storage",
       "llm_calls": 11
     },
@@ -920,7 +920,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.063,
+      "wall_sec": 0.058,
       "topic": "nuclear",
       "llm_calls": 11
     },
@@ -1016,7 +1016,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.06,
+      "wall_sec": 0.055,
       "topic": "lithium",
       "llm_calls": 11
     },
@@ -1112,7 +1112,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.106,
+      "wall_sec": 0.093,
       "topic": "finetune",
       "llm_calls": 11
     },
@@ -1211,7 +1211,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.026,
+      "wall_sec": 0.023,
       "topic": "nuclear",
       "llm_calls": 11
     },
@@ -1402,7 +1402,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.044,
+      "wall_sec": 0.041,
       "topic": "transformer_ambiguous",
       "llm_calls": 11
     },
@@ -1497,7 +1497,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.038,
+      "wall_sec": 0.029,
       "topic": "apple",
       "llm_calls": 11
     },
@@ -1590,7 +1590,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.023,
+      "wall_sec": 0.022,
       "topic": "bank",
       "llm_calls": 11
     },
@@ -1684,7 +1684,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.119,
+      "wall_sec": 0.104,
       "topic": "rag",
       "llm_calls": 11
     },
@@ -1778,7 +1778,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.06,
+      "wall_sec": 0.04,
       "topic": "lithium",
       "llm_calls": 11
     },
@@ -1876,7 +1876,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.022,
+      "wall_sec": 0.025,
       "topic": "renewables",
       "llm_calls": 11
     },
@@ -1971,7 +1971,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.059,
+      "wall_sec": 0.051,
       "topic": "renewables",
       "llm_calls": 11
     },
@@ -2064,7 +2064,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.029,
+      "wall_sec": 0.033,
       "topic": "lithium",
       "llm_calls": 11
     },
@@ -2159,7 +2159,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.023,
+      "wall_sec": 0.029,
       "topic": "ai_adoption",
       "llm_calls": 11
     },
@@ -2253,7 +2253,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.039,
+      "wall_sec": 0.037,
       "topic": "heat_pumps",
       "llm_calls": 11
     },
@@ -2347,7 +2347,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.037,
+      "wall_sec": 0.032,
       "topic": "ev",
       "llm_calls": 11
     },
@@ -2443,7 +2443,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.042,
+      "wall_sec": 0.049,
       "topic": "wind_solar",
       "llm_calls": 11
     },
@@ -2537,7 +2537,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.059,
+      "wall_sec": 0.054,
       "topic": "nuclear",
       "llm_calls": 11
     },
@@ -2635,7 +2635,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.027,
+      "wall_sec": 0.026,
       "topic": "ai_regulation",
       "llm_calls": 11
     }

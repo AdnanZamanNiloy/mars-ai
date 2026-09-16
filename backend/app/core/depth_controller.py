@@ -168,6 +168,136 @@ def _needs_corroboration_count(state: Dict[str, Any]) -> int:
     return count
 
 
+def _summary_claims(state: Dict[str, Any]) -> List[str]:
+    """Claim texts the executive summary / key findings will draw on.
+
+    Mirrors `workflow._summary_claim_texts` (kept local to avoid importing the
+    graph module into the stopping hot path). Sourced from explicit state keys
+    when present; deterministic, bounded, and empty when synthesis has not run
+    yet — callers then rank on the other impact signals.
+    """
+    texts: List[str] = []
+    for key in ("summary_claims", "key_findings", "headline_claims"):
+        for item in state.get(key) or []:
+            if isinstance(item, dict):
+                text = str(item.get("claim", "") or "").strip()
+            else:
+                text = str(item or "").strip()
+            if text:
+                texts.append(text)
+    answer = str(state.get("synthesized_answer", "") or "")
+    if answer:
+        for raw in answer.splitlines():
+            line = raw.strip().lstrip("-*# ").strip()
+            if 20 <= len(line) <= 200:
+                texts.append(line)
+            if len(texts) >= 12:
+                break
+    return texts[:12]
+
+
+def _high_impact_uncorroborated(state: Dict[str, Any], limit: int = 5) -> List[Dict[str, Any]]:
+    """High-impact single-publisher claims, ranked, with their impact score.
+
+    Impact is the same deterministic policy the corroboration procurement uses
+    (`evidence_completion.rank_completion_targets`): quantitative claims and
+    claims the executive summary / key findings uses lead. `needs_corroboration`
+    alone is a broad net (a peripheral definitional remark qualifies); the
+    adaptive loop should spend its remaining passes on the claims that would
+    change the ANSWER. Returns [] on empty/ungradeable input — never raises, so
+    grading can never change routing on failure.
+    """
+    facts = [f for f in state.get("facts", []) or [] if isinstance(f, dict)]
+    if not facts:
+        return []
+    try:
+        from app.core.evidence_completion import rank_completion_targets
+
+        ranked = rank_completion_targets(
+            facts,
+            state.get("contradictions") or [],
+            summary_claims=_summary_claims(state),
+            limit=max(1, int(limit)),
+        )
+    except Exception as exc:  # ranking must never change routing
+        logger.warning("depth_completion_ranking_failed", error=str(exc), exc_info=exc)
+        return []
+    out: List[Dict[str, Any]] = []
+    for record in ranked:
+        if not isinstance(record, dict):
+            continue
+        claim = str(record.get("claim", "") or "").strip()
+        if not claim:
+            continue
+        out.append({
+            "claim": claim[:200],
+            "impact": int(record.get("impact", 0) or 0),
+            "has_numbers": bool(record.get("has_numbers", False)),
+        })
+    return out
+
+
+def _thin_dimensions(state: Dict[str, Any], min_facts: int = 1) -> List[str]:
+    """Planned research dimensions whose evidence is too thin to finalize on.
+
+    A dimension is thin when:
+      * it is a planned axis/sub-question (from `sub_questions`) with fewer than
+        `min_facts` verified facts attributed to it (source-URL → axis), OR
+      * it has facts but a primary-source share at/below
+        `evidence_completion.PRIMARY_THIN_THRESHOLD` (the same threshold the
+        primary-source follow-up channel uses — no parallel system).
+
+    Deterministic and total: a grading/import failure yields [] so a bug can
+    never wedge the loop. Unattributed facts (no sub_question) never create a
+    thin dimension; a dimension with no facts at all is already an uncovered
+    axis and is reported separately.
+    """
+    facts = [f for f in state.get("facts", []) or [] if isinstance(f, dict)]
+    if not facts:
+        return []
+    planned = {
+        str(q.get("question", "") or "").strip()
+        for q in state.get("sub_questions", []) or []
+        if isinstance(q, dict) and str(q.get("question", "") or "").strip()
+    }
+    if not planned:
+        return []
+    # Dimension attribution needs the summarizer's `sub_question` stamp. When
+    # NO fact carries it (hand-built states, legacy runs, resume rebuilds), the
+    # input is absent — thinness is unmeasurable, so report none rather than
+    # falsely flag every planned dimension (backwards-compatible rule).
+    stamped = [
+        f for f in facts if str(f.get("sub_question", "") or "").strip()
+    ]
+    if not stamped:
+        return []
+    thin: List[str] = []
+    # (a) planned dimensions with no verified fact attributed at all.
+    have: Dict[str, int] = {}
+    for f in stamped:
+        dim = str(f.get("sub_question", "") or "").strip()
+        have[dim] = have.get(dim, 0) + 1
+    for dim in sorted(planned):
+        if have.get(dim, 0) < min_facts:
+            thin.append(dim)
+    # (b) planned dimensions that have facts but are primary-source thin.
+    try:
+        from app.core.evidence_completion import (
+            PRIMARY_THIN_THRESHOLD,
+            dimension_primary_share,
+        )
+
+        shares = dimension_primary_share(stamped)
+        for dim in sorted(planned):
+            if dim in thin:
+                continue
+            if dim in shares and shares[dim] <= PRIMARY_THIN_THRESHOLD:
+                thin.append(dim)
+    except Exception as exc:  # primary-share is an ADDITIONAL signal only
+        logger.warning("depth_thin_dimension_share_failed", error=str(exc), exc_info=exc)
+    return thin
+
+
 def _axis_imbalance(state: Dict[str, Any]) -> bool:
     verified = _verified_facts(state)
     if not verified:
@@ -321,14 +451,55 @@ def evaluate(state: Dict[str, Any], settings: Settings | None = None) -> Dict[st
     min_iters = _min_iterations(state)
     needs_corroboration = _needs_corroboration_count(state)
     severe_contradictions = _severe_contradictions(state)
+    high_impact = _high_impact_uncorroborated(state)
+    thin = _thin_dimensions(state)
 
     sufficiency_met = (
         confidence >= target
         and not axes_below
     )
 
+    # Holistic evidence-sufficiency — the Step-3 signal: confidence at target,
+    # axes covered, no thin dimension, no uncorroborated important claim and no
+    # unresolved severe contradiction. `sufficiency_met` keeps its historical
+    # (confidence + per-axis source floor) meaning for callers that depend on
+    # it; this is the stricter measure the adaptive stop reads.
+    evidence_sufficient = (
+        sufficiency_met
+        and not uncovered
+        and not thin
+        and needs_corroboration == 0
+        and severe_contradictions == 0
+    )
+
+    # Concrete, human-readable triggers — the WHY behind expand/finalize, so
+    # the trace/UI can explain the decision instead of showing a bare verdict.
+    # Deterministic ordering (sorted/ranked) so the reason string is stable.
+    reasons: List[str] = []
+    if severe_contradictions:
+        reasons.append(
+            f"{severe_contradictions} unresolved severe contradiction"
+            + ("s" if severe_contradictions != 1 else "")
+        )
+    if thin:
+        reasons.append(
+            f"{len(thin)} thin dimension" + ("s" if len(thin) != 1 else "")
+        )
+    if high_impact:
+        reasons.append(
+            f"{len(high_impact)} high-impact claim"
+            + ("s" if len(high_impact) != 1 else "")
+            + " uncorroborated"
+        )
+    if uncovered:
+        reasons.append(
+            f"{len(uncovered)} uncovered planned axe"
+            + ("s" if len(uncovered) != 1 else "")
+        )
+
     checks = {
         "sufficiency_met": sufficiency_met,
+        "evidence_sufficient": evidence_sufficient,
         "sufficiency_stop": bool(critique.get("is_sufficient", False)) or sufficiency_met,
         "critic_sufficient": bool(critique.get("is_sufficient", False)),
         "marginal_gain_stop": _two_consecutive_stalls(history, settings.min_marginal_gain),
@@ -347,6 +518,12 @@ def evaluate(state: Dict[str, Any], settings: Settings | None = None) -> Dict[st
         "uncovered_axes": uncovered,
         "needs_corroboration_count": needs_corroboration,
         "severe_contradictions": severe_contradictions,
+        # Step 3 adaptive depth: impact-ranked corroboration gaps + thin
+        # dimensions. `needs_corroboration_count` stays for backwards
+        # compatibility; these two carry the concrete targets.
+        "high_impact_uncorroborated": high_impact,
+        "high_impact_uncorroborated_count": len(high_impact),
+        "thin_dimensions": thin,
         "counter_evidence_attempted": bool(state.get("counter_evidence_attempted", False)),
         # Feature-11 signals now live:
         "confidence_target": target,
@@ -354,7 +531,10 @@ def evaluate(state: Dict[str, Any], settings: Settings | None = None) -> Dict[st
         "no_novel_queries": bool(improved) and not novel,
         "budget": budget,
         "budget_stop": bool(budget["exhausted"] or not budget["can_afford_pass"]),
+        # Explainability: the ordered trigger list behind the decision.
+        "decision_reasons": reasons,
     }
+    checks["decision_reason"] = "; ".join(reasons) if reasons else "evidence sufficient"
     return checks
 
 
@@ -378,6 +558,12 @@ def decide_with_checks(
     """
     checks = evaluate(state, settings)
 
+    def _with_reason(decision: DECISION, reason: str) -> tuple[DECISION, Dict[str, Any]]:
+        """Stamp the concrete reason for this call (checks are per-call)."""
+        checks["decision"] = decision
+        checks["decision_reason"] = reason
+        return decision, checks
+
     # ------------------------------------------------------------------
     # Hard walls are ABSOLUTE — nothing below can preempt them. Budget and the
     # iteration/depth ceiling are the anti-infinite-loop guarantee. The
@@ -388,63 +574,109 @@ def decide_with_checks(
     # ------------------------------------------------------------------
     if checks["budget_stop"]:
         # Budget is a hard wall: never expand into a pass we cannot pay for.
-        return "finalize", checks
+        return _with_reason(
+            "finalize",
+            "hard wall: research budget exhausted (dollars/tokens/calls/time)",
+        )
     if checks["ceiling_reached"]:
         # The iteration/depth ceiling is a hard wall alongside budget: at the
         # limit the run finalizes even if gaps remain (they become limitations).
-        return "finalize", checks
+        reason = (
+            "hard wall: iteration/depth ceiling reached; remaining gaps "
+            "recorded as limitations"
+        )
+        if checks["decision_reasons"]:
+            reason += f" ({checks['decision_reason']})"
+        return _with_reason("finalize", reason)
 
     # Mode demands a minimum depth (audit re-scopes even a sufficient-looking
     # pass 1): only the hard walls above may preempt this.
     if checks["min_iterations_not_reached"]:
-        return "expand", checks
+        return _with_reason(
+            "expand",
+            f"mode minimum depth not reached (iteration < {_min_iterations(state)})",
+        )
 
     # ------------------------------------------------------------------
     # Evidence-completeness hard-blocks. These preempt every SOFT stop
     # (sufficiency, marginal gain, no-novel-queries): a run that still has an
-    # unsourced planned angle, an uncorroborated important claim, or a severe
-    # open contradiction must not finalize while a useful pass can still run.
+    # unsourced planned angle, an uncorroborated important claim, a severe open
+    # contradiction, or a thinly-evidenced planned dimension must not finalize
+    # while a useful pass can still run.
     # ------------------------------------------------------------------
     if checks["uncovered_axes"]:
         # A planned angle with zero verified facts is a hole, not a rounding
         # error. Expanding is the only way to fill it.
-        return "expand", checks
+        return _with_reason(
+            "expand",
+            f"{len(checks['uncovered_axes'])} uncovered planned axe"
+            + ("s" if len(checks["uncovered_axes"]) != 1 else "")
+            + ": " + ", ".join(checks["uncovered_axes"][:3]),
+        )
 
-    if checks["needs_corroboration_count"] > 0 or checks["severe_contradictions"] > 0:
+    gaps_present = (
+        checks["needs_corroboration_count"] > 0
+        or checks["severe_contradictions"] > 0
+        or bool(checks["thin_dimensions"])
+    )
+    if gaps_present:
         if checks["novel_followups"]:
-            return "expand", checks
+            return _with_reason("expand", checks["decision_reason"])
         # Nothing new left to search: record as limitations rather than burn a
         # pass re-finding the same pages (prevents an unbounded loop).
-        return "finalize", checks
+        reason = checks["decision_reason"] or "evidence gaps remain"
+        return _with_reason(
+            "finalize",
+            f"evidence gaps remain but nothing novel is left to search ({reason}); "
+            "recorded as limitations",
+        )
 
     # A critic that explicitly said "insufficient" and proposed actionable new
     # queries forces a pass — the model verdict is not waivable by a measured
     # sufficiency that ignores what the critic saw.
     if not checks["critic_sufficient"] and checks["novel_followups"]:
-        return "expand", checks
+        return _with_reason(
+            "expand",
+            "critic reported insufficient evidence and proposed novel follow-up queries",
+        )
 
     # ------------------------------------------------------------------
     # Soft stops. Reached only when the evidence base is complete.
     # ------------------------------------------------------------------
     if checks["sufficiency_stop"]:
-        return "finalize", checks
+        return _with_reason(
+            "finalize",
+            "evidence sufficient: confidence at target and planned axes covered",
+        )
     if checks["marginal_gain_stop"]:
-        return "finalize", checks
+        return _with_reason(
+            "finalize",
+            "no meaningful marginal confidence gain for two consecutive iterations",
+        )
     if checks["no_novel_queries"]:
         # Every proposed follow-up duplicates a search we already ran —
         # expanding would burn a pass to re-find the same pages.
-        return "finalize", checks
+        return _with_reason(
+            "finalize",
+            "no novel queries left: every follow-up duplicates an already-run search",
+        )
 
     # Expansion trigger: critic sees a specific gap AND axis coverage is poor.
     if checks["coverage_gap"]:
-        return "expand", checks
+        return _with_reason(
+            "expand",
+            "critic-reported coverage gap: axis spread/imbalance or a below-floor axis",
+        )
 
     # Default: trust the critic's loop decision (it returned insufficient
     # with improved_queries even if axis data couldn't confirm a gap).
     if state.get("critique", {}).get("improved_queries"):
-        return "expand", checks
+        return _with_reason(
+            "expand",
+            "critic returned insufficient with actionable follow-up queries",
+        )
 
-    return "finalize", checks
+    return _with_reason("finalize", "no expansion trigger and no gaps detected")
 
 
 def hard_wall_reached(state: Dict[str, Any], settings: Settings | None = None) -> bool:
@@ -465,6 +697,26 @@ def last_decision(state: Dict[str, Any], settings: Settings | None = None) -> Di
     safe under concurrent runs and cannot return another run's checks.
     """
     return decide_with_checks(state, settings)[1]
+
+
+def explain(state: Dict[str, Any], settings: Settings | None = None) -> Dict[str, Any]:
+    """The decision AND its concrete reason, for the trace/UI.
+
+    Returns a small, JSON-friendly dict: the verdict, why it was reached, and
+    the evidence triggers behind it (high-impact uncorroborated claim count,
+    unresolved severe contradictions, thin dimensions, uncovered axes). Pure
+    and side-effect-free so a trace can call it after the fact.
+    """
+    decision, checks = decide_with_checks(state, settings)
+    return {
+        "decision": decision,
+        "reason": checks.get("decision_reason", ""),
+        "triggers": list(checks.get("decision_reasons", []) or []),
+        "high_impact_uncorroborated": int(checks.get("high_impact_uncorroborated_count", 0) or 0),
+        "severe_contradictions": int(checks.get("severe_contradictions", 0) or 0),
+        "thin_dimensions": list(checks.get("thin_dimensions", []) or []),
+        "uncovered_axes": list(checks.get("uncovered_axes", []) or []),
+    }
 
 
 
@@ -488,5 +740,13 @@ def stop_reason(state: Dict[str, Any], settings: Settings | None = None) -> str 
         return (
             "Stopped early because every remaining question duplicated a search "
             "already run; the gaps are recorded below as limitations instead."
+        )
+    # Evidence-driven early stop: the run hit a hard wall while measurable
+    # evidence gaps remained. Name them so the Limitations section reflects why
+    # the report is not deeper, not just that it stopped.
+    if (checks["ceiling_reached"] or checks["budget_stop"]) and checks["decision_reasons"]:
+        return (
+            "Stopped at the research depth limit with outstanding evidence gaps "
+            f"({checks['decision_reason']}); they are recorded below as limitations."
         )
     return None
