@@ -1160,20 +1160,49 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         # expansion passes, independent of whether the planner model chose to
         # turn critique feedback into a contract. Deduped against everything
         # already searched.
+        cap = max(1, int(getattr(settings, "search_max_queries_per_pass", 8) or 8))
         corroboration_to_run: List[str] = []
         if int(state.get("iteration", 0)) > 0:
-            for q in state.get("corroboration_queries", []) or []:
-                text = str(q or "").strip()
-                key = normalize_text(text)
-                if not text or not key or key in answered:
-                    continue
-                corroboration_to_run.append(text)
-                answered.add(key)
+            # Central investigation allocator (app/core/investigation_planner.py):
+            # instead of a fixed-order concatenation of the corroboration /
+            # counter-evidence / primary-source channels, rank every candidate
+            # investigation by expected value and take the top-K within the
+            # per-pass budget. Deterministic fallback: when the allocator yields
+            # nothing (empty/garbage state, all targets exhausted, every query
+            # already executed), revert to the historical channel list exactly
+            # as before — existing behavior is preserved, never weakened.
+            allocation: Dict[str, Any] = {"selected": []}
+            try:
+                from app.core.investigation_planner import select_investigations
 
-        cap = max(1, int(getattr(settings, "search_max_queries_per_pass", 8) or 8))
-        # Corroboration queries get priority within the per-pass query cap:
-        # they are the pass's reason for existing when a claim needs a new
-        # publisher, so an oversized plan cannot crowd them out.
+                allocation = select_investigations(state, budget_cap=cap)
+            except Exception as exc:  # allocator failure must not break search
+                logger.warning("investigation_allocator_failed", error=str(exc), exc_info=exc)
+                allocation = {"selected": []}
+            alloc_queries = [
+                str(c.get("query", "") or "").strip()
+                for c in (allocation.get("selected") or [])
+                if isinstance(c, dict) and str(c.get("query", "") or "").strip()
+            ]
+            if alloc_queries:
+                for text in alloc_queries:
+                    key = normalize_text(text)
+                    if not key or key in answered:
+                        continue
+                    corroboration_to_run.append(text)
+                    answered.add(key)
+            else:
+                for q in state.get("corroboration_queries", []) or []:
+                    text = str(q or "").strip()
+                    key = normalize_text(text)
+                    if not text or not key or key in answered:
+                        continue
+                    corroboration_to_run.append(text)
+                    answered.add(key)
+
+        # Allocated/fallback follow-ups get priority within the per-pass query
+        # cap: they are the pass's reason for existing when evidence is missing,
+        # so an oversized plan cannot crowd them out.
         room = max(0, cap - len(corroboration_to_run))
         fresh = fresh[:room]
         fresh.extend((q, "general") for q in corroboration_to_run)
