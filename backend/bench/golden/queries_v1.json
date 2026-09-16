@@ -1,0 +1,904 @@
+{
+  "version": "v1",
+  "description": "Golden query set v1. 24 queries across 7 categories. Expectations are deterministic and offline-checkable only (see expected_v1.json for the field contract). Fixtures (offline pages + scripted answer per query) live in bench/golden/fixtures_v1.py, keyed by id.",
+  "queries": [
+    {
+      "id": "factual-rag",
+      "category": "factual_explanation",
+      "query": "What is retrieval augmented generation and how does it work?",
+      "query_type_required": "analytical",
+      "required_dimensions": [
+        "definition",
+        "mechanism",
+        "evidence"
+      ],
+      "min_dimensions_hit": 3,
+      "forbidden_domains": [
+        "electrical-transformer",
+        "power-grid-voltage"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 4,
+        "corroborated_claims": 2,
+        "distinct_domains": 3,
+        "primary_share": 0.9,
+        "sections": 5
+      }
+    },
+    {
+      "id": "factual-mrna",
+      "category": "factual_explanation",
+      "query": "What is an mRNA vaccine and how does it produce an immune response?",
+      "query_type_required": "analytical",
+      "required_dimensions": [
+        "definition",
+        "mechanism",
+        "evidence"
+      ],
+      "min_dimensions_hit": 3,
+      "forbidden_domains": [
+        "electrical-transformer",
+        "power-grid-voltage"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 2,
+        "corroborated_claims": 1,
+        "distinct_domains": 1,
+        "primary_share": 0.9,
+        "sections": 5
+      }
+    },
+    {
+      "id": "factual-transformer-ml",
+      "category": "factual_explanation",
+      "query": "What is the transformer neural network architecture?",
+      "query_type_required": "factual",
+      "required_dimensions": [
+        "definition",
+        "mechanism",
+        "evidence"
+      ],
+      "min_dimensions_hit": 2,
+      "forbidden_domains": [
+        "electrical-transformer",
+        "power-grid-voltage"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 2,
+        "corroborated_claims": 0,
+        "distinct_domains": 2,
+        "primary_share": 0.9,
+        "sections": 5
+      }
+    },
+    {
+      "id": "factual-solid-state",
+      "category": "factual_explanation",
+      "query": "What is a solid-state battery and how does it differ from lithium-ion?",
+      "query_type_required": "analytical",
+      "required_dimensions": [
+        "definition",
+        "mechanism",
+        "evidence"
+      ],
+      "min_dimensions_hit": 3,
+      "forbidden_domains": [
+        "ml-attention",
+        "electrical-transformer"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 1,
+        "corroborated_claims": 1,
+        "distinct_domains": 1,
+        "primary_share": 0.9,
+        "sections": 5
+      }
+    },
+    {
+      "id": "trend-renewables",
+      "category": "current_trend",
+      "query": "What is the current trend in global renewable energy capacity additions?",
+      "query_type_required": "factual",
+      "required_dimensions": [
+        "statistical",
+        "evidence",
+        "trend"
+      ],
+      "min_dimensions_hit": 3,
+      "forbidden_domains": [
+        "ml-attention",
+        "electrical-transformer"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 3,
+        "corroborated_claims": 2,
+        "distinct_domains": 2,
+        "primary_share": 0.57,
+        "sections": 5
+      }
+    },
+    {
+      "id": "trend-ai-adoption",
+      "category": "current_trend",
+      "query": "How is enterprise adoption of artificial intelligence changing?",
+      "query_type_required": "factual",
+      "required_dimensions": [
+        "statistical",
+        "evidence",
+        "trend"
+      ],
+      "min_dimensions_hit": 2,
+      "forbidden_domains": [
+        "ml-attention",
+        "electrical-transformer"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 0,
+        "corroborated_claims": 0,
+        "distinct_domains": 1,
+        "primary_share": 0.9,
+        "sections": 5
+      }
+    },
+    {
+      "id": "trend-storage",
+      "category": "current_trend",
+      "query": "What is the current state of grid-scale battery storage deployment?",
+      "query_type_required": "exploratory",
+      "required_dimensions": [
+        "statistical",
+        "evidence",
+        "trend"
+      ],
+      "min_dimensions_hit": 3,
+      "forbidden_domains": [
+        "ml-attention",
+        "electrical-transformer"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 0,
+        "corroborated_claims": 0,
+        "distinct_domains": 1,
+        "primary_share": 0.9,
+        "sections": 5
+      }
+    },
+    {
+      "id": "comparison-nuclear-solar",
+      "category": "comparison",
+      "query": "Compare nuclear and solar energy for grid reliability and cost.",
+      "query_type_required": "comparative",
+      "required_dimensions": [
+        "comparison",
+        "statistical",
+        "evidence"
+      ],
+      "min_dimensions_hit": 3,
+      "forbidden_domains": [
+        "ml-attention",
+        "electrical-transformer"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 2,
+        "corroborated_claims": 1,
+        "distinct_domains": 1,
+        "primary_share": 0.4,
+        "sections": 5
+      }
+    },
+    {
+      "id": "comparison-lithium-solid",
+      "category": "comparison",
+      "query": "Compare lithium-ion and solid-state batteries on energy density and cost.",
+      "query_type_required": "comparative",
+      "required_dimensions": [
+        "comparison",
+        "statistical",
+        "evidence"
+      ],
+      "min_dimensions_hit": 3,
+      "forbidden_domains": [
+        "ml-attention",
+        "electrical-transformer"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 2,
+        "corroborated_claims": 2,
+        "distinct_domains": 1,
+        "primary_share": 0.9,
+        "sections": 5
+      }
+    },
+    {
+      "id": "comparison-rag-finetune",
+      "category": "comparison",
+      "query": "Compare retrieval augmented generation versus fine-tuning for grounding language models.",
+      "query_type_required": "comparative",
+      "required_dimensions": [
+        "comparison",
+        "evidence",
+        "mechanism"
+      ],
+      "min_dimensions_hit": 3,
+      "forbidden_domains": [
+        "electrical-transformer",
+        "power-grid-voltage"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 3,
+        "corroborated_claims": 2,
+        "distinct_domains": 3,
+        "primary_share": 0.9,
+        "sections": 5
+      }
+    },
+    {
+      "id": "decision-nuclear-investment",
+      "category": "decision_policy",
+      "query": "Should Bangladesh expand nuclear energy investment over the next twenty years?",
+      "query_type_required": "analytical",
+      "required_dimensions": [
+        "comparison",
+        "statistical",
+        "evidence",
+        "causal"
+      ],
+      "min_dimensions_hit": 4,
+      "forbidden_domains": [
+        "ml-attention",
+        "electrical-transformer"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 0,
+        "corroborated_claims": 0,
+        "distinct_domains": 1,
+        "primary_share": 0.9,
+        "sections": 5
+      }
+    },
+    {
+      "id": "decision-carbon-policy",
+      "category": "decision_policy",
+      "query": "Should policymakers prioritize carbon pricing or direct subsidies to cut emissions?",
+      "query_type_required": "analytical",
+      "required_dimensions": [
+        "comparison",
+        "evidence",
+        "policy",
+        "causal"
+      ],
+      "min_dimensions_hit": 4,
+      "forbidden_domains": [
+        "ml-attention",
+        "electrical-transformer"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 2,
+        "corroborated_claims": 2,
+        "distinct_domains": 1,
+        "primary_share": 0.9,
+        "sections": 5
+      }
+    },
+    {
+      "id": "ambiguous-transformer",
+      "category": "ambiguous_term",
+      "query": "What is a transformer?",
+      "query_type_required": "factual",
+      "required_dimensions": [
+        "definition",
+        "mechanism",
+        "evidence"
+      ],
+      "min_dimensions_hit": 2,
+      "forbidden_domains": [],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 2,
+        "corroborated_claims": 0,
+        "distinct_domains": 1,
+        "primary_share": 0.0,
+        "sections": 5
+      }
+    },
+    {
+      "id": "ambiguous-apple",
+      "category": "ambiguous_term",
+      "query": "What is Apple?",
+      "query_type_required": "factual",
+      "required_dimensions": [
+        "definition",
+        "evidence"
+      ],
+      "min_dimensions_hit": 2,
+      "forbidden_domains": [],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 1,
+        "corroborated_claims": 0,
+        "distinct_domains": 1,
+        "primary_share": 0.0,
+        "sections": 5
+      }
+    },
+    {
+      "id": "ambiguous-bank",
+      "category": "ambiguous_term",
+      "query": "What is a bank?",
+      "query_type_required": "factual",
+      "required_dimensions": [
+        "definition",
+        "evidence"
+      ],
+      "min_dimensions_hit": 2,
+      "forbidden_domains": [],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 0,
+        "corroborated_claims": 0,
+        "distinct_domains": 1,
+        "primary_share": 0.0,
+        "sections": 5
+      }
+    },
+    {
+      "id": "causal-rag-hallucination",
+      "category": "causal",
+      "query": "Does retrieval augmented generation reduce hallucination rates, and why?",
+      "query_type_required": "factual",
+      "required_dimensions": [
+        "mechanism",
+        "causal",
+        "evidence"
+      ],
+      "min_dimensions_hit": 1,
+      "forbidden_domains": [
+        "electrical-transformer",
+        "power-grid-voltage"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 4,
+        "corroborated_claims": 2,
+        "distinct_domains": 3,
+        "primary_share": 0.9,
+        "sections": 5
+      }
+    },
+    {
+      "id": "causal-battery-costs",
+      "category": "causal",
+      "query": "Why have lithium-ion battery prices fallen, and what drove the decline?",
+      "query_type_required": "analytical",
+      "required_dimensions": [
+        "mechanism",
+        "causal",
+        "statistical"
+      ],
+      "min_dimensions_hit": 2,
+      "forbidden_domains": [
+        "ml-attention",
+        "electrical-transformer"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 2,
+        "corroborated_claims": 1,
+        "distinct_domains": 1,
+        "primary_share": 0.9,
+        "sections": 5
+      }
+    },
+    {
+      "id": "causal-solar-growth",
+      "category": "causal",
+      "query": "What caused the rapid growth in solar photovoltaic deployment?",
+      "query_type_required": "analytical",
+      "required_dimensions": [
+        "mechanism",
+        "causal",
+        "statistical"
+      ],
+      "min_dimensions_hit": 2,
+      "forbidden_domains": [
+        "ml-attention",
+        "electrical-transformer"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 0,
+        "corroborated_claims": 0,
+        "distinct_domains": 1,
+        "primary_share": 0.9,
+        "sections": 5
+      }
+    },
+    {
+      "id": "quant-renewable",
+      "category": "quantitative",
+      "query": "How much renewable energy capacity was added globally in 2023?",
+      "query_type_required": "factual",
+      "required_dimensions": [
+        "statistical",
+        "evidence"
+      ],
+      "min_dimensions_hit": 2,
+      "forbidden_domains": [
+        "ml-attention",
+        "electrical-transformer"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 2,
+        "corroborated_claims": 1,
+        "distinct_domains": 2,
+        "primary_share": 0.57,
+        "sections": 5
+      }
+    },
+    {
+      "id": "quant-battery-price",
+      "category": "quantitative",
+      "query": "What was the price of lithium-ion battery packs and how much did it decline?",
+      "query_type_required": "factual",
+      "required_dimensions": [
+        "statistical",
+        "evidence"
+      ],
+      "min_dimensions_hit": 2,
+      "forbidden_domains": [
+        "ml-attention",
+        "electrical-transformer"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 1,
+        "corroborated_claims": 1,
+        "distinct_domains": 1,
+        "primary_share": 0.9,
+        "sections": 5
+      }
+    },
+    {
+      "id": "quant-ai-investment",
+      "category": "quantitative",
+      "query": "How large was global investment in artificial intelligence infrastructure?",
+      "query_type_required": "factual",
+      "required_dimensions": [
+        "statistical",
+        "evidence"
+      ],
+      "min_dimensions_hit": 2,
+      "forbidden_domains": [
+        "ml-attention",
+        "electrical-transformer"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 0,
+        "corroborated_claims": 0,
+        "distinct_domains": 1,
+        "primary_share": 0.9,
+        "sections": 5
+      }
+    },
+    {
+      "id": "factual-heat-pumps",
+      "category": "factual_explanation",
+      "query": "What is a heat pump and how does it heat a building efficiently?",
+      "query_type_required": "analytical",
+      "required_dimensions": [
+        "definition",
+        "mechanism",
+        "evidence"
+      ],
+      "min_dimensions_hit": 3,
+      "forbidden_domains": [
+        "ml-attention",
+        "electrical-transformer"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 1,
+        "corroborated_claims": 1,
+        "distinct_domains": 1,
+        "primary_share": 0.9,
+        "sections": 5
+      }
+    },
+    {
+      "id": "trend-ev-adoption",
+      "category": "current_trend",
+      "query": "What is the current trend in electric vehicle sales globally?",
+      "query_type_required": "factual",
+      "required_dimensions": [
+        "statistical",
+        "evidence",
+        "trend"
+      ],
+      "min_dimensions_hit": 3,
+      "forbidden_domains": [
+        "ml-attention",
+        "electrical-transformer"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 1,
+        "corroborated_claims": 0,
+        "distinct_domains": 1,
+        "primary_share": 0.9,
+        "sections": 5
+      }
+    },
+    {
+      "id": "comparison-wind-solar",
+      "category": "comparison",
+      "query": "Compare wind and solar power on cost and capacity factor.",
+      "query_type_required": "comparative",
+      "required_dimensions": [
+        "comparison",
+        "statistical",
+        "evidence"
+      ],
+      "min_dimensions_hit": 3,
+      "forbidden_domains": [
+        "ml-attention",
+        "electrical-transformer"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 2,
+        "corroborated_claims": 1,
+        "distinct_domains": 1,
+        "primary_share": 0.9,
+        "sections": 5
+      }
+    },
+    {
+      "id": "causal-nuclear-cost",
+      "category": "causal",
+      "query": "Why are nuclear power plants expensive to build, and what drives the cost overruns?",
+      "query_type_required": "analytical",
+      "required_dimensions": [
+        "mechanism",
+        "causal",
+        "evidence"
+      ],
+      "min_dimensions_hit": 2,
+      "forbidden_domains": [
+        "ml-attention",
+        "electrical-transformer"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 1,
+        "corroborated_claims": 0,
+        "distinct_domains": 1,
+        "primary_share": 0.4,
+        "sections": 5
+      }
+    },
+    {
+      "id": "decision-ai-regulation",
+      "category": "decision_policy",
+      "query": "Should governments regulate frontier artificial intelligence models, or rely on industry self-regulation?",
+      "query_type_required": "analytical",
+      "required_dimensions": [
+        "comparison",
+        "evidence",
+        "policy"
+      ],
+      "min_dimensions_hit": 2,
+      "forbidden_domains": [
+        "ml-attention",
+        "electrical-transformer"
+      ],
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "citation_invariants": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums": {
+        "verified_claims": 0,
+        "corroborated_claims": 0,
+        "distinct_domains": 1,
+        "primary_share": 0.9,
+        "sections": 5
+      }
+    }
+  ]
+}

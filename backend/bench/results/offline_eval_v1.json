@@ -1,0 +1,2728 @@
+{
+  "suite": "mars-golden-offline-eval",
+  "version": "v1",
+  "ran_at": "2026-09-16T09:46:14.325745+00:00",
+  "golden_path": "bench/golden/queries_v1.json",
+  "thresholds_path": "bench/golden/thresholds_v1.json",
+  "aggregate": {
+    "queries_total": 26,
+    "queries_scored": 26,
+    "queries_failed": 0,
+    "metrics": {
+      "query_type_accuracy": 1.0,
+      "dimension_hit_rate": 0.8846,
+      "forbidden_clean_rate": 1.0,
+      "section_presence_rate": 1.0,
+      "citation_resolution_rate": 1.0,
+      "verified_claims_mean": 2.4615,
+      "corroborated_claims_mean": 1.7308,
+      "distinct_domains_mean": 1.9231,
+      "primary_share_mean": 0.8205,
+      "grade_ab_share": 1.0,
+      "answer_quality_mean": 69.2692,
+      "answer_relevance_mean": 0.3971,
+      "support_rate_mean": 0.5051,
+      "minimums_pass_rate": 1.0
+    }
+  },
+  "per_category": {
+    "ambiguous_term": {
+      "queries": 3,
+      "metrics": {
+        "query_type_accuracy": 1.0,
+        "dimension_hit_rate": 0.8889,
+        "forbidden_clean_rate": 1.0,
+        "section_presence_rate": 1.0,
+        "citation_resolution_rate": 1.0,
+        "verified_claims_mean": 2.0,
+        "corroborated_claims_mean": 1.0,
+        "distinct_domains_mean": 1.3333,
+        "primary_share_mean": 0.0,
+        "grade_ab_share": 1.0,
+        "answer_quality_mean": 68.0,
+        "answer_relevance_mean": 0.5469,
+        "support_rate_mean": 0.4444,
+        "minimums_pass_rate": 1.0
+      }
+    },
+    "causal": {
+      "queries": 4,
+      "metrics": {
+        "query_type_accuracy": 1.0,
+        "dimension_hit_rate": 0.5833,
+        "forbidden_clean_rate": 1.0,
+        "section_presence_rate": 1.0,
+        "citation_resolution_rate": 1.0,
+        "verified_claims_mean": 2.75,
+        "corroborated_claims_mean": 1.75,
+        "distinct_domains_mean": 2.25,
+        "primary_share_mean": 0.875,
+        "grade_ab_share": 1.0,
+        "answer_quality_mean": 67.25,
+        "answer_relevance_mean": 0.3941,
+        "support_rate_mean": 0.4417,
+        "minimums_pass_rate": 1.0
+      }
+    },
+    "comparison": {
+      "queries": 4,
+      "metrics": {
+        "query_type_accuracy": 1.0,
+        "dimension_hit_rate": 1.0,
+        "forbidden_clean_rate": 1.0,
+        "section_presence_rate": 1.0,
+        "citation_resolution_rate": 1.0,
+        "verified_claims_mean": 3.25,
+        "corroborated_claims_mean": 2.5,
+        "distinct_domains_mean": 2.5,
+        "primary_share_mean": 0.875,
+        "grade_ab_share": 1.0,
+        "answer_quality_mean": 67.25,
+        "answer_relevance_mean": 0.3265,
+        "support_rate_mean": 0.4833,
+        "minimums_pass_rate": 1.0
+      }
+    },
+    "current_trend": {
+      "queries": 4,
+      "metrics": {
+        "query_type_accuracy": 1.0,
+        "dimension_hit_rate": 0.9167,
+        "forbidden_clean_rate": 1.0,
+        "section_presence_rate": 1.0,
+        "citation_resolution_rate": 1.0,
+        "verified_claims_mean": 2.0,
+        "corroborated_claims_mean": 1.25,
+        "distinct_domains_mean": 1.5,
+        "primary_share_mean": 0.9167,
+        "grade_ab_share": 1.0,
+        "answer_quality_mean": 69.75,
+        "answer_relevance_mean": 0.3544,
+        "support_rate_mean": 0.5,
+        "minimums_pass_rate": 1.0
+      }
+    },
+    "decision_policy": {
+      "queries": 3,
+      "metrics": {
+        "query_type_accuracy": 1.0,
+        "dimension_hit_rate": 0.8889,
+        "forbidden_clean_rate": 1.0,
+        "section_presence_rate": 1.0,
+        "citation_resolution_rate": 1.0,
+        "verified_claims_mean": 1.6667,
+        "corroborated_claims_mean": 1.6667,
+        "distinct_domains_mean": 1.3333,
+        "primary_share_mean": 1.0,
+        "grade_ab_share": 1.0,
+        "answer_quality_mean": 66.0,
+        "answer_relevance_mean": 0.2506,
+        "support_rate_mean": 0.5556,
+        "minimums_pass_rate": 1.0
+      }
+    },
+    "factual_explanation": {
+      "queries": 5,
+      "metrics": {
+        "query_type_accuracy": 1.0,
+        "dimension_hit_rate": 0.9333,
+        "forbidden_clean_rate": 1.0,
+        "section_presence_rate": 1.0,
+        "citation_resolution_rate": 1.0,
+        "verified_claims_mean": 3.0,
+        "corroborated_claims_mean": 2.0,
+        "distinct_domains_mean": 2.4,
+        "primary_share_mean": 1.0,
+        "grade_ab_share": 1.0,
+        "answer_quality_mean": 73.8,
+        "answer_relevance_mean": 0.5111,
+        "support_rate_mean": 0.5867,
+        "minimums_pass_rate": 1.0
+      }
+    },
+    "quantitative": {
+      "queries": 3,
+      "metrics": {
+        "query_type_accuracy": 1.0,
+        "dimension_hit_rate": 1.0,
+        "forbidden_clean_rate": 1.0,
+        "section_presence_rate": 1.0,
+        "citation_resolution_rate": 1.0,
+        "verified_claims_mean": 2.0,
+        "corroborated_claims_mean": 1.6667,
+        "distinct_domains_mean": 1.6667,
+        "primary_share_mean": 0.8889,
+        "grade_ab_share": 1.0,
+        "answer_quality_mean": 71.0,
+        "answer_relevance_mean": 0.359,
+        "support_rate_mean": 0.5,
+        "minimums_pass_rate": 1.0
+      }
+    }
+  },
+  "queries": [
+    {
+      "id": "factual-rag",
+      "category": "factual_explanation",
+      "query": "What is retrieval augmented generation and how does it work?",
+      "query_type": "analytical",
+      "query_type_required": "analytical",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "definition",
+        "mechanism",
+        "evidence"
+      ],
+      "dimensions_hit": 3,
+      "dimensions_min": 3,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 5,
+        "markers_resolved": 5,
+        "markers_unresolved": [],
+        "legend_entries": 4,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 3,
+          "B": 2,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 5,
+        "corroborated_claims": 3,
+        "needs_corroboration": 1,
+        "distinct_domains": 4,
+        "primary_share": 1.0,
+        "total_claims": 5
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 75,
+        "passed": true,
+        "accuracy": 63,
+        "relevance": 81,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.5743,
+        "failures": []
+      },
+      "support_rate": 0.6,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.126,
+      "topic": "rag",
+      "llm_calls": 11
+    },
+    {
+      "id": "factual-mrna",
+      "category": "factual_explanation",
+      "query": "What is an mRNA vaccine and how does it produce an immune response?",
+      "query_type": "analytical",
+      "query_type_required": "analytical",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "definition",
+        "mechanism",
+        "evidence"
+      ],
+      "dimensions_hit": 3,
+      "dimensions_min": 3,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 3,
+        "markers_resolved": 3,
+        "markers_unresolved": [],
+        "legend_entries": 2,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 2,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 3,
+        "corroborated_claims": 2,
+        "needs_corroboration": 1,
+        "distinct_domains": 2,
+        "primary_share": 1.0,
+        "total_claims": 3
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 73,
+        "passed": true,
+        "accuracy": 66,
+        "relevance": 68,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.4397,
+        "failures": [
+          "Relevance: the Executive Summary does not address the query's core terms (mrna, vaccine, produce, immune). Answer the asked question in the first paragraph."
+        ]
+      },
+      "support_rate": 0.6666666666666666,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.059,
+      "topic": "mrna",
+      "llm_calls": 11
+    },
+    {
+      "id": "factual-transformer-ml",
+      "category": "factual_explanation",
+      "query": "What is the transformer neural network architecture?",
+      "query_type": "factual",
+      "query_type_required": "factual",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "definition",
+        "mechanism",
+        "evidence"
+      ],
+      "dimensions_hit": 2,
+      "dimensions_min": 2,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 4,
+        "markers_resolved": 4,
+        "markers_unresolved": [],
+        "legend_entries": 3,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 1,
+          "B": 2,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 3,
+        "corroborated_claims": 1,
+        "needs_corroboration": 0,
+        "distinct_domains": 3,
+        "primary_share": 1.0,
+        "total_claims": 3
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 74,
+        "passed": true,
+        "accuracy": 58,
+        "relevance": 84,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.6249,
+        "failures": []
+      },
+      "support_rate": 0.5,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.055,
+      "topic": "transformer_ml",
+      "llm_calls": 11
+    },
+    {
+      "id": "factual-solid-state",
+      "category": "factual_explanation",
+      "query": "What is a solid-state battery and how does it differ from lithium-ion?",
+      "query_type": "analytical",
+      "query_type_required": "analytical",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "definition",
+        "mechanism",
+        "evidence"
+      ],
+      "dimensions_hit": 3,
+      "dimensions_min": 3,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 3,
+        "markers_resolved": 3,
+        "markers_unresolved": [],
+        "legend_entries": 2,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 2,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 2,
+        "corroborated_claims": 2,
+        "needs_corroboration": 0,
+        "distinct_domains": 2,
+        "primary_share": 1.0,
+        "total_claims": 2
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 76,
+        "passed": true,
+        "accuracy": 66,
+        "relevance": 81,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.5317,
+        "failures": []
+      },
+      "support_rate": 0.6666666666666666,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.041,
+      "topic": "solid_state",
+      "llm_calls": 11
+    },
+    {
+      "id": "trend-renewables",
+      "category": "current_trend",
+      "query": "What is the current trend in global renewable energy capacity additions?",
+      "query_type": "factual",
+      "query_type_required": "factual",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "statistical",
+        "evidence",
+        "trend"
+      ],
+      "dimensions_hit": 3,
+      "dimensions_min": 3,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 4,
+        "markers_resolved": 4,
+        "markers_unresolved": [],
+        "legend_entries": 3,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 3,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 4,
+        "corroborated_claims": 3,
+        "needs_corroboration": 1,
+        "distinct_domains": 3,
+        "primary_share": 0.6666666666666666,
+        "total_claims": 4
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 70,
+        "passed": true,
+        "accuracy": 61,
+        "relevance": 69,
+        "evidence": 49,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.4457,
+        "failures": [
+          "Relevance: the Executive Summary does not address the query's core terms (current, trend, global, renewable). Answer the asked question in the first paragraph."
+        ]
+      },
+      "support_rate": 0.5,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.068,
+      "topic": "renewables",
+      "llm_calls": 11
+    },
+    {
+      "id": "trend-ai-adoption",
+      "category": "current_trend",
+      "query": "How is enterprise adoption of artificial intelligence changing?",
+      "query_type": "factual",
+      "query_type_required": "factual",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "statistical",
+        "evidence",
+        "trend"
+      ],
+      "dimensions_hit": 2,
+      "dimensions_min": 2,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 2,
+        "markers_resolved": 2,
+        "markers_unresolved": [],
+        "legend_entries": 1,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 1,
+        "corroborated_claims": 1,
+        "needs_corroboration": 0,
+        "distinct_domains": 1,
+        "primary_share": 1.0,
+        "total_claims": 1
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 75,
+        "passed": true,
+        "accuracy": 63,
+        "relevance": 81,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.5458,
+        "failures": []
+      },
+      "support_rate": 0.5,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.029,
+      "topic": "ai_adoption",
+      "llm_calls": 11
+    },
+    {
+      "id": "trend-storage",
+      "category": "current_trend",
+      "query": "What is the current state of grid-scale battery storage deployment?",
+      "query_type": "exploratory",
+      "query_type_required": "exploratory",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "statistical",
+        "evidence",
+        "trend"
+      ],
+      "dimensions_hit": 3,
+      "dimensions_min": 3,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 2,
+        "markers_resolved": 2,
+        "markers_unresolved": [],
+        "legend_entries": 1,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 0,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 1,
+        "corroborated_claims": 0,
+        "needs_corroboration": 0,
+        "distinct_domains": 1,
+        "primary_share": 1.0,
+        "total_claims": 1
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 62,
+        "passed": false,
+        "accuracy": 58,
+        "relevance": 35,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.0775,
+        "failures": [
+          "Relevance: the report's content does not match the question asked \u2014 it reads as evidence about a different topic. Restructure around the query's actual subject: 'What is the current state of grid-scale battery storage deployment?'.",
+          "Relevance: the Executive Summary does not address the query's core terms (current, state, grid, scale). Answer the asked question in the first paragraph.",
+          "Relevance 35/100 is below the 40/100 floor."
+        ]
+      },
+      "support_rate": 0.5,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions",
+        "summarizer"
+      ],
+      "error": null,
+      "wall_sec": 0.037,
+      "topic": "storage",
+      "llm_calls": 11
+    },
+    {
+      "id": "comparison-nuclear-solar",
+      "category": "comparison",
+      "query": "Compare nuclear and solar energy for grid reliability and cost.",
+      "query_type": "comparative",
+      "query_type_required": "comparative",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "comparison",
+        "statistical",
+        "evidence"
+      ],
+      "dimensions_hit": 3,
+      "dimensions_min": 3,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 3,
+        "markers_resolved": 3,
+        "markers_unresolved": [],
+        "legend_entries": 2,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 2,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 3,
+        "corroborated_claims": 2,
+        "needs_corroboration": 1,
+        "distinct_domains": 2,
+        "primary_share": 0.5,
+        "total_claims": 3
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 62,
+        "passed": false,
+        "accuracy": 48,
+        "relevance": 53,
+        "evidence": 46,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.241,
+        "failures": [
+          "Relevance: the Executive Summary does not address the query's core terms (compare, nuclear, solar, energy). Answer the asked question in the first paragraph."
+        ]
+      },
+      "support_rate": 0.3333333333333333,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.063,
+      "topic": "nuclear",
+      "llm_calls": 11
+    },
+    {
+      "id": "comparison-lithium-solid",
+      "category": "comparison",
+      "query": "Compare lithium-ion and solid-state batteries on energy density and cost.",
+      "query_type": "comparative",
+      "query_type_required": "comparative",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "comparison",
+        "statistical",
+        "evidence"
+      ],
+      "dimensions_hit": 3,
+      "dimensions_min": 3,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 3,
+        "markers_resolved": 3,
+        "markers_unresolved": [],
+        "legend_entries": 2,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 3,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 3,
+        "corroborated_claims": 3,
+        "needs_corroboration": 0,
+        "distinct_domains": 2,
+        "primary_share": 1.0,
+        "total_claims": 3
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 72,
+        "passed": true,
+        "accuracy": 66,
+        "relevance": 65,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.3643,
+        "failures": [
+          "Relevance: the Executive Summary does not address the query's core terms (compare, lithium, solid, state). Answer the asked question in the first paragraph."
+        ]
+      },
+      "support_rate": 0.6666666666666666,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.06,
+      "topic": "lithium",
+      "llm_calls": 11
+    },
+    {
+      "id": "comparison-rag-finetune",
+      "category": "comparison",
+      "query": "Compare retrieval augmented generation versus fine-tuning for grounding language models.",
+      "query_type": "comparative",
+      "query_type_required": "comparative",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "comparison",
+        "evidence",
+        "mechanism"
+      ],
+      "dimensions_hit": 3,
+      "dimensions_min": 3,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 5,
+        "markers_resolved": 5,
+        "markers_unresolved": [],
+        "legend_entries": 4,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 3,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 4,
+        "corroborated_claims": 3,
+        "needs_corroboration": 1,
+        "distinct_domains": 4,
+        "primary_share": 1.0,
+        "total_claims": 4
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 71,
+        "passed": true,
+        "accuracy": 63,
+        "relevance": 65,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.4284,
+        "failures": [
+          "Relevance: the Executive Summary does not address the query's core terms (compare, retrieval, augmented, generation). Answer the asked question in the first paragraph."
+        ]
+      },
+      "support_rate": 0.6,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.106,
+      "topic": "finetune",
+      "llm_calls": 11
+    },
+    {
+      "id": "decision-nuclear-investment",
+      "category": "decision_policy",
+      "query": "Should Bangladesh expand nuclear energy investment over the next twenty years?",
+      "query_type": "analytical",
+      "query_type_required": "analytical",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "comparison",
+        "statistical",
+        "evidence",
+        "causal"
+      ],
+      "dimensions_hit": 4,
+      "dimensions_min": 4,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 2,
+        "markers_resolved": 2,
+        "markers_unresolved": [],
+        "legend_entries": 1,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 1,
+        "corroborated_claims": 1,
+        "needs_corroboration": 0,
+        "distinct_domains": 1,
+        "primary_share": 1.0,
+        "total_claims": 1
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 62,
+        "passed": false,
+        "accuracy": 58,
+        "relevance": 35,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.1213,
+        "failures": [
+          "Relevance: the report's content does not match the question asked \u2014 it reads as evidence about a different topic. Restructure around the query's actual subject: 'Should Bangladesh expand nuclear energy investment over the next twenty years?'.",
+          "Relevance: the Executive Summary does not address the query's core terms (bangladesh, expand, nuclear, energy). Answer the asked question in the first paragraph.",
+          "Relevance 35/100 is below the 40/100 floor."
+        ]
+      },
+      "support_rate": 0.5,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.026,
+      "topic": "nuclear",
+      "llm_calls": 11
+    },
+    {
+      "id": "decision-carbon-policy",
+      "category": "decision_policy",
+      "query": "Should policymakers prioritize carbon pricing or direct subsidies to cut emissions?",
+      "query_type": "analytical",
+      "query_type_required": "analytical",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "comparison",
+        "evidence",
+        "policy",
+        "causal"
+      ],
+      "dimensions_hit": 4,
+      "dimensions_min": 4,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 3,
+        "markers_resolved": 3,
+        "markers_unresolved": [],
+        "legend_entries": 2,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 3,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 3,
+        "corroborated_claims": 3,
+        "needs_corroboration": 0,
+        "distinct_domains": 2,
+        "primary_share": 1.0,
+        "total_claims": 3
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 73,
+        "passed": true,
+        "accuracy": 66,
+        "relevance": 69,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.4579,
+        "failures": [
+          "Relevance: the Executive Summary does not address the query's core terms (policymakers, prioritize, carbon, pricing). Answer the asked question in the first paragraph."
+        ]
+      },
+      "support_rate": 0.6666666666666666,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.037,
+      "topic": "carbon_policy",
+      "llm_calls": 11
+    },
+    {
+      "id": "ambiguous-transformer",
+      "category": "ambiguous_term",
+      "query": "What is a transformer?",
+      "query_type": "factual",
+      "query_type_required": "factual",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "definition",
+        "mechanism",
+        "evidence"
+      ],
+      "dimensions_hit": 2,
+      "dimensions_min": 2,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 3,
+        "markers_resolved": 3,
+        "markers_unresolved": [],
+        "legend_entries": 2,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 1,
+          "B": 2,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 3,
+        "corroborated_claims": 1,
+        "needs_corroboration": 1,
+        "distinct_domains": 2,
+        "primary_share": 0.0,
+        "total_claims": 3
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 67,
+        "passed": false,
+        "accuracy": 48,
+        "relevance": 80,
+        "evidence": 39,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.5673,
+        "failures": []
+      },
+      "support_rate": 0.3333333333333333,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.044,
+      "topic": "transformer_ambiguous",
+      "llm_calls": 11
+    },
+    {
+      "id": "ambiguous-apple",
+      "category": "ambiguous_term",
+      "query": "What is Apple?",
+      "query_type": "factual",
+      "query_type_required": "factual",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "definition",
+        "evidence"
+      ],
+      "dimensions_hit": 2,
+      "dimensions_min": 2,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 2,
+        "markers_resolved": 2,
+        "markers_unresolved": [],
+        "legend_entries": 1,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 1,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 2,
+        "corroborated_claims": 1,
+        "needs_corroboration": 1,
+        "distinct_domains": 1,
+        "primary_share": 0.0,
+        "total_claims": 2
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 65,
+        "passed": false,
+        "accuracy": 58,
+        "relevance": 61,
+        "evidence": 39,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.5193,
+        "failures": [
+          "Relevance: the Executive Summary does not address the query's core terms (apple). Answer the asked question in the first paragraph."
+        ]
+      },
+      "support_rate": 0.5,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.038,
+      "topic": "apple",
+      "llm_calls": 11
+    },
+    {
+      "id": "ambiguous-bank",
+      "category": "ambiguous_term",
+      "query": "What is a bank?",
+      "query_type": "factual",
+      "query_type_required": "factual",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "definition",
+        "evidence"
+      ],
+      "dimensions_hit": 2,
+      "dimensions_min": 2,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 2,
+        "markers_resolved": 2,
+        "markers_unresolved": [],
+        "legend_entries": 1,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 1,
+        "corroborated_claims": 1,
+        "needs_corroboration": 0,
+        "distinct_domains": 1,
+        "primary_share": 0.0,
+        "total_claims": 1
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 72,
+        "passed": true,
+        "accuracy": 58,
+        "relevance": 87,
+        "evidence": 39,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.554,
+        "failures": []
+      },
+      "support_rate": 0.5,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.023,
+      "topic": "bank",
+      "llm_calls": 11
+    },
+    {
+      "id": "causal-rag-hallucination",
+      "category": "causal",
+      "query": "Does retrieval augmented generation reduce hallucination rates, and why?",
+      "query_type": "factual",
+      "query_type_required": "factual",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "mechanism",
+        "causal",
+        "evidence"
+      ],
+      "dimensions_hit": 1,
+      "dimensions_min": 1,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 5,
+        "markers_resolved": 5,
+        "markers_unresolved": [],
+        "legend_entries": 4,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 3,
+          "B": 2,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 5,
+        "corroborated_claims": 3,
+        "needs_corroboration": 1,
+        "distinct_domains": 4,
+        "primary_share": 1.0,
+        "total_claims": 5
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 76,
+        "passed": true,
+        "accuracy": 63,
+        "relevance": 84,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.7282,
+        "failures": []
+      },
+      "support_rate": 0.6,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.119,
+      "topic": "rag",
+      "llm_calls": 11
+    },
+    {
+      "id": "causal-battery-costs",
+      "category": "causal",
+      "query": "Why have lithium-ion battery prices fallen, and what drove the decline?",
+      "query_type": "analytical",
+      "query_type_required": "analytical",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "mechanism",
+        "causal",
+        "statistical"
+      ],
+      "dimensions_hit": 2,
+      "dimensions_min": 2,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 3,
+        "markers_resolved": 3,
+        "markers_unresolved": [],
+        "legend_entries": 2,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 2,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 3,
+        "corroborated_claims": 2,
+        "needs_corroboration": 0,
+        "distinct_domains": 2,
+        "primary_share": 1.0,
+        "total_claims": 3
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 68,
+        "passed": false,
+        "accuracy": 53,
+        "relevance": 67,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.4757,
+        "failures": []
+      },
+      "support_rate": 0.3333333333333333,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.06,
+      "topic": "lithium",
+      "llm_calls": 11
+    },
+    {
+      "id": "causal-solar-growth",
+      "category": "causal",
+      "query": "What caused the rapid growth in solar photovoltaic deployment?",
+      "query_type": "analytical",
+      "query_type_required": "analytical",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "mechanism",
+        "causal",
+        "statistical"
+      ],
+      "dimensions_hit": 2,
+      "dimensions_min": 2,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 2,
+        "markers_resolved": 2,
+        "markers_unresolved": [],
+        "legend_entries": 1,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 1,
+        "corroborated_claims": 1,
+        "needs_corroboration": 0,
+        "distinct_domains": 1,
+        "primary_share": 1.0,
+        "total_claims": 1
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 62,
+        "passed": false,
+        "accuracy": 58,
+        "relevance": 35,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.0908,
+        "failures": [
+          "Relevance: the report's content does not match the question asked \u2014 it reads as evidence about a different topic. Restructure around the query's actual subject: 'What caused the rapid growth in solar photovoltaic deployment?'.",
+          "Relevance: the Executive Summary does not address the query's core terms (caused, rapid, growth, solar). Answer the asked question in the first paragraph.",
+          "Relevance 35/100 is below the 40/100 floor."
+        ]
+      },
+      "support_rate": 0.5,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.022,
+      "topic": "renewables",
+      "llm_calls": 11
+    },
+    {
+      "id": "quant-renewable",
+      "category": "quantitative",
+      "query": "How much renewable energy capacity was added globally in 2023?",
+      "query_type": "factual",
+      "query_type_required": "factual",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "statistical",
+        "evidence"
+      ],
+      "dimensions_hit": 2,
+      "dimensions_min": 2,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 4,
+        "markers_resolved": 4,
+        "markers_unresolved": [],
+        "legend_entries": 3,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 2,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 3,
+        "corroborated_claims": 2,
+        "needs_corroboration": 1,
+        "distinct_domains": 3,
+        "primary_share": 0.6666666666666666,
+        "total_claims": 3
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 70,
+        "passed": true,
+        "accuracy": 61,
+        "relevance": 68,
+        "evidence": 49,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.395,
+        "failures": [
+          "Relevance: the Executive Summary does not address the query's core terms (much, renewable, energy, capacity). Answer the asked question in the first paragraph."
+        ]
+      },
+      "support_rate": 0.5,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.059,
+      "topic": "renewables",
+      "llm_calls": 11
+    },
+    {
+      "id": "quant-battery-price",
+      "category": "quantitative",
+      "query": "What was the price of lithium-ion battery packs and how much did it decline?",
+      "query_type": "factual",
+      "query_type_required": "factual",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "statistical",
+        "evidence"
+      ],
+      "dimensions_hit": 2,
+      "dimensions_min": 2,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 2,
+        "markers_resolved": 2,
+        "markers_unresolved": [],
+        "legend_entries": 1,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 2,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 2,
+        "corroborated_claims": 2,
+        "needs_corroboration": 0,
+        "distinct_domains": 1,
+        "primary_share": 1.0,
+        "total_claims": 2
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 73,
+        "passed": true,
+        "accuracy": 63,
+        "relevance": 75,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.4426,
+        "failures": []
+      },
+      "support_rate": 0.5,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.029,
+      "topic": "lithium",
+      "llm_calls": 11
+    },
+    {
+      "id": "quant-ai-investment",
+      "category": "quantitative",
+      "query": "How large was global investment in artificial intelligence infrastructure?",
+      "query_type": "factual",
+      "query_type_required": "factual",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "statistical",
+        "evidence"
+      ],
+      "dimensions_hit": 2,
+      "dimensions_min": 2,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 2,
+        "markers_resolved": 2,
+        "markers_unresolved": [],
+        "legend_entries": 1,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 1,
+        "corroborated_claims": 1,
+        "needs_corroboration": 0,
+        "distinct_domains": 1,
+        "primary_share": 1.0,
+        "total_claims": 1
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 70,
+        "passed": true,
+        "accuracy": 63,
+        "relevance": 61,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.2395,
+        "failures": [
+          "Relevance: the Executive Summary does not address the query's core terms (large, global, investment, artificial). Answer the asked question in the first paragraph."
+        ]
+      },
+      "support_rate": 0.5,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.023,
+      "topic": "ai_adoption",
+      "llm_calls": 11
+    },
+    {
+      "id": "factual-heat-pumps",
+      "category": "factual_explanation",
+      "query": "What is a heat pump and how does it heat a building efficiently?",
+      "query_type": "analytical",
+      "query_type_required": "analytical",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "definition",
+        "mechanism",
+        "evidence"
+      ],
+      "dimensions_hit": 3,
+      "dimensions_min": 3,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 2,
+        "markers_resolved": 2,
+        "markers_unresolved": [],
+        "legend_entries": 1,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 2,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 2,
+        "corroborated_claims": 2,
+        "needs_corroboration": 0,
+        "distinct_domains": 1,
+        "primary_share": 1.0,
+        "total_claims": 2
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 71,
+        "passed": true,
+        "accuracy": 58,
+        "relevance": 72,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.385,
+        "failures": []
+      },
+      "support_rate": 0.5,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.039,
+      "topic": "heat_pumps",
+      "llm_calls": 11
+    },
+    {
+      "id": "trend-ev-adoption",
+      "category": "current_trend",
+      "query": "What is the current trend in electric vehicle sales globally?",
+      "query_type": "factual",
+      "query_type_required": "factual",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "statistical",
+        "evidence",
+        "trend"
+      ],
+      "dimensions_hit": 3,
+      "dimensions_min": 3,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 2,
+        "markers_resolved": 2,
+        "markers_unresolved": [],
+        "legend_entries": 1,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 1,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 2,
+        "corroborated_claims": 1,
+        "needs_corroboration": 1,
+        "distinct_domains": 1,
+        "primary_share": 1.0,
+        "total_claims": 2
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 72,
+        "passed": true,
+        "accuracy": 63,
+        "relevance": 68,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.3488,
+        "failures": []
+      },
+      "support_rate": 0.5,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.037,
+      "topic": "ev",
+      "llm_calls": 11
+    },
+    {
+      "id": "comparison-wind-solar",
+      "category": "comparison",
+      "query": "Compare wind and solar power on cost and capacity factor.",
+      "query_type": "comparative",
+      "query_type_required": "comparative",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "comparison",
+        "statistical",
+        "evidence"
+      ],
+      "dimensions_hit": 3,
+      "dimensions_min": 3,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 3,
+        "markers_resolved": 3,
+        "markers_unresolved": [],
+        "legend_entries": 2,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 2,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 3,
+        "corroborated_claims": 2,
+        "needs_corroboration": 0,
+        "distinct_domains": 2,
+        "primary_share": 1.0,
+        "total_claims": 3
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 64,
+        "passed": false,
+        "accuracy": 48,
+        "relevance": 57,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.2721,
+        "failures": [
+          "Relevance: the Executive Summary does not address the query's core terms (compare, wind, solar, power). Answer the asked question in the first paragraph."
+        ]
+      },
+      "support_rate": 0.3333333333333333,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.042,
+      "topic": "wind_solar",
+      "llm_calls": 11
+    },
+    {
+      "id": "causal-nuclear-cost",
+      "category": "causal",
+      "query": "Why are nuclear power plants expensive to build, and what drives the cost overruns?",
+      "query_type": "analytical",
+      "query_type_required": "analytical",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "mechanism",
+        "causal",
+        "evidence"
+      ],
+      "dimensions_hit": 2,
+      "dimensions_min": 2,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 3,
+        "markers_resolved": 3,
+        "markers_unresolved": [],
+        "legend_entries": 2,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 1,
+          "B": 1,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 2,
+        "corroborated_claims": 1,
+        "needs_corroboration": 1,
+        "distinct_domains": 2,
+        "primary_share": 0.5,
+        "total_claims": 2
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 63,
+        "passed": false,
+        "accuracy": 48,
+        "relevance": 59,
+        "evidence": 46,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.2815,
+        "failures": []
+      },
+      "support_rate": 0.3333333333333333,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.059,
+      "topic": "nuclear",
+      "llm_calls": 11
+    },
+    {
+      "id": "decision-ai-regulation",
+      "category": "decision_policy",
+      "query": "Should governments regulate frontier artificial intelligence models, or rely on industry self-regulation?",
+      "query_type": "analytical",
+      "query_type_required": "analytical",
+      "query_type_ok": true,
+      "dimensions_required": [
+        "comparison",
+        "evidence",
+        "policy"
+      ],
+      "dimensions_hit": 2,
+      "dimensions_min": 2,
+      "dimensions_ok": true,
+      "forbidden_hits": [],
+      "forbidden_ok": true,
+      "required_sections": [
+        "Executive Summary",
+        "Key Findings",
+        "Evidence Strength",
+        "Limitations & Unknowns",
+        "Counterarguments & Disputed Points"
+      ],
+      "missing_sections": [],
+      "sections_present": 5,
+      "section_presence_rate": 1.0,
+      "citation": {
+        "markers_total": 2,
+        "markers_resolved": 2,
+        "markers_unresolved": [],
+        "legend_entries": 1,
+        "legend_unused": [],
+        "resolution_rate": 1.0,
+        "no_dangling": true,
+        "no_unsupported_numbers": true,
+        "unsupported_numbers": 0,
+        "production_support_rate": 0.0,
+        "production_uncited": 1
+      },
+      "evidence": {
+        "grade_distribution": {
+          "A": 1,
+          "B": 0,
+          "C": 0,
+          "D": 0
+        },
+        "grade_ab_share": 1.0,
+        "verified_claims": 1,
+        "corroborated_claims": 1,
+        "needs_corroboration": 0,
+        "distinct_domains": 1,
+        "primary_share": 1.0,
+        "total_claims": 1
+      },
+      "contradictions": {
+        "total": 0,
+        "resolved": 0,
+        "unresolved": 0,
+        "independent_scan_count": 0
+      },
+      "answer_quality": {
+        "overall": 63,
+        "passed": false,
+        "accuracy": 63,
+        "relevance": 35,
+        "evidence": 54,
+        "clarity": 100,
+        "reasoning": 100,
+        "answer_relevance": 0.1727,
+        "failures": [
+          "Relevance: the report's content does not match the question asked \u2014 it reads as evidence about a different topic. Restructure around the query's actual subject: 'Should governments regulate frontier artificial intelligence models, or rely on '.",
+          "Relevance: the Executive Summary does not address the query's core terms (governments, regulate, frontier, artificial). Answer the asked question in the first paragraph.",
+          "Relevance 35/100 is below the 40/100 floor."
+        ]
+      },
+      "support_rate": 0.5,
+      "minimums_checks": {
+        "verified_claims": true,
+        "corroborated_claims": true,
+        "distinct_domains": true,
+        "primary_share": true,
+        "sections": true
+      },
+      "invariant_checks": {
+        "every_marker_resolves": true,
+        "no_dangling_markers": true,
+        "no_unsupported_numbers": true
+      },
+      "minimums_ok": true,
+      "degraded": [
+        "planner_dimensions"
+      ],
+      "error": null,
+      "wall_sec": 0.027,
+      "topic": "ai_regulation",
+      "llm_calls": 11
+    }
+  ],
+  "thresholds": {
+    "version": "v1",
+    "description": "Regression floors for the deterministic offline golden evaluator. Calibrated to the CURRENT system's measured baseline (bench/results/offline_eval_v1.json) minus a small margin, so the baseline passes with headroom while a real regression trips. Invariant metrics (citation resolution, forbidden-sources clean) are held at their measured value; noisy means get a slightly larger margin. The evaluator exits non-zero on any violation.",
+    "calibration": {
+      "baseline_generated_from": "bench/results/offline_eval_v1.json",
+      "rule": "floor = measured_actual - margin (see per-metric note in the accompanying OFFLINE_EVAL_v1.md)",
+      "margin_policy": "invariants: 0.0; rates: 0.05; means: ~10-15% below actual; quality/relevance: ~8 points / 0.05"
+    },
+    "aggregate": {
+      "query_type_accuracy": 1.0,
+      "dimension_hit_rate": 0.8,
+      "forbidden_clean_rate": 1.0,
+      "section_presence_rate": 1.0,
+      "citation_resolution_rate": 1.0,
+      "verified_claims_mean": 1.8,
+      "corroborated_claims_mean": 1.2,
+      "distinct_domains_mean": 1.4,
+      "primary_share_mean": 0.65,
+      "grade_ab_share": 0.95,
+      "answer_quality_mean": 62.0,
+      "answer_relevance_mean": 0.3,
+      "support_rate_mean": 0.4,
+      "minimums_pass_rate": 0.95
+    },
+    "per_category": {
+      "factual_explanation": {
+        "query_type_accuracy": 1.0,
+        "section_presence_rate": 1.0,
+        "citation_resolution_rate": 1.0,
+        "forbidden_clean_rate": 1.0,
+        "answer_quality_mean": 66.0,
+        "minimums_pass_rate": 0.95
+      },
+      "current_trend": {
+        "query_type_accuracy": 1.0,
+        "section_presence_rate": 1.0,
+        "citation_resolution_rate": 1.0,
+        "forbidden_clean_rate": 1.0,
+        "answer_quality_mean": 62.0,
+        "minimums_pass_rate": 0.95
+      },
+      "comparison": {
+        "query_type_accuracy": 1.0,
+        "section_presence_rate": 1.0,
+        "citation_resolution_rate": 1.0,
+        "forbidden_clean_rate": 1.0,
+        "answer_quality_mean": 60.0,
+        "minimums_pass_rate": 0.95
+      },
+      "decision_policy": {
+        "query_type_accuracy": 1.0,
+        "section_presence_rate": 1.0,
+        "citation_resolution_rate": 1.0,
+        "forbidden_clean_rate": 1.0,
+        "answer_quality_mean": 58.0,
+        "minimums_pass_rate": 0.95
+      },
+      "ambiguous_term": {
+        "query_type_accuracy": 1.0,
+        "section_presence_rate": 1.0,
+        "citation_resolution_rate": 1.0,
+        "forbidden_clean_rate": 1.0,
+        "answer_quality_mean": 60.0,
+        "minimums_pass_rate": 0.95
+      },
+      "causal": {
+        "query_type_accuracy": 1.0,
+        "section_presence_rate": 1.0,
+        "citation_resolution_rate": 1.0,
+        "forbidden_clean_rate": 1.0,
+        "answer_quality_mean": 60.0,
+        "minimums_pass_rate": 0.95
+      },
+      "quantitative": {
+        "query_type_accuracy": 1.0,
+        "section_presence_rate": 1.0,
+        "citation_resolution_rate": 1.0,
+        "forbidden_clean_rate": 1.0,
+        "answer_quality_mean": 63.0,
+        "minimums_pass_rate": 0.95
+      }
+    }
+  },
+  "threshold_failures": [],
+  "passed": true
+}

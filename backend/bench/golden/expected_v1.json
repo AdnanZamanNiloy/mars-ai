@@ -1,0 +1,36 @@
+{
+  "version": "v1",
+  "description": "MARS golden benchmark — versioned query set with ONLY deterministic, offline-checkable expectations. No model-specific prose. Each query is run through the production graph with the deterministic golden mock (bench/mock_pipeline.py GoldenFakeLLM/GoldenFakeSearch); expectations are checked against the resulting report and measured pipeline state.",
+  "categories": [
+    "factual_explanation",
+    "current_trend",
+    "comparison",
+    "decision_policy",
+    "ambiguous_term",
+    "causal",
+    "quantitative"
+  ],
+  "field_contract": {
+    "id": "stable query id; never reused across versions",
+    "category": "one of the `categories` above",
+    "query": "the user-facing research question",
+    "query_type_required": "classify_query_type(query) MUST equal this (factual|comparative|analytical|exploratory)",
+    "required_dimensions": ["loose-match research axes: at least min_dimensions_hit must appear in the plan/evidence"],
+    "min_dimensions_hit": "how many of required_dimensions must be present",
+    "forbidden_domains": ["off-topic senses/domains that MUST NOT appear in cited sources"],
+    "required_sections": ["human section names; each must be present (alias-tolerant, reusing synthesizer REQUIRED_SECTIONS)"],
+    "citation_invariants": {
+      "every_marker_resolves": true,
+      "no_dangling_markers": true,
+      "no_unsupported_numbers": true
+    },
+    "minimums": {
+      "verified_claims": ">= this many claims verified",
+      "corroborated_claims": ">= this many claims with independent corroboration (grade evidence)",
+      "distinct_domains": ">= this many distinct source registrable domains",
+      "primary_share": ">= this primary-source share (0-1)",
+      "sections": ">= this many of required_sections present (loose), 0 = all"
+    },
+    "fixture": "deterministic offline pages + scripted answer used by the golden mock; see bench/golden/fixtures_v1.py"
+  }
+}

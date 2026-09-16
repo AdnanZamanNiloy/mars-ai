@@ -1,0 +1,83 @@
+{
+  "version": "v1",
+  "description": "Regression floors for the deterministic offline golden evaluator. Calibrated to the CURRENT system's measured baseline (bench/results/offline_eval_v1.json) minus a small margin, so the baseline passes with headroom while a real regression trips. Invariant metrics (citation resolution, forbidden-sources clean) are held at their measured value; noisy means get a slightly larger margin. The evaluator exits non-zero on any violation.",
+  "calibration": {
+    "baseline_generated_from": "bench/results/offline_eval_v1.json",
+    "rule": "floor = measured_actual - margin (see per-metric note in the accompanying OFFLINE_EVAL_v1.md)",
+    "margin_policy": "invariants: 0.0; rates: 0.05; means: ~10-15% below actual; quality/relevance: ~8 points / 0.05"
+  },
+  "aggregate": {
+    "query_type_accuracy": 1.0,
+    "dimension_hit_rate": 0.8,
+    "forbidden_clean_rate": 1.0,
+    "section_presence_rate": 1.0,
+    "citation_resolution_rate": 1.0,
+    "verified_claims_mean": 1.8,
+    "corroborated_claims_mean": 1.2,
+    "distinct_domains_mean": 1.4,
+    "primary_share_mean": 0.65,
+    "grade_ab_share": 0.95,
+    "answer_quality_mean": 62.0,
+    "answer_relevance_mean": 0.3,
+    "support_rate_mean": 0.4,
+    "minimums_pass_rate": 0.95
+  },
+  "per_category": {
+    "factual_explanation": {
+      "query_type_accuracy": 1.0,
+      "section_presence_rate": 1.0,
+      "citation_resolution_rate": 1.0,
+      "forbidden_clean_rate": 1.0,
+      "answer_quality_mean": 66.0,
+      "minimums_pass_rate": 0.95
+    },
+    "current_trend": {
+      "query_type_accuracy": 1.0,
+      "section_presence_rate": 1.0,
+      "citation_resolution_rate": 1.0,
+      "forbidden_clean_rate": 1.0,
+      "answer_quality_mean": 62.0,
+      "minimums_pass_rate": 0.95
+    },
+    "comparison": {
+      "query_type_accuracy": 1.0,
+      "section_presence_rate": 1.0,
+      "citation_resolution_rate": 1.0,
+      "forbidden_clean_rate": 1.0,
+      "answer_quality_mean": 60.0,
+      "minimums_pass_rate": 0.95
+    },
+    "decision_policy": {
+      "query_type_accuracy": 1.0,
+      "section_presence_rate": 1.0,
+      "citation_resolution_rate": 1.0,
+      "forbidden_clean_rate": 1.0,
+      "answer_quality_mean": 58.0,
+      "minimums_pass_rate": 0.95
+    },
+    "ambiguous_term": {
+      "query_type_accuracy": 1.0,
+      "section_presence_rate": 1.0,
+      "citation_resolution_rate": 1.0,
+      "forbidden_clean_rate": 1.0,
+      "answer_quality_mean": 60.0,
+      "minimums_pass_rate": 0.95
+    },
+    "causal": {
+      "query_type_accuracy": 1.0,
+      "section_presence_rate": 1.0,
+      "citation_resolution_rate": 1.0,
+      "forbidden_clean_rate": 1.0,
+      "answer_quality_mean": 60.0,
+      "minimums_pass_rate": 0.95
+    },
+    "quantitative": {
+      "query_type_accuracy": 1.0,
+      "section_presence_rate": 1.0,
+      "citation_resolution_rate": 1.0,
+      "forbidden_clean_rate": 1.0,
+      "answer_quality_mean": 63.0,
+      "minimums_pass_rate": 0.95
+    }
+  }
+}
