@@ -135,6 +135,115 @@ def test_resolve_contradiction_is_total_on_malformed_input():
 
 
 # ---------------------------------------------------------------------------
+# 2b. evidence-semantics guards (labeled-fixture regressions)
+# ---------------------------------------------------------------------------
+
+def test_period_does_not_explain_opposite_polarity():
+    """A differing year cannot reconcile "fell" with "rose". The period branch
+    must not auto-resolve a polarity conflict — that was a false 'resolved'."""
+    facts = _facts(
+        ("Coal capacity fell 12% in 2020 across the region", "https://a.example/x"),
+        ("Coal capacity rose 12% in 2023 across the region", "https://b.example/y"),
+    )
+    found = find_contradictions(facts)
+    assert found and found[0]["kind"] == "polarity"
+    resolved = resolve_contradictions(found)
+    assert resolved[0]["resolved"] is False
+    assert unresolved_contradictions(resolved) == [resolved[0]]
+
+
+def test_incidental_context_year_is_not_a_temporal_conflict():
+    """Two claims that agree on the measure and only differ by an extra
+    historical year are not a period conflict. `numeric_conflict` keeps the
+    last value per unit, so it sees 5 GW vs 26.5 GW while missing the agreeing
+    26.5 GW — the shared agreeing quantity is the guard."""
+    facts = _facts(
+        ("Bangladesh capacity reached 26.5 GW in 2024, up from 5 GW in 2009",
+         "https://a.example/x"),
+        ("Bangladesh capacity was 26.5 GW in 2024", "https://b.example/y"),
+    )
+    assert find_contradictions(facts) == []
+
+
+def test_different_population_segments_are_a_scope_note_not_a_conflict():
+    """Urban vs rural adults are different populations: the engine records a
+    scope spread (resolved=true) and never counts it as an unresolved
+    contradiction."""
+    facts = _facts(
+        ("The literacy rate among urban adults was 82% in 2020", "https://a.example/x"),
+        ("The literacy rate among rural adults was 61% in 2020", "https://b.example/y"),
+    )
+    found = resolve_contradictions(find_contradictions(facts))
+    assert found and found[0]["kind"] == "scope"
+    assert found[0]["resolved"] is True
+    assert "scope" in found[0]["resolution"].lower()
+    assert unresolved_contradictions(found) == []
+
+
+def test_primary_vs_secondary_conflict_stays_unresolved():
+    """A primary journal and a secondary blog disagreeing on the same measure,
+    scope and period is a genuine conflict — the primary/secondary weighting
+    must not silently mark it resolved."""
+    facts = _facts(
+        ("The trial reported a mortality reduction of 15% versus placebo",
+         "https://nejm.org/a"),
+        ("The trial reported a mortality reduction of 40% versus placebo",
+         "https://someblog.example/b"),
+    )
+    resolved = resolve_contradictions(find_contradictions(facts))
+    assert resolved and resolved[0]["resolved"] is False
+    assert "unresolved" in resolved[0]["resolution"].lower()
+
+
+def test_unresolved_genuine_conflict_still_penalizes_confidence():
+    """The whole point of keeping a genuine conflict unresolved: it must keep
+    penalizing confidence (never be waved away by the guard changes)."""
+    facts = _facts(
+        ("The trial reported a mortality reduction of 15% versus placebo",
+         "https://nejm.org/a"),
+        ("The trial reported a mortality reduction of 40% versus placebo",
+         "https://someblog.example/b"),
+    )
+    resolved = resolve_contradictions(find_contradictions(facts))
+    critique = {"is_sufficient": True, "reason": "ok"}
+    with_conflict = compute_confidence(
+        facts=facts, critique=critique, iteration=2, max_iterations=4,
+        contradictions=resolved,
+    )
+    baseline = compute_confidence(
+        facts=facts, critique=critique, iteration=2, max_iterations=4,
+        contradictions=[],
+    )
+    assert with_conflict["overall"] < baseline["overall"]
+    assert _severe_contradictions({"contradictions": resolved}) >= 1
+
+
+def test_unresolved_conflict_reaches_synthesis_counterarguments():
+    """An unresolved conflict must appear in the report's Counterarguments
+    section (not silently dropped)."""
+    from app.agents.synthesizer import ensure_required_sections
+
+    facts = [
+        {"claim": "The trial reported a mortality reduction of 15% versus placebo",
+         "source": "https://nejm.org/a", "verified": True},
+        {"claim": "The trial reported a mortality reduction of 40% versus placebo",
+         "source": "https://someblog.example/b", "verified": True},
+    ]
+    resolved = resolve_contradictions(find_contradictions(facts))
+    assert unresolved_contradictions(resolved)
+    report = ensure_required_sections(
+        "## Executive Summary\n\nA short draft.",
+        ctx={"contradictions": resolved},
+        usable_facts=facts,
+        contradictions=resolved,
+    )
+    counter = report.lower()
+    assert "counterarguments" in counter
+    assert "mortality reduction" in counter
+
+
+
+# ---------------------------------------------------------------------------
 # 3. deep-mode depth scaling (Fix B.1)
 # ---------------------------------------------------------------------------
 

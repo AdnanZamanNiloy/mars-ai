@@ -89,6 +89,14 @@ AGGREGATE_METRICS = (
     # Populated only when --with-depth is set; absent otherwise (the markdown
     # writer skips metrics it has no value for).
     "depth_routing_pass_rate",
+    # Populated only when --with-contradictions is set.
+    "detection_precision",
+    "detection_recall",
+    "detection_f1",
+    "resolution_precision",
+    "resolution_recall",
+    "resolution_f1",
+    "classification_accuracy",
 )
 
 
@@ -624,6 +632,19 @@ def write_markdown(report: Dict[str, Any], out_dir: Path = RESULTS_DIR) -> Path:
         for f in report["threshold_failures"]:
             a(f"- **{f['scope']} / {f['metric']}**: actual {f['actual']} < floor {f['floor']}")
         a("")
+    if report.get("contradictions"):
+        cagg = report["contradictions"]["aggregate"]
+        a("## Contradiction detection / resolution")
+        a("")
+        a(f"Labeled cases: {cagg['cases_total']} "
+          f"(correct {cagg['cases_correct']}, incorrect {cagg['cases_incorrect']})")
+        a("")
+        a("| id | expected | observed | ok |")
+        a("|---|---|---|---|")
+        for row in report["contradictions"]["cases"]:
+            a(f"| {row['id']} | {row['expected_label']} | {row['observed_label']} | "
+              f"{'Y' if row['correct'] else 'N'} |")
+        a("")
     a("## Per query")
     a("")
     a("| id | cat | type ok | dims | sections | cit. res | verified | corrob | domains | quality | min ok |")
@@ -665,7 +686,9 @@ async def evaluate(golden_path: Optional[str] = None,
                    thresholds_path: Optional[str] = None,
                    out_dir: Optional[Path] = None,
                    with_depth: bool = False,
-                   depth_thresholds_path: Optional[str] = None) -> Dict[str, Any]:
+                   depth_thresholds_path: Optional[str] = None,
+                   with_contradictions: bool = False,
+                   contradiction_thresholds_path: Optional[str] = None) -> Dict[str, Any]:
     from bench.golden.loader import load_queries, load_thresholds
 
     queries = load_queries(golden_path)
@@ -708,6 +731,24 @@ async def evaluate(golden_path: Optional[str] = None,
             print(f"[depth {status:>4}] {row['id']:<42} "
                   f"decision={row['actual_decision']:<8}")
 
+    contradiction_report: Optional[Dict[str, Any]] = None
+    if with_contradictions:
+        # Contradiction detection/resolution precision+recall lives in its own
+        # evaluator (bench/eval_contradictions.py) over a labeled fixture set;
+        # fold its aggregate metrics and threshold failures into THIS gate so
+        # one command remains the whole offline gate.
+        from bench import eval_contradictions
+
+        contradiction_report = eval_contradictions.evaluate(contradiction_thresholds_path)
+        aggregate_result["metrics"].update(contradiction_report["aggregate"]["metrics"])
+        for f in contradiction_report["threshold_failures"]:
+            failures.append({"scope": "contradictions", "metric": f["metric"],
+                             "actual": f["actual"], "floor": f["floor"]})
+        for row in contradiction_report["cases"]:
+            status = "ok" if row["correct"] else "FAIL"
+            print(f"[contra {status:>4}] {row['id']:<44} "
+                  f"expected={row['expected_label']:<18} observed={row['observed_label']}")
+
     report = {
         "suite": "mars-golden-offline-eval",
         "version": thresholds.get("version", "v1"),
@@ -718,6 +759,7 @@ async def evaluate(golden_path: Optional[str] = None,
         "per_category": category_result,
         "queries": per_query,
         "depth": depth_report,
+        "contradictions": contradiction_report,
         "thresholds": thresholds,
         "threshold_failures": failures,
         "passed": not failures,
@@ -734,13 +776,19 @@ def main() -> int:
                         help="also run the adaptive-depth routing evaluator")
     parser.add_argument("--depth-thresholds", default=None,
                         help="adaptive-depth thresholds JSON path")
+    parser.add_argument("--with-contradictions", action="store_true",
+                        help="also run the contradiction detection/resolution evaluator")
+    parser.add_argument("--contradiction-thresholds", default=None,
+                        help="contradiction thresholds JSON path")
     args = parser.parse_args()
 
     try:
         report = asyncio.run(evaluate(args.golden, args.thresholds,
                                       Path(args.out) if args.out else None,
                                       with_depth=args.with_depth,
-                                      depth_thresholds_path=args.depth_thresholds))
+                                      depth_thresholds_path=args.depth_thresholds,
+                                      with_contradictions=args.with_contradictions,
+                                      contradiction_thresholds_path=args.contradiction_thresholds))
     except Exception as exc:
         print(f"golden evaluation failed to run: {type(exc).__name__}: {exc}",
               file=sys.stderr)

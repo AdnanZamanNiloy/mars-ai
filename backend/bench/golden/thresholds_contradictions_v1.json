@@ -1,0 +1,13 @@
+{
+  "version": "v1",
+  "description": "Regression floors for the deterministic offline contradiction resolution evaluator (bench/eval_contradictions.py). Every fixture case asserts a label; the floors are set at the post-fix measured baseline so a resolution/detection regression trips. Additive only: this file does not alter any threshold in thresholds_v1.json or thresholds_depth_v1.json.",
+  "contradictions": {
+    "detection_precision": 1.0,
+    "detection_recall": 1.0,
+    "detection_f1": 1.0,
+    "resolution_precision": 1.0,
+    "resolution_recall": 1.0,
+    "resolution_f1": 1.0,
+    "classification_accuracy": 1.0
+  }
+}

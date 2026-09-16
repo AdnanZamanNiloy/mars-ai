@@ -1,0 +1,279 @@
+{
+  "suite": "mars-golden-contradiction-eval",
+  "version": "v1",
+  "ran_at": "2026-09-16T10:20:48.571955+00:00",
+  "thresholds_path": "/home/adnan-zaman/Desktop/mars-ai/backend/bench/golden/thresholds_contradictions_v1.json",
+  "aggregate": {
+    "cases_total": 13,
+    "cases_correct": 13,
+    "cases_incorrect": 0,
+    "detection": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "tp": 9,
+      "fp": 0,
+      "fn": 0
+    },
+    "resolution": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "tp": 4,
+      "fp": 0,
+      "fn": 0
+    },
+    "metrics": {
+      "detection_precision": 1.0,
+      "detection_recall": 1.0,
+      "detection_f1": 1.0,
+      "resolution_precision": 1.0,
+      "resolution_recall": 1.0,
+      "resolution_f1": 1.0,
+      "classification_accuracy": 1.0
+    }
+  },
+  "cases": [
+    {
+      "id": "true_same_measure_conflict",
+      "category": "same_measure_conflict",
+      "expected_label": "contradiction",
+      "observed_label": "contradiction",
+      "correct": true,
+      "detected_count": 1,
+      "resolved_count": 0,
+      "unresolved_count": 1,
+      "kinds": [
+        "numeric"
+      ],
+      "explanation_present": null,
+      "claims": [
+        "Global installed solar capacity reached 1,200 GW in 2023",
+        "Global installed solar capacity reached 1,600 GW in 2023"
+      ]
+    },
+    {
+      "id": "true_same_measure_conflict_market_growth",
+      "category": "same_measure_conflict",
+      "expected_label": "contradiction",
+      "observed_label": "contradiction",
+      "correct": true,
+      "detected_count": 1,
+      "resolved_count": 0,
+      "unresolved_count": 1,
+      "kinds": [
+        "numeric"
+      ],
+      "explanation_present": null,
+      "claims": [
+        "The market grew by 25% globally last year",
+        "The market grew by 11% globally last year"
+      ]
+    },
+    {
+      "id": "true_same_measure_conflict_primary_vs_secondary",
+      "category": "primary_secondary_conflict",
+      "expected_label": "contradiction",
+      "observed_label": "contradiction",
+      "correct": true,
+      "detected_count": 1,
+      "resolved_count": 0,
+      "unresolved_count": 1,
+      "kinds": [
+        "numeric"
+      ],
+      "explanation_present": null,
+      "claims": [
+        "The trial reported a mortality reduction of 15% versus placebo",
+        "The trial reported a mortality reduction of 40% versus placebo"
+      ]
+    },
+    {
+      "id": "different_period_same_measure",
+      "category": "different_period",
+      "expected_label": "resolved_explained",
+      "observed_label": "resolved_explained",
+      "correct": true,
+      "detected_count": 1,
+      "resolved_count": 1,
+      "unresolved_count": 0,
+      "kinds": [
+        "temporal"
+      ],
+      "explanation_present": true,
+      "claims": [
+        "Global installed solar capacity reached 1,200 GW in 2023",
+        "Global installed solar capacity reached 1,600 GW in 2024"
+      ]
+    },
+    {
+      "id": "different_period_capacity",
+      "category": "different_period",
+      "expected_label": "resolved_explained",
+      "observed_label": "resolved_explained",
+      "correct": true,
+      "detected_count": 1,
+      "resolved_count": 1,
+      "unresolved_count": 0,
+      "kinds": [
+        "temporal"
+      ],
+      "explanation_present": true,
+      "claims": [
+        "Bangladesh's installed power generation capacity was 5 GW in 2009",
+        "Bangladesh's installed power generation capacity reached 26.5 GW by 2024"
+      ]
+    },
+    {
+      "id": "different_scope_global_vs_us",
+      "category": "different_scope",
+      "expected_label": "resolved_explained",
+      "observed_label": "resolved_explained",
+      "correct": true,
+      "detected_count": 1,
+      "resolved_count": 1,
+      "unresolved_count": 0,
+      "kinds": [
+        "scope"
+      ],
+      "explanation_present": true,
+      "claims": [
+        "Carbon emissions fell 30% globally across the power sector in 2022",
+        "Carbon emissions fell 5% in the United States across the power sector in 2022"
+      ]
+    },
+    {
+      "id": "different_scope_regional_segments",
+      "category": "different_scope",
+      "expected_label": "resolved_explained",
+      "observed_label": "resolved_explained",
+      "correct": true,
+      "detected_count": 1,
+      "resolved_count": 1,
+      "unresolved_count": 0,
+      "kinds": [
+        "scope"
+      ],
+      "explanation_present": true,
+      "claims": [
+        "The literacy rate among urban adults was 82% in 2020",
+        "The literacy rate among rural adults was 61% in 2020"
+      ]
+    },
+    {
+      "id": "unrelated_shared_numbers_and_year",
+      "category": "shared_number_unrelated",
+      "expected_label": "not_contradiction",
+      "observed_label": "not_contradiction",
+      "correct": true,
+      "detected_count": 0,
+      "resolved_count": 0,
+      "unresolved_count": 0,
+      "kinds": [],
+      "explanation_present": null,
+      "claims": [
+        "The Rooppur Nuclear Power Plant has an estimated construction cost of 12.65 billion US dollars as of June 2024",
+        "The Declaration to Triple Nuclear Energy by 2050 has been endorsed by 38 countries"
+      ]
+    },
+    {
+      "id": "unrelated_shared_number_different_metric",
+      "category": "shared_number_unrelated",
+      "expected_label": "not_contradiction",
+      "observed_label": "not_contradiction",
+      "correct": true,
+      "detected_count": 0,
+      "resolved_count": 0,
+      "unresolved_count": 0,
+      "kinds": [],
+      "explanation_present": null,
+      "claims": [
+        "Coal's share of electricity generation fell to 12% in 2021",
+        "The central bank raised its policy rate by 12% in 2021 to curb inflation"
+      ]
+    },
+    {
+      "id": "unit_mismatch_percent_vs_capacity",
+      "category": "different_metric",
+      "expected_label": "not_contradiction",
+      "observed_label": "not_contradiction",
+      "correct": true,
+      "detected_count": 0,
+      "resolved_count": 0,
+      "unresolved_count": 0,
+      "kinds": [],
+      "explanation_present": null,
+      "claims": [
+        "Module efficiency improved by 22% in the latest generation",
+        "New plants added 22 GW of capacity in the latest generation"
+      ]
+    },
+    {
+      "id": "polarity_direct_negation",
+      "category": "polarity_conflict",
+      "expected_label": "contradiction",
+      "observed_label": "contradiction",
+      "correct": true,
+      "detected_count": 1,
+      "resolved_count": 0,
+      "unresolved_count": 1,
+      "kinds": [
+        "polarity"
+      ],
+      "explanation_present": null,
+      "claims": [
+        "The new model outperforms the baseline on all benchmarks",
+        "The new model does not outperform the baseline on all benchmarks"
+      ]
+    },
+    {
+      "id": "polarity_opposite_directions_different_years",
+      "category": "polarity_conflict",
+      "expected_label": "contradiction",
+      "observed_label": "contradiction",
+      "correct": true,
+      "detected_count": 1,
+      "resolved_count": 0,
+      "unresolved_count": 1,
+      "kinds": [
+        "polarity"
+      ],
+      "explanation_present": null,
+      "claims": [
+        "Coal capacity fell 12% in 2020 across the region",
+        "Coal capacity rose 12% in 2023 across the region"
+      ]
+    },
+    {
+      "id": "same_value_incidental_context_year",
+      "category": "shared_number_unrelated",
+      "expected_label": "not_contradiction",
+      "observed_label": "not_contradiction",
+      "correct": true,
+      "detected_count": 0,
+      "resolved_count": 0,
+      "unresolved_count": 0,
+      "kinds": [],
+      "explanation_present": null,
+      "claims": [
+        "Bangladesh capacity reached 26.5 GW in 2024, up from 5 GW in 2009",
+        "Bangladesh capacity was 26.5 GW in 2024"
+      ]
+    }
+  ],
+  "thresholds": {
+    "version": "v1",
+    "description": "Regression floors for the deterministic offline contradiction resolution evaluator (bench/eval_contradictions.py). Every fixture case asserts a label; the floors are set at the post-fix measured baseline so a resolution/detection regression trips. Additive only: this file does not alter any threshold in thresholds_v1.json or thresholds_depth_v1.json.",
+    "contradictions": {
+      "detection_precision": 1.0,
+      "detection_recall": 1.0,
+      "detection_f1": 1.0,
+      "resolution_precision": 1.0,
+      "resolution_recall": 1.0,
+      "resolution_f1": 1.0,
+      "classification_accuracy": 1.0
+    }
+  },
+  "threshold_failures": [],
+  "passed": true
+}

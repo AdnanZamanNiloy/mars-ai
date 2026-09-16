@@ -25,6 +25,7 @@ import re
 from typing import Any, Dict, List
 
 from app.agents.evidence_utils import (
+    _significant_quantities,
     claim_polarity,
     numeric_conflict,
 )
@@ -71,6 +72,10 @@ _SCOPE_MARKERS: Dict[str, str] = {
     "asia": "asia", "asian": "asia",
     "canada": "canada", "canadian": "canada",
     "australia": "australia", "australian": "australia",
+    # Population segments (not geographies) are scope too: a figure for "urban
+    # adults" and one for "rural adults" describe different populations. A
+    # numeric difference between them is a scope mismatch, not a disagreement.
+    "urban": "urban", "rural": "rural",
 }
 
 _SCOPE_PHRASE_RE = re.compile(
@@ -139,6 +144,29 @@ def _scopes_conflict(a: set, b: set) -> bool:
     if not a or not b:
         return True
     return not (a & b)
+
+
+def _share_agreeing_quantity(a: str, b: str, tolerance: float = 0.05) -> bool:
+    """True when the two claims carry at least one like-united quantity that
+    AGREES within `tolerance`.
+
+    Used to stop an incidental year token from manufacturing a period conflict
+    between claims that actually agree on their measure: "capacity reached 26.5
+    GW in 2024, up from 5 GW in 2009" vs "capacity was 26.5 GW in 2024" share
+    the 26.5 GW value and only differ by a context year — the years differ but
+    the measured quantity does not. A genuine period spread ("5 GW in 2009" vs
+    "26.5 GW by 2024") has no agreeing like-united pair and still fires.
+    """
+    qa = _significant_quantities(a or "")
+    qb = _significant_quantities(b or "")
+    for qa_item in qa:
+        for qb_item in qb:
+            if qa_item.unit != qb_item.unit:
+                continue
+            scale = max(abs(qa_item.value), abs(qb_item.value), 1e-9)
+            if abs(qa_item.value - qb_item.value) / scale < tolerance:
+                return True
+    return False
 
 
 def _severity(kind: str, divergence: float) -> float:
@@ -225,7 +253,15 @@ def find_contradictions(
             # pairs — same measure, different reporting years — score 0.51+.
             if found is None and similarity >= SIMILARITY_LOW:
                 years_a, years_b = _years_in(claim_a), _years_in(claim_b)
-                if years_a and years_b and set(years_a) != set(years_b):
+                if (
+                    years_a and years_b
+                    and set(years_a) != set(years_b)
+                    # The differing years must actually separate the measure.
+                    # Two claims that agree on a like-united quantity and only
+                    # differ by an incidental context year are not a period
+                    # conflict (the 18d4da8 bug class, one step subtler).
+                    and not _share_agreeing_quantity(claim_a, claim_b)
+                ):
                     temporal = numeric_conflict(
                         claim_a, claim_b, divergence=TEMPORAL_DIVERGENCE
                     )
@@ -261,8 +297,18 @@ def find_contradictions(
                 if SIMILARITY_LOW <= similarity < SIMILARITY_HIGH:
                     conflict = numeric_conflict(claim_a, claim_b, divergence=SIGNIFICANT_DIFF)
                     if conflict is not None:
+                        # The claims must not agree on a like-united quantity:
+                        # "26.5 GW in 2024, up from 5 GW in 2009" vs "26.5 GW in
+                        # 2024" diverges only on the incidental historical
+                        # figure, while the measured value agrees. `numeric_conflict`
+                        # keeps the last value per unit, so it reports the 5 vs
+                        # 26.5 spread and misses the 26.5 vs 26.5 agreement; a
+                        # shared agreeing quantity means the measure is the same,
+                        # not the sources disagreeing.
                         scopes_a, scopes_b = _scopes_in(claim_a), _scopes_in(claim_b)
-                        if _scopes_conflict(scopes_a, scopes_b):
+                        if _share_agreeing_quantity(claim_a, claim_b):
+                            found = None
+                        elif _scopes_conflict(scopes_a, scopes_b):
                             found = {
                                 "kind": "scope",
                                 "severity": _severity("scope", conflict["relative_divergence"]),

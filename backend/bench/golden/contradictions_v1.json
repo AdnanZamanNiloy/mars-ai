@@ -1,0 +1,138 @@
+{
+  "version": "v1",
+  "suite": "contradiction-resolution",
+  "description": "Deterministic labeled fixture set for CONTRADICTION RESOLUTION accuracy. Each case supplies two (or more) claims with sources and expects one classification label. Labels: 'contradiction' means a genuine UNRESOLVED conflict (same measure: unit+scope+period+metric, materially different values); 'not_contradiction' means the engine must NOT flag it at all; 'resolved_explained' means it is flagged as a spread but resolution sets resolved=true with an explanation (period/scope/metric difference demonstrably accounts for the values). At most ONE primary claim pair per case is scored (the first two claims); extra claims are context. Detection and resolution are scored as separate deterministic metrics so the gate can tell a false positive from a false 'resolved'.",
+  "labels": ["contradiction", "not_contradiction", "resolved_explained"],
+  "cases": [
+    {
+      "id": "true_same_measure_conflict",
+      "category": "same_measure_conflict",
+      "expected_label": "contradiction",
+      "rationale": "Same unit (GW), same scope (global), same period (2023), same metric (installed solar capacity): materially different values are a real cross-source conflict that must stay unresolved.",
+      "claims": [
+        {"claim": "Global installed solar capacity reached 1,200 GW in 2023", "source": "https://a.example/x", "verified": true},
+        {"claim": "Global installed solar capacity reached 1,600 GW in 2023", "source": "https://b.example/y", "verified": true}
+      ]
+    },
+    {
+      "id": "true_same_measure_conflict_market_growth",
+      "category": "same_measure_conflict",
+      "expected_label": "contradiction",
+      "rationale": "Same unit (%), same scope (global), same period (last year), same metric (market growth): 25% vs 11% is a genuine disagreement.",
+      "claims": [
+        {"claim": "The market grew by 25% globally last year", "source": "https://a.example/x", "verified": true},
+        {"claim": "The market grew by 11% globally last year", "source": "https://b.example/y", "verified": true}
+      ]
+    },
+    {
+      "id": "true_same_measure_conflict_primary_vs_secondary",
+      "category": "primary_secondary_conflict",
+      "expected_label": "contradiction",
+      "rationale": "A primary journal and a secondary blog report the same measure (mortality reduction, %) for the same trial and period with materially different values. Primary/secondary weighting is visible on the sources, but the discrepancy is NOT explained by scope/period/metric, so it must not be silently marked resolved.",
+      "claims": [
+        {"claim": "The trial reported a mortality reduction of 15% versus placebo", "source": "https://nejm.org/a", "verified": true},
+        {"claim": "The trial reported a mortality reduction of 40% versus placebo", "source": "https://someblog.example/b", "verified": true}
+      ]
+    },
+    {
+      "id": "different_period_same_measure",
+      "category": "different_period",
+      "expected_label": "resolved_explained",
+      "rationale": "Same measure (global solar capacity, GW) reported for different years: the period difference explains the values. A period explanation must be recorded.",
+      "claims": [
+        {"claim": "Global installed solar capacity reached 1,200 GW in 2023", "source": "https://a.example/x", "verified": true},
+        {"claim": "Global installed solar capacity reached 1,600 GW in 2024", "source": "https://b.example/y", "verified": true}
+      ]
+    },
+    {
+      "id": "different_period_capacity",
+      "category": "different_period",
+      "expected_label": "resolved_explained",
+      "rationale": "Same measure (installed generation capacity, GW) for different years with a materially different value. Period explains the spread.",
+      "claims": [
+        {"claim": "Bangladesh's installed power generation capacity was 5 GW in 2009", "source": "https://a.example/x", "verified": true},
+        {"claim": "Bangladesh's installed power generation capacity reached 26.5 GW by 2024", "source": "https://b.example/y", "verified": true}
+      ]
+    },
+    {
+      "id": "different_scope_global_vs_us",
+      "category": "different_scope",
+      "expected_label": "resolved_explained",
+      "rationale": "Same metric (carbon emissions change, %), same period, but different scope: global vs United States. Different populations, not a disagreement; a scope explanation must be recorded.",
+      "claims": [
+        {"claim": "Carbon emissions fell 30% globally across the power sector in 2022", "source": "https://a.example/x", "verified": true},
+        {"claim": "Carbon emissions fell 5% in the United States across the power sector in 2022", "source": "https://b.example/y", "verified": true}
+      ]
+    },
+    {
+      "id": "different_scope_regional_segments",
+      "category": "different_scope",
+      "expected_label": "resolved_explained",
+      "rationale": "Two explicitly different populations (urban vs rural adults) with different values are not the same measure. The engine records this as a scope spread (resolved=true, never counted as an unresolved conflict) and must NOT leave it as a genuine contradiction. The scope difference is the visible explanation.",
+      "claims": [
+        {"claim": "The literacy rate among urban adults was 82% in 2020", "source": "https://a.example/x", "verified": true},
+        {"claim": "The literacy rate among rural adults was 61% in 2020", "source": "https://b.example/y", "verified": true}
+      ]
+    },
+    {
+      "id": "unrelated_shared_numbers_and_year",
+      "category": "shared_number_unrelated",
+      "expected_label": "not_contradiction",
+      "rationale": "Regression for commit 18d4da8: a Rooppur cost claim and a '38 countries' declaration share a year but are different measures. They must never be paired, even as a period conflict.",
+      "claims": [
+        {"claim": "The Rooppur Nuclear Power Plant has an estimated construction cost of 12.65 billion US dollars as of June 2024", "source": "https://wikipedia.example/x", "verified": true},
+        {"claim": "The Declaration to Triple Nuclear Energy by 2050 has been endorsed by 38 countries", "source": "https://world-nuclear.example/y", "verified": true}
+      ]
+    },
+    {
+      "id": "unrelated_shared_number_different_metric",
+      "category": "shared_number_unrelated",
+      "expected_label": "not_contradiction",
+      "rationale": "Two unrelated measures that happen to share a number (12%) and a year. Shared numbers alone are not evidence of a conflict.",
+      "claims": [
+        {"claim": "Coal's share of electricity generation fell to 12% in 2021", "source": "https://a.example/x", "verified": true},
+        {"claim": "The central bank raised its policy rate by 12% in 2021 to curb inflation", "source": "https://b.example/y", "verified": true}
+      ]
+    },
+    {
+      "id": "unit_mismatch_percent_vs_capacity",
+      "category": "different_metric",
+      "expected_label": "not_contradiction",
+      "rationale": "A percentage and a GW capacity are different units/metrics; their magnitude difference is a category error, not a disagreement.",
+      "claims": [
+        {"claim": "Module efficiency improved by 22% in the latest generation", "source": "https://a.example/x", "verified": true},
+        {"claim": "New plants added 22 GW of capacity in the latest generation", "source": "https://b.example/y", "verified": true}
+      ]
+    },
+    {
+      "id": "polarity_direct_negation",
+      "category": "polarity_conflict",
+      "expected_label": "contradiction",
+      "rationale": "Same subject, directly opposite assertions. Same scope and period: this is the strongest genuine conflict and must stay unresolved.",
+      "claims": [
+        {"claim": "The new model outperforms the baseline on all benchmarks", "source": "https://a.example/x", "verified": true},
+        {"claim": "The new model does not outperform the baseline on all benchmarks", "source": "https://b.example/y", "verified": true}
+      ]
+    },
+    {
+      "id": "polarity_opposite_directions_different_years",
+      "category": "polarity_conflict",
+      "expected_label": "contradiction",
+      "rationale": "Regression: a period difference cannot explain opposite directions. 'fell 12% in 2020' vs 'rose 12% in 2023' is a polarity conflict about the same measure; reporting different years must NOT auto-resolve it as a period artifact.",
+      "claims": [
+        {"claim": "Coal capacity fell 12% in 2020 across the region", "source": "https://a.example/x", "verified": true},
+        {"claim": "Coal capacity rose 12% in 2023 across the region", "source": "https://b.example/y", "verified": true}
+      ]
+    },
+    {
+      "id": "same_value_incidental_context_year",
+      "category": "shared_number_unrelated",
+      "expected_label": "not_contradiction",
+      "rationale": "Regression: the claims agree on the measure (26.5 GW in 2024); one merely mentions an extra historical year (5 GW in 2009) as context. The values are not a cross-source disagreement, and the engine must not manufacture a 'temporal' conflict (then 'resolve' it) from an incidental year token.",
+      "claims": [
+        {"claim": "Bangladesh capacity reached 26.5 GW in 2024, up from 5 GW in 2009", "source": "https://a.example/x", "verified": true},
+        {"claim": "Bangladesh capacity was 26.5 GW in 2024", "source": "https://b.example/y", "verified": true}
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # MARS Offline Golden Evaluation (v1)
 
-*Generated 2026-09-16T10:11:02Z — deterministic, network-free.*
+*Generated 2026-09-16T10:20:50Z — deterministic, network-free.*
 
 Golden set: `bench/golden/queries_v1.json`  
 Thresholds: `bench/golden/thresholds_v1.json`  
@@ -27,6 +27,13 @@ Queries: 26 (scored 26, failed 0)
 | support_rate_mean | 0.5051 | 0.4000 | ok |
 | minimums_pass_rate | 1.0000 | 0.9500 | ok |
 | depth_routing_pass_rate | 1.0000 |  | ok |
+| detection_precision | 1.0000 |  | ok |
+| detection_recall | 1.0000 |  | ok |
+| detection_f1 | 1.0000 |  | ok |
+| resolution_precision | 1.0000 |  | ok |
+| resolution_recall | 1.0000 |  | ok |
+| resolution_f1 | 1.0000 |  | ok |
+| classification_accuracy | 1.0000 |  | ok |
 
 ## Per category
 
@@ -39,6 +46,26 @@ Queries: 26 (scored 26, failed 0)
 | decision_policy | 3 | 66.000 | 0.556 | 1.000 | 1.000 |
 | factual_explanation | 5 | 73.800 | 0.587 | 1.000 | 1.000 |
 | quantitative | 3 | 71.000 | 0.500 | 1.000 | 1.000 |
+
+## Contradiction detection / resolution
+
+Labeled cases: 13 (correct 13, incorrect 0)
+
+| id | expected | observed | ok |
+|---|---|---|---|
+| true_same_measure_conflict | contradiction | contradiction | Y |
+| true_same_measure_conflict_market_growth | contradiction | contradiction | Y |
+| true_same_measure_conflict_primary_vs_secondary | contradiction | contradiction | Y |
+| different_period_same_measure | resolved_explained | resolved_explained | Y |
+| different_period_capacity | resolved_explained | resolved_explained | Y |
+| different_scope_global_vs_us | resolved_explained | resolved_explained | Y |
+| different_scope_regional_segments | resolved_explained | resolved_explained | Y |
+| unrelated_shared_numbers_and_year | not_contradiction | not_contradiction | Y |
+| unrelated_shared_number_different_metric | not_contradiction | not_contradiction | Y |
+| unit_mismatch_percent_vs_capacity | not_contradiction | not_contradiction | Y |
+| polarity_direct_negation | contradiction | contradiction | Y |
+| polarity_opposite_directions_different_years | contradiction | contradiction | Y |
+| same_value_incidental_context_year | not_contradiction | not_contradiction | Y |
 
 ## Per query
 

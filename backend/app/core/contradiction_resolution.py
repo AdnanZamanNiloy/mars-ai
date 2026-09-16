@@ -27,9 +27,15 @@ from typing import Any, Dict, List
 
 from app.agents.evidence_utils import numeric_conflict
 
-# Reuse the contradiction engine's scope vocabulary and year parser so the two
-# modules can never drift apart on what "different scope/period" means.
-from app.core.contradictions import _scopes_conflict, _scopes_in, _years_in
+# Reuse the contradiction engine's scope vocabulary, year parser and the
+# agreeing-quantity guard so the two modules can never drift apart on what
+# "different scope/period" or "the values actually agree" means.
+from app.core.contradictions import (
+    _scopes_conflict,
+    _scopes_in,
+    _share_agreeing_quantity,
+    _years_in,
+)
 
 # Re-exported for callers that only import this module.
 __all__ = [
@@ -76,23 +82,25 @@ def resolve_contradiction(contradiction: Dict[str, Any]) -> Dict[str, Any]:
     unit = _unit_of(contradiction)
 
     # --- period: different years explain different values ------------------
+    # A period difference can only explain a VALUE spread — never an opposite
+    # assertion. "Coal capacity fell 12% in 2020" vs "...rose 12% in 2023" is a
+    # polarity conflict about the same measure; different reporting years do
+    # not reconcile "fell" with "rose". Polarity findings therefore skip the
+    # period branch entirely and stay unresolved below.
     years_a, years_b = _years_in(claim_a), _years_in(claim_b)
-    if years_a and years_b and set(years_a) != set(years_b):
+    period_explains = (
+        kind != "polarity"
+        and (not _share_agreeing_quantity(claim_a, claim_b))
+        and _values_differ(contradiction)
+        and ((years_a and years_b and set(years_a) != set(years_b)) or kind == "temporal")
+    )
+    if period_explains:
         out["resolved"] = True
         out["resolution"] = (
             "different periods: the sources report the same measure for "
-            f"{sorted(set(years_a))[:3]} vs {sorted(set(years_b))[:3]}; the "
-            "values differ because the periods differ, not because the "
-            "sources disagree."
-        )
-        return out
-    # A finding the engine already classified as temporal is by definition
-    # period-separated even if the year tokens were noisy.
-    if kind == "temporal":
-        out["resolved"] = True
-        out["resolution"] = (
-            "different periods: the engine classified this as a period "
-            "mismatch, so the value spread is explained by the reporting date."
+            f"{sorted(set(years_a))[:3] or ['unspecified']} vs "
+            f"{sorted(set(years_b))[:3] or ['unspecified']}; the values differ "
+            "because the periods differ, not because the sources disagree."
         )
         return out
 
