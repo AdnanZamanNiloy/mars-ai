@@ -1,0 +1,121 @@
+{
+  "suite": "mars-golden-provider-eval",
+  "version": "v1",
+  "ran_at": "2026-09-16T10:41:28.279088+00:00",
+  "thresholds_path": "/home/adnan-zaman/Desktop/mars-ai/backend/bench/golden/thresholds_provider_v1.json",
+  "aggregate": {
+    "cases_total": 6,
+    "cases_passed": 6,
+    "cases_failed": 0,
+    "metrics": {
+      "provider_classification_pass_rate": 1.0
+    }
+  },
+  "cases": [
+    {
+      "id": "case1_healthy_provider",
+      "description": "healthy provider: no degradation recorded",
+      "passed": true,
+      "error": null,
+      "result": {
+        "raised": null,
+        "text": "{\"ok\": true}",
+        "degraded": [],
+        "provider_degraded": false,
+        "provider_kinds": []
+      }
+    },
+    {
+      "id": "case2_transient_429_recovered",
+      "description": "429 then 200: retry succeeds, no degradation, breaker closed",
+      "passed": true,
+      "error": null,
+      "result": {
+        "raised": null,
+        "text": "{\"ok\": true}",
+        "recorded_provider_degradation": false,
+        "breaker_open": false,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "case3_repeated_429_fallback",
+      "description": "repeated 429 -> fallback provider, run completes, provider-transient",
+      "passed": true,
+      "error": null,
+      "result": {
+        "raised": null,
+        "text": "{\"ok\": true}",
+        "provider_degraded": true,
+        "provider_kinds": [
+          "provider-transient"
+        ],
+        "evidence_agents": [],
+        "breaker_open": false
+      }
+    },
+    {
+      "id": "case4_provider_exhaustion",
+      "description": "provider exhaustion: explicit degraded, never weak evidence",
+      "passed": true,
+      "error": null,
+      "result": {
+        "raised": "AllProvidersFailedError",
+        "provider_degraded": true,
+        "provider_kinds": [
+          "provider-transient"
+        ],
+        "agents": [],
+        "evidence_agents": []
+      }
+    },
+    {
+      "id": "case5_weak_evidence",
+      "description": "provider OK, evidence thin: weak-evidence, not provider degradation",
+      "passed": true,
+      "error": null,
+      "result": {
+        "provider_degraded": false,
+        "provider_kinds": [],
+        "evidence_agents": [
+          "summarizer"
+        ],
+        "reasons": {
+          "summarizer": "weak-evidence"
+        }
+      }
+    },
+    {
+      "id": "case6_both_classes_separate",
+      "description": "provider degradation + weak evidence: both represented separately",
+      "passed": true,
+      "error": null,
+      "result": {
+        "provider_degraded": true,
+        "provider_kinds": [
+          "provider-transient"
+        ],
+        "evidence_agents": [
+          "summarizer"
+        ],
+        "provider_agents": [
+          "synthesizer"
+        ],
+        "reasons": {
+          "summarizer": "weak-evidence",
+          "synthesizer": "provider-transient"
+        },
+        "exhaustion_raised": "HTTPStatusError"
+      }
+    }
+  ],
+  "thresholds": {
+    "version": "v1",
+    "description": "Regression floors for the deterministic offline provider-failure classification evaluator (bench/eval_provider.py). Every case asserts the transient-vs-hard classification and the provider-vs-evidence reason mapping; the aggregate pass rate is held at 1.0 because the mapping is deterministic and a conflation of provider failure with weak evidence is always a regression. Additive only: this file does not alter any threshold in thresholds_v1.json, thresholds_depth_v1.json or thresholds_contradictions_v1.json.",
+    "provider": {
+      "provider_classification_pass_rate": 1.0
+    }
+  },
+  "threshold_failures": [],
+  "passed": true
+}

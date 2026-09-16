@@ -44,7 +44,11 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
-from app.core.degradation import record_fallback
+from app.core.degradation import (
+    EVIDENCE_WEAK,
+    PROVIDER_TRANSIENT,
+    record_fallback,
+)
 from app.core.llm import AllProvidersFailedError, LLMClient, PromptTooLargeError
 from app.core.logging import get_logger
 from app.core.usage import run_seconds_remaining
@@ -540,7 +544,7 @@ async def synthesize(
                     )
                     continue
                 logger.warning("[Synthesizer] provider too slow (timeout); using deterministic fallback")
-                record_fallback("synthesizer")
+                record_fallback("synthesizer", reason=PROVIDER_TRANSIENT)
                 payload = {}
                 break
             # Rate-limited wall: shrink the evidence view — a smaller prompt
@@ -553,13 +557,13 @@ async def synthesize(
             continue
         except Exception as exc:
             logger.warning("[Synthesizer] LLM call failed, using deterministic fallback", exc_info=exc)
-            record_fallback("synthesizer")
+            record_fallback("synthesizer", reason=PROVIDER_TRANSIENT)
             payload = {}
             break
 
     answer = str(payload.get("answer", "")).strip() if isinstance(payload, dict) else ""
     if not answer:
-        record_fallback("synthesizer")
+        record_fallback("synthesizer", reason=EVIDENCE_WEAK)
         return _deterministic_report(query, usable_facts, top_facts, ctx, angles)
 
     answer = _sanitize_answer_text(answer, query)

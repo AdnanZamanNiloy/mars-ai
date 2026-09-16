@@ -11,7 +11,12 @@ from slowapi.util import get_remote_address
 
 from app.core.usage import clear_run_usage, start_run_usage
 from app.core.config import get_settings
-from app.core.degradation import clear_fallbacks, reset_fallbacks, take_fallbacks
+from app.core.degradation import (
+    clear_fallbacks,
+    degradation_summary,
+    reset_fallbacks,
+    take_fallbacks,
+)
 from app.db.sqlite import (
     complete_research_run,
     get_run_trace,
@@ -577,13 +582,17 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 # Degradation flag: which agents fell back to deterministic
                 # defaults (field on the existing event — no contract break).
                 degraded = take_fallbacks()
+                degradation = degradation_summary()
                 for agent in degraded:
                     await _persist(record_event(
                         settings.database_url, request_id, agent, "fallback",
-                        payload=json.dumps({"agent": agent}),
+                        payload=json.dumps({"agent": agent, "reason": degradation["reasons"].get(agent, "")}),
                     ))
                 support = last_snapshot.get("answer_support", {}) or {}
                 yield event_line("final_report", report=report, confidence=confidence, degraded=degraded,
+                                 degraded_reasons=degradation["reasons"],
+                                 provider_degraded=degradation["provider_degraded"],
+                                 provider_kinds=degradation["provider_kinds"],
                                  answer_support=support.get("rate"),
                                  budget=budget_snapshot,
                                  wave_report=last_snapshot.get("wave_report") or [],
@@ -593,8 +602,13 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                                  section_wise=bool(last_snapshot.get("section_wise")),
                                  evidence_distribution=last_snapshot.get("evidence_distribution") or {})
             else:
+                _degradation = degradation_summary()
                 yield event_line("final_report", report="No final report generated.", confidence=confidence,
-                                 degraded=take_fallbacks(), budget=budget_snapshot)
+                                 degraded=_degradation["agents"],
+                                 degraded_reasons=_degradation["reasons"],
+                                 provider_degraded=_degradation["provider_degraded"],
+                                 provider_kinds=_degradation["provider_kinds"],
+                                 budget=budget_snapshot)
 
             # Decision Layer rows (3.5): one per strategic option.
             decision_options = last_snapshot.get("decision_options") or []
@@ -782,17 +796,25 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
                 await _persist_report(settings.database_url, request_id, str(state.get("query", "")), report, confidence)
                 await _persist(save_citations(settings.database_url, request_id, report))
                 degraded = take_fallbacks()
+                degradation = degradation_summary()
                 for agent in degraded:
                     await _persist(record_event(
                         settings.database_url, request_id, agent, "fallback",
-                        payload=json.dumps({"agent": agent}),
+                        payload=json.dumps({"agent": agent, "reason": degradation["reasons"].get(agent, "")}),
                     ))
                 support = last_snapshot.get("answer_support", {}) or {}
                 yield event_line("final_report", report=report, confidence=confidence, degraded=degraded,
+                                 degraded_reasons=degradation["reasons"],
+                                 provider_degraded=degradation["provider_degraded"],
+                                 provider_kinds=degradation["provider_kinds"],
                                  answer_support=support.get("rate"))
             else:
+                _degradation = degradation_summary()
                 yield event_line("final_report", report="No final report generated.", confidence=confidence,
-                                 degraded=take_fallbacks())
+                                 degraded=_degradation["agents"],
+                                 degraded_reasons=_degradation["reasons"],
+                                 provider_degraded=_degradation["provider_degraded"],
+                                 provider_kinds=_degradation["provider_kinds"])
         finally:
             clear_fallbacks()
             unbind_request_context()

@@ -347,3 +347,64 @@ def test_depth_thresholds_file_loads_and_gates_at_one():
     assert report["passed"] is True
     assert report["threshold_failures"] == []
     assert report["thresholds"]["depth"]["depth_routing_pass_rate"] == 1.0
+
+
+# Provider-failure classification golden coverage (bench/eval_provider.py)
+# Reliability #4: provider failure must never be read as weak evidence.
+
+async def test_provider_cases_all_pass_and_cover_classification():
+    from bench import eval_provider
+
+    report = await eval_provider.evaluate()
+    assert report["passed"] is True
+    assert report["threshold_failures"] == []
+    ids = {c["id"] for c in report["cases"]}
+    assert ids == {
+        "case1_healthy_provider",
+        "case2_transient_429_recovered",
+        "case3_repeated_429_fallback",
+        "case4_provider_exhaustion",
+        "case5_weak_evidence",
+        "case6_both_classes_separate",
+    }
+    assert all(c["passed"] for c in report["cases"])
+
+
+async def test_provider_gate_bites_on_a_conflated_case():
+    """If the classification collapses provider failure into weak evidence,
+    the gate must exit non-zero."""
+    from bench import eval_provider
+
+    original = eval_provider.CASES
+
+    async def _broken_case_4():
+        # Regression: exhaustion mislabeled as weak evidence, no provider kind.
+        return {
+            "raised": "AllProvidersFailedError",
+            "provider_degraded": False,
+            "provider_kinds": [],
+            "agents": ["summarizer"],
+            "evidence_agents": ["summarizer"],
+        }
+
+    try:
+        eval_provider.CASES = [
+            *original[:3],
+            {**original[3], "run": _broken_case_4},
+            *original[4:],
+        ]
+        report = await eval_provider.evaluate()
+    finally:
+        eval_provider.CASES = original
+    assert report["passed"] is False
+    assert any(f["metric"] == "provider_classification_pass_rate"
+               for f in report["threshold_failures"])
+
+
+async def test_provider_thresholds_file_loads_and_gates_at_one():
+    from bench import eval_provider
+
+    report = await eval_provider.evaluate()
+    assert report["passed"] is True
+    assert report["thresholds"]["provider"]["provider_classification_pass_rate"] == 1.0
+

@@ -143,11 +143,39 @@ const AGENT_LABELS = {
   synthesizer: "synthesis",
   redteam: "red-team review",
 };
+// Backend reason codes (app/core/degradation.py + agent-local codes): WHY a
+// stage degraded. Provider causes and evidence causes must read differently —
+// a provider outage is not thin evidence.
+const REASON_LABELS = {
+  "provider-transient": "the LLM provider was temporarily unavailable (rate limit, timeout or outage)",
+  "provider-hard": "the LLM provider rejected the request permanently (auth, quota or size)",
+  provider_timeout: "the LLM provider timed out",
+  providers_unavailable: "no LLM provider could serve the request",
+  llm_error: "the LLM call failed",
+  "weak-evidence": "the extracted evidence was too thin or unusable",
+  no_facts_parsed: "no usable claims could be parsed from the sources",
+  llm_returned_no_facts: "the model returned no usable claims",
+  payload_too_large: "the source payload was too large for the provider",
+};
 
-function describeDegradation(degraded) {
+function reasonText(reason) {
+  return REASON_LABELS[reason] || (reason ? String(reason).replace(/_/g, " ") : "");
+}
+
+function describeDegradation(degraded, reasons = {}, providerDegraded = false) {
   const labels = degraded.map((a) => AGENT_LABELS[a] || a);
   const extractive = degraded.filter((a) => EXTRACTIVE_AGENTS.has(a));
   const parts = [];
+  // Name the concrete causes first, deduped — this is what distinguishes a
+  // provider-transient run from a genuinely weak-evidence run.
+  const causes = [];
+  for (const agent of degraded) {
+    const text = reasonText(reasons[agent]);
+    if (text && !causes.includes(text)) causes.push(text);
+  }
+  if (providerDegraded && !causes.some((c) => /provider/.test(c))) {
+    causes.push("an LLM provider failed during the run");
+  }
   if (extractive.length) {
     parts.push(
       `${labels.join(", ")} ran on deterministic extraction instead of a model-generated response`
@@ -161,6 +189,7 @@ function describeDegradation(degraded) {
     );
     parts.push("treat those sections as lower-assurance");
   }
+  if (causes.length) parts.push(`cause: ${causes.join("; ")}`);
   return parts.join(" — ") + ".";
 }
 
@@ -171,7 +200,9 @@ export default function AnswerCard({ run }) {
   const verified = findings.filter((f) => f && f.verified === true).length;
   const conflicts = sections.contradictions ? sections.contradictions.split(/\n+/).filter((l) => l.trim()).length : 0;
   const degraded = Array.isArray(run.degraded) ? run.degraded.filter(Boolean) : [];
-  const degradedNotice = describeDegradation(degraded);
+  const degradedNotice = degraded.length
+    ? describeDegradation(degraded, run.degradedReasons || {}, run.providerDegraded === true)
+    : "";
   const decisions = Array.isArray(run.decisions) ? run.decisions : [];
   const support = typeof run.answerSupport === "number" ? Math.round(run.answerSupport * 100) : null;
   const outlineSections = run.outline && Array.isArray(run.outline.sections) ? run.outline.sections : [];
@@ -192,12 +223,13 @@ export default function AnswerCard({ run }) {
 
   return (
     <div className="answer anim-rise">
-      {degraded.length ? (
+      {(degraded.length || run.providerDegraded === true) ? (
         <div className="degraded-banner" role="alert">
           <IconAlert size={16} />
           <div>
             <strong>Degraded run — treat with caution.</strong>{" "}
-            {degradedNotice}
+            {degradedNotice ||
+              "an LLM provider failed during the run, so some output came from deterministic fallbacks."}
           </div>
         </div>
       ) : null}

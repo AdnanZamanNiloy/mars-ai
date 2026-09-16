@@ -349,6 +349,7 @@ def compute_confidence(
     contradictions: List[Dict[str, Any]] | None = None,
     answer_support: Dict[str, Any] | None = None,
     sub_questions: List[Dict[str, Any]] | None = None,
+    provider_degraded: bool = False,
 ) -> Dict[str, Any]:
     """Return {"overall": float, "signals": {...}} with per-signal values.
 
@@ -361,6 +362,15 @@ def compute_confidence(
     iteration's verify_answer_support) and `sub_questions` (the plan) wire
     the three v3 signals; each contributes only when present so historical
     scores stay comparable.
+
+    `provider_degraded` is True when a provider failed for TRANSPORT reasons
+    during the run. A provider outage preserves no evidence signal — the
+    extractive fallback that replaces it self-verifies — so a transport
+    failure must not inflate confidence even when the resulting pool looks
+    well-corroborated. It applies the cap unconditionally (unlike a
+    summarizer fallback, whose cap is evidence-conditional), while the
+    degradation reasons still report provider-transient vs weak-evidence
+    separately so the two causes are never conflated.
     """
     freshness_value, measured = _freshness(source_dates)
     weights = dict(WEIGHTS_FRESH if measured else WEIGHTS)
@@ -447,6 +457,18 @@ def compute_confidence(
         notes.append(
             "confidence capped: " + ", ".join(capping)
             + " ran on deterministic extraction — claims are unrewritten source text"
+        )
+        overall = round(min(overall, DEGRADED_CAP), 3)
+    elif provider_degraded:
+        # A provider failed for transport reasons. Even if the extractive pool
+        # happens to look verified/corroborated, it was produced under an
+        # outage — the same reason the extractive cap exists. Applied only when
+        # no explicit extraction cap already fired, so the note names the real
+        # cause. This is NOT weak evidence: the reasons object distinguishes
+        # provider-transient from evidence weakness downstream.
+        notes.append(
+            "confidence capped: an LLM provider failed during the run "
+            "(provider-transient) — evidence was produced under degradation"
         )
         overall = round(min(overall, DEGRADED_CAP), 3)
     return {

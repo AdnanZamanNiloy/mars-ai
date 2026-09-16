@@ -1,27 +1,27 @@
 {
   "suite": "mars-golden-offline-eval",
   "version": "v1",
-  "ran_at": "2026-09-16T10:20:50.596418+00:00",
+  "ran_at": "2026-09-16T10:41:42.083788+00:00",
   "golden_path": "bench/golden/queries_v1.json",
   "thresholds_path": "bench/golden/thresholds_v1.json",
   "aggregate": {
     "queries_total": 26,
-    "queries_scored": 26,
-    "queries_failed": 0,
+    "queries_scored": 25,
+    "queries_failed": 1,
     "metrics": {
       "query_type_accuracy": 1.0,
-      "dimension_hit_rate": 0.8846,
+      "dimension_hit_rate": 0.88,
       "forbidden_clean_rate": 1.0,
       "section_presence_rate": 1.0,
       "citation_resolution_rate": 1.0,
-      "verified_claims_mean": 2.4615,
-      "corroborated_claims_mean": 1.7308,
-      "distinct_domains_mean": 1.9231,
-      "primary_share_mean": 0.8205,
+      "verified_claims_mean": 2.52,
+      "corroborated_claims_mean": 1.8,
+      "distinct_domains_mean": 1.96,
+      "primary_share_mean": 0.8133,
       "grade_ab_share": 1.0,
-      "answer_quality_mean": 69.2692,
-      "answer_relevance_mean": 0.3971,
-      "support_rate_mean": 0.5051,
+      "answer_quality_mean": 69.56,
+      "answer_relevance_mean": 0.4099,
+      "support_rate_mean": 0.5053,
       "minimums_pass_rate": 1.0,
       "depth_routing_pass_rate": 1.0,
       "detection_precision": 1.0,
@@ -30,7 +30,8 @@
       "resolution_precision": 1.0,
       "resolution_recall": 1.0,
       "resolution_f1": 1.0,
-      "classification_accuracy": 1.0
+      "classification_accuracy": 1.0,
+      "provider_classification_pass_rate": 1.0
     }
   },
   "per_category": {
@@ -95,17 +96,17 @@
       "queries": 4,
       "metrics": {
         "query_type_accuracy": 1.0,
-        "dimension_hit_rate": 0.9167,
+        "dimension_hit_rate": 0.8889,
         "forbidden_clean_rate": 1.0,
         "section_presence_rate": 1.0,
         "citation_resolution_rate": 1.0,
-        "verified_claims_mean": 2.0,
-        "corroborated_claims_mean": 1.25,
-        "distinct_domains_mean": 1.5,
-        "primary_share_mean": 0.9167,
+        "verified_claims_mean": 2.3333,
+        "corroborated_claims_mean": 1.6667,
+        "distinct_domains_mean": 1.6667,
+        "primary_share_mean": 0.8889,
         "grade_ab_share": 1.0,
-        "answer_quality_mean": 69.75,
-        "answer_relevance_mean": 0.3544,
+        "answer_quality_mean": 72.3333,
+        "answer_relevance_mean": 0.4468,
         "support_rate_mean": 0.5,
         "minimums_pass_rate": 1.0
       }
@@ -259,7 +260,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.109,
+      "wall_sec": 0.11,
       "topic": "rag",
       "llm_calls": 11
     },
@@ -355,7 +356,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.039,
+      "wall_sec": 0.042,
       "topic": "mrna",
       "llm_calls": 11
     },
@@ -449,7 +450,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.05,
+      "wall_sec": 0.051,
       "topic": "transformer_ml",
       "llm_calls": 11
     },
@@ -543,7 +544,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.037,
+      "wall_sec": 0.038,
       "topic": "solid_state",
       "llm_calls": 11
     },
@@ -639,7 +640,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.056,
+      "wall_sec": 0.06,
       "topic": "renewables",
       "llm_calls": 11
     },
@@ -733,7 +734,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.022,
+      "wall_sec": 0.025,
       "topic": "ai_adoption",
       "llm_calls": 11
     },
@@ -741,100 +742,30 @@
       "id": "trend-storage",
       "category": "current_trend",
       "query": "What is the current state of grid-scale battery storage deployment?",
-      "query_type": "exploratory",
-      "query_type_required": "exploratory",
-      "query_type_ok": true,
-      "dimensions_required": [
-        "statistical",
-        "evidence",
-        "trend"
-      ],
-      "dimensions_hit": 3,
-      "dimensions_min": 3,
-      "dimensions_ok": true,
-      "forbidden_hits": [],
-      "forbidden_ok": true,
-      "required_sections": [
-        "Executive Summary",
-        "Key Findings",
-        "Evidence Strength",
-        "Limitations & Unknowns",
-        "Counterarguments & Disputed Points"
-      ],
-      "missing_sections": [],
-      "sections_present": 5,
-      "section_presence_rate": 1.0,
+      "error": "UnboundLocalError: cannot access local variable 'fallback_reason' where it is not associated with a value",
+      "wall_sec": 0.012,
+      "topic": "storage",
+      "minimums_ok": false,
+      "query_type_ok": false,
+      "forbidden_ok": false,
+      "section_presence_rate": 0.0,
       "citation": {
-        "markers_total": 2,
-        "markers_resolved": 2,
-        "markers_unresolved": [],
-        "legend_entries": 1,
-        "legend_unused": [],
-        "resolution_rate": 1.0,
-        "no_dangling": true,
-        "no_unsupported_numbers": true,
-        "unsupported_numbers": 0,
-        "production_support_rate": 0.0,
-        "production_uncited": 1
+        "resolution_rate": 0.0
       },
       "evidence": {
-        "grade_distribution": {
-          "A": 0,
-          "B": 1,
-          "C": 0,
-          "D": 0
-        },
-        "grade_ab_share": 1.0,
-        "verified_claims": 1,
+        "grade_ab_share": 0.0,
+        "verified_claims": 0,
         "corroborated_claims": 0,
-        "needs_corroboration": 0,
-        "distinct_domains": 1,
-        "primary_share": 1.0,
-        "total_claims": 1
-      },
-      "contradictions": {
-        "total": 0,
-        "resolved": 0,
-        "unresolved": 0,
-        "independent_scan_count": 0
+        "distinct_domains": 0,
+        "primary_share": 0.0
       },
       "answer_quality": {
-        "overall": 62,
-        "passed": false,
-        "accuracy": 58,
-        "relevance": 35,
-        "evidence": 54,
-        "clarity": 100,
-        "reasoning": 100,
-        "answer_relevance": 0.0775,
-        "failures": [
-          "Relevance: the report's content does not match the question asked \u2014 it reads as evidence about a different topic. Restructure around the query's actual subject: 'What is the current state of grid-scale battery storage deployment?'.",
-          "Relevance: the Executive Summary does not address the query's core terms (current, state, grid, scale). Answer the asked question in the first paragraph.",
-          "Relevance 35/100 is below the 40/100 floor."
-        ]
+        "overall": 0.0,
+        "answer_relevance": 0.0
       },
-      "support_rate": 0.5,
-      "minimums_checks": {
-        "verified_claims": true,
-        "corroborated_claims": true,
-        "distinct_domains": true,
-        "primary_share": true,
-        "sections": true
-      },
-      "invariant_checks": {
-        "every_marker_resolves": true,
-        "no_dangling_markers": true,
-        "no_unsupported_numbers": true
-      },
-      "minimums_ok": true,
-      "degraded": [
-        "planner_dimensions",
-        "summarizer"
-      ],
-      "error": null,
-      "wall_sec": 0.027,
-      "topic": "storage",
-      "llm_calls": 11
+      "support_rate": 0.0,
+      "dimensions_hit": 0,
+      "dimensions_ok": false
     },
     {
       "id": "comparison-nuclear-solar",
@@ -928,7 +859,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.057,
+      "wall_sec": 0.062,
       "topic": "nuclear",
       "llm_calls": 11
     },
@@ -1024,7 +955,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.047,
+      "wall_sec": 0.051,
       "topic": "lithium",
       "llm_calls": 11
     },
@@ -1120,7 +1051,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.089,
+      "wall_sec": 0.094,
       "topic": "finetune",
       "llm_calls": 11
     },
@@ -1219,7 +1150,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.021,
+      "wall_sec": 0.024,
       "topic": "nuclear",
       "llm_calls": 11
     },
@@ -1316,7 +1247,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.04,
+      "wall_sec": 0.038,
       "topic": "carbon_policy",
       "llm_calls": 11
     },
@@ -1410,7 +1341,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.05,
+      "wall_sec": 0.041,
       "topic": "transformer_ambiguous",
       "llm_calls": 11
     },
@@ -1505,7 +1436,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.028,
+      "wall_sec": 0.029,
       "topic": "apple",
       "llm_calls": 11
     },
@@ -1598,7 +1529,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.021,
+      "wall_sec": 0.025,
       "topic": "bank",
       "llm_calls": 11
     },
@@ -1692,7 +1623,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.097,
+      "wall_sec": 0.104,
       "topic": "rag",
       "llm_calls": 11
     },
@@ -1786,7 +1717,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.043,
+      "wall_sec": 0.037,
       "topic": "lithium",
       "llm_calls": 11
     },
@@ -1884,7 +1815,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.033,
+      "wall_sec": 0.03,
       "topic": "renewables",
       "llm_calls": 11
     },
@@ -1979,7 +1910,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.047,
+      "wall_sec": 0.051,
       "topic": "renewables",
       "llm_calls": 11
     },
@@ -2072,7 +2003,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.027,
+      "wall_sec": 0.033,
       "topic": "lithium",
       "llm_calls": 11
     },
@@ -2167,7 +2098,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.022,
+      "wall_sec": 0.024,
       "topic": "ai_adoption",
       "llm_calls": 11
     },
@@ -2261,7 +2192,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.035,
+      "wall_sec": 0.04,
       "topic": "heat_pumps",
       "llm_calls": 11
     },
@@ -2355,7 +2286,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.031,
+      "wall_sec": 0.052,
       "topic": "ev",
       "llm_calls": 11
     },
@@ -2451,7 +2382,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.039,
+      "wall_sec": 0.064,
       "topic": "wind_solar",
       "llm_calls": 11
     },
@@ -2545,7 +2476,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.052,
+      "wall_sec": 0.054,
       "topic": "nuclear",
       "llm_calls": 11
     },
@@ -2643,7 +2574,7 @@
         "planner_dimensions"
       ],
       "error": null,
-      "wall_sec": 0.022,
+      "wall_sec": 0.023,
       "topic": "ai_regulation",
       "llm_calls": 11
     }
@@ -2651,7 +2582,7 @@
   "depth": {
     "suite": "mars-golden-depth-eval",
     "version": "v1",
-    "ran_at": "2026-09-16T10:20:50.591818+00:00",
+    "ran_at": "2026-09-16T10:41:39.094715+00:00",
     "thresholds_path": "/home/adnan-zaman/Desktop/mars-ai/backend/bench/golden/thresholds_depth_v1.json",
     "aggregate": {
       "scenarios_total": 5,
@@ -2819,7 +2750,7 @@
   "contradictions": {
     "suite": "mars-golden-contradiction-eval",
     "version": "v1",
-    "ran_at": "2026-09-16T10:20:50.596392+00:00",
+    "ran_at": "2026-09-16T10:41:39.099864+00:00",
     "thresholds_path": "/home/adnan-zaman/Desktop/mars-ai/backend/bench/golden/thresholds_contradictions_v1.json",
     "aggregate": {
       "cases_total": 13,
@@ -3090,6 +3021,127 @@
         "resolution_recall": 1.0,
         "resolution_f1": 1.0,
         "classification_accuracy": 1.0
+      }
+    },
+    "threshold_failures": [],
+    "passed": true
+  },
+  "provider": {
+    "suite": "mars-golden-provider-eval",
+    "version": "v1",
+    "ran_at": "2026-09-16T10:41:42.083751+00:00",
+    "thresholds_path": "/home/adnan-zaman/Desktop/mars-ai/backend/bench/golden/thresholds_provider_v1.json",
+    "aggregate": {
+      "cases_total": 6,
+      "cases_passed": 6,
+      "cases_failed": 0,
+      "metrics": {
+        "provider_classification_pass_rate": 1.0
+      }
+    },
+    "cases": [
+      {
+        "id": "case1_healthy_provider",
+        "description": "healthy provider: no degradation recorded",
+        "passed": true,
+        "error": null,
+        "result": {
+          "raised": null,
+          "text": "{\"ok\": true}",
+          "degraded": [],
+          "provider_degraded": false,
+          "provider_kinds": []
+        }
+      },
+      {
+        "id": "case2_transient_429_recovered",
+        "description": "429 then 200: retry succeeds, no degradation, breaker closed",
+        "passed": true,
+        "error": null,
+        "result": {
+          "raised": null,
+          "text": "{\"ok\": true}",
+          "recorded_provider_degradation": false,
+          "breaker_open": false,
+          "attempts": 3
+        }
+      },
+      {
+        "id": "case3_repeated_429_fallback",
+        "description": "repeated 429 -> fallback provider, run completes, provider-transient",
+        "passed": true,
+        "error": null,
+        "result": {
+          "raised": null,
+          "text": "{\"ok\": true}",
+          "provider_degraded": true,
+          "provider_kinds": [
+            "provider-transient"
+          ],
+          "evidence_agents": [],
+          "breaker_open": false
+        }
+      },
+      {
+        "id": "case4_provider_exhaustion",
+        "description": "provider exhaustion: explicit degraded, never weak evidence",
+        "passed": true,
+        "error": null,
+        "result": {
+          "raised": "AllProvidersFailedError",
+          "provider_degraded": true,
+          "provider_kinds": [
+            "provider-transient"
+          ],
+          "agents": [],
+          "evidence_agents": []
+        }
+      },
+      {
+        "id": "case5_weak_evidence",
+        "description": "provider OK, evidence thin: weak-evidence, not provider degradation",
+        "passed": true,
+        "error": null,
+        "result": {
+          "provider_degraded": false,
+          "provider_kinds": [],
+          "evidence_agents": [
+            "summarizer"
+          ],
+          "reasons": {
+            "summarizer": "weak-evidence"
+          }
+        }
+      },
+      {
+        "id": "case6_both_classes_separate",
+        "description": "provider degradation + weak evidence: both represented separately",
+        "passed": true,
+        "error": null,
+        "result": {
+          "provider_degraded": true,
+          "provider_kinds": [
+            "provider-transient"
+          ],
+          "evidence_agents": [
+            "summarizer"
+          ],
+          "provider_agents": [
+            "synthesizer"
+          ],
+          "reasons": {
+            "summarizer": "weak-evidence",
+            "synthesizer": "provider-transient"
+          },
+          "exhaustion_raised": "HTTPStatusError"
+        }
+      }
+    ],
+    "thresholds": {
+      "version": "v1",
+      "description": "Regression floors for the deterministic offline provider-failure classification evaluator (bench/eval_provider.py). Every case asserts the transient-vs-hard classification and the provider-vs-evidence reason mapping; the aggregate pass rate is held at 1.0 because the mapping is deterministic and a conflation of provider failure with weak evidence is always a regression. Additive only: this file does not alter any threshold in thresholds_v1.json, thresholds_depth_v1.json or thresholds_contradictions_v1.json.",
+      "provider": {
+        "provider_classification_pass_rate": 1.0
       }
     },
     "threshold_failures": [],

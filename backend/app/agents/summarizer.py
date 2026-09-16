@@ -35,7 +35,12 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from app.core.cache import cache_key, get_cache
 from app.core.usage import run_seconds_remaining
-from app.core.degradation import record_fallback
+from app.core.degradation import (
+    EVIDENCE_WEAK,
+    PROVIDER_HARD,
+    PROVIDER_TRANSIENT,
+    record_fallback,
+)
 from app.core.llm import AllProvidersFailedError, LLMClient, PromptTooLargeError, clamp_confidence
 from app.core.logging import get_logger
 from app.core.schemas import SummarizerFactsModel
@@ -53,6 +58,23 @@ from app.agents.evidence_utils import (
 from app.agents.sources import canonical_url, classify_source
 
 logger = get_logger(__name__)
+
+# Summarizer-internal fallback reasons -> the two degradation classes that
+# must never be conflated. `provider_timeout` / `providers_unavailable` /
+# `llm_error` are transport causes (the provider failed); the rest are
+# evidence/payload causes (the provider answered, the output was unusable or
+# the extraction found nothing usable). Recorded per-agent so the report can
+# say WHY the stage degraded.
+_PROVIDER_REASONS = frozenset({"provider_timeout", "providers_unavailable", "llm_error"})
+
+
+def _degradation_reason(fallback_reason: str) -> str:
+    if fallback_reason in _PROVIDER_REASONS:
+        return PROVIDER_TRANSIENT
+    if fallback_reason == "payload_too_large":
+        return PROVIDER_HARD
+    return EVIDENCE_WEAK
+
 
 PROMPT_VERSION = "summarizer-v17"  # BUMP on any claim-shape change: the cache
 # key embeds this, and stale entries would otherwise serve pre-fix claims.
@@ -442,6 +464,10 @@ async def summarizer_agent(
     if cached is not None:
         logger.info("[Summarizer] cache hit (%s)", PROMPT_VERSION)
         facts = cached
+        # A cache hit is not a provider failure; if the cached facts fail the
+        # cleaning/attribution filters below, the fallback reason is evidence
+        # weakness, never provider degradation.
+        fallback_reason = "cached_facts_unusable"
     else:
         logger.info("[Summarizer] cache miss (%s)", PROMPT_VERSION)
         # Adaptive payload ladder: providers cap request size (Groq 413s
@@ -662,7 +688,7 @@ async def summarizer_agent(
     # the source's own sub-question, ranked, and only the best per source kept:
     # taking the first sentences over a bare 0.15 overlap let off-topic
     # passages through as top claims.
-    record_fallback("summarizer")
+    record_fallback("summarizer", reason=_degradation_reason(fallback_reason))
     MIN_FALLBACK_OVERLAP = 0.2
     fallback: List[Dict[str, Any]] = []
     for item in quality_results[:MAX_SOURCES_PER_CALL]:

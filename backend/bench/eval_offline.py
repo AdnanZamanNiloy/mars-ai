@@ -97,6 +97,9 @@ AGGREGATE_METRICS = (
     "resolution_recall",
     "resolution_f1",
     "classification_accuracy",
+    # Populated only when --with-provider is set: provider-failure
+    # classification vs weak-evidence separation.
+    "provider_classification_pass_rate",
 )
 
 
@@ -688,7 +691,9 @@ async def evaluate(golden_path: Optional[str] = None,
                    with_depth: bool = False,
                    depth_thresholds_path: Optional[str] = None,
                    with_contradictions: bool = False,
-                   contradiction_thresholds_path: Optional[str] = None) -> Dict[str, Any]:
+                   contradiction_thresholds_path: Optional[str] = None,
+                   with_provider: bool = False,
+                   provider_thresholds_path: Optional[str] = None) -> Dict[str, Any]:
     from bench.golden.loader import load_queries, load_thresholds
 
     queries = load_queries(golden_path)
@@ -749,6 +754,23 @@ async def evaluate(golden_path: Optional[str] = None,
             print(f"[contra {status:>4}] {row['id']:<44} "
                   f"expected={row['expected_label']:<18} observed={row['observed_label']}")
 
+    provider_report: Optional[Dict[str, Any]] = None
+    if with_provider:
+        # Provider-failure classification (transient vs hard) and its
+        # separation from weak evidence lives in its own evaluator
+        # (bench/eval_provider.py); fold its aggregate metric and threshold
+        # failures into THIS gate so one command remains the offline gate.
+        from bench import eval_provider
+
+        provider_report = await eval_provider.evaluate(provider_thresholds_path)
+        aggregate_result["metrics"].update(provider_report["aggregate"]["metrics"])
+        for f in provider_report["threshold_failures"]:
+            failures.append({"scope": "provider", "metric": f["metric"],
+                             "actual": f["actual"], "floor": f["floor"]})
+        for row in provider_report["cases"]:
+            status = "ok" if row["passed"] else "FAIL"
+            print(f"[prov {status:>5}] {row['id']:<34} {row['description']}")
+
     report = {
         "suite": "mars-golden-offline-eval",
         "version": thresholds.get("version", "v1"),
@@ -760,6 +782,7 @@ async def evaluate(golden_path: Optional[str] = None,
         "queries": per_query,
         "depth": depth_report,
         "contradictions": contradiction_report,
+        "provider": provider_report,
         "thresholds": thresholds,
         "threshold_failures": failures,
         "passed": not failures,
@@ -780,6 +803,10 @@ def main() -> int:
                         help="also run the contradiction detection/resolution evaluator")
     parser.add_argument("--contradiction-thresholds", default=None,
                         help="contradiction thresholds JSON path")
+    parser.add_argument("--with-provider", action="store_true",
+                        help="also run the provider-failure classification evaluator")
+    parser.add_argument("--provider-thresholds", default=None,
+                        help="provider thresholds JSON path")
     args = parser.parse_args()
 
     try:
@@ -788,7 +815,9 @@ def main() -> int:
                                       with_depth=args.with_depth,
                                       depth_thresholds_path=args.depth_thresholds,
                                       with_contradictions=args.with_contradictions,
-                                      contradiction_thresholds_path=args.contradiction_thresholds))
+                                      contradiction_thresholds_path=args.contradiction_thresholds,
+                                      with_provider=args.with_provider,
+                                      provider_thresholds_path=args.provider_thresholds))
     except Exception as exc:
         print(f"golden evaluation failed to run: {type(exc).__name__}: {exc}",
               file=sys.stderr)

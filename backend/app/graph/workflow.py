@@ -21,7 +21,7 @@ from app.agents.verifier import verify_facts
 from app.core.llm import LLMClient
 from app.core.confidence import compute_confidence
 from app.core.contradictions import find_contradictions
-from app.core.degradation import take_fallbacks
+from app.core.degradation import has_provider_degradation, take_fallbacks
 from app.core.decision import build_decision_layer
 from app.core import depth_controller
 from app.core.isolation import AgentContext, build_contexts
@@ -1496,6 +1496,10 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             contradictions=contradictions,
             answer_support=state.get("answer_support"),
             sub_questions=state.get("sub_questions", []),
+            # A provider outage must not inflate confidence: the extractive
+            # fallback self-verifies, so transport failures are capped like
+            # degraded extraction (reliability #4).
+            provider_degraded=has_provider_degradation(),
         )
         overall_conf = breakdown["overall"]
 

@@ -1,0 +1,7 @@
+{
+  "version": "v1",
+  "description": "Regression floors for the deterministic offline provider-failure classification evaluator (bench/eval_provider.py). Every case asserts the transient-vs-hard classification and the provider-vs-evidence reason mapping; the aggregate pass rate is held at 1.0 because the mapping is deterministic and a conflation of provider failure with weak evidence is always a regression. Additive only: this file does not alter any threshold in thresholds_v1.json, thresholds_depth_v1.json or thresholds_contradictions_v1.json.",
+  "provider": {
+    "provider_classification_pass_rate": 1.0
+  }
+}

@@ -17,6 +17,11 @@ from tenacity import (
 
 from app.core.config import Settings
 from app.core import llm_cache
+from app.core.degradation import (
+    PROVIDER_HARD,
+    PROVIDER_TRANSIENT,
+    record_provider_failure,
+)
 from app.core.usage import get_run_usage
 
 logger = get_logger(__name__)
@@ -150,6 +155,21 @@ class CircuitBreaker:
                 self.cooldown_sec,
             )
 
+    def record_rate_limit(self) -> None:
+        """A 429 is a THROTTLE, not an outage: it must not open the cooldown
+        breaker. The provider is reachable and a rolling per-minute window
+        usually clears within the tenacity retry's own backoff (up to 20s on
+        the first retry). Counting it toward the breaker's threshold made a
+        burst of free-tier 429s skip a healthy provider for a full 60s and
+        degrade the run — exactly the conflation of "throttled" with "down"
+        this class must avoid. A short per-provider cooldown would still add
+        a second wait on top of tenacity's, so this only logs; the retry
+        policy + caller ladders own the back-off."""
+        logger.warning(
+            "[LLM] provider rate-limited (429); not opening breaker — "
+            "retry/backoff owns the wait"
+        )
+
     def _reset(self) -> None:
         self._consecutive_failures = 0
         self._opened_at = None
@@ -209,6 +229,46 @@ def _is_retryable(exc: BaseException) -> bool:
         # errors, 5xx, 429) stay retryable below.
         return False
     return isinstance(exc, (httpx.HTTPError, RuntimeError))
+
+
+def _is_rate_limit(exc: BaseException) -> bool:
+    """A provider throttle (429) — distinct from a genuine failure."""
+    return (
+        isinstance(exc, httpx.HTTPStatusError)
+        and exc.response is not None
+        and exc.response.status_code == 429
+    )
+
+
+def classify_provider_failure(exc: BaseException) -> str:
+    """Classify a provider error as transient or hard (or "" for neither).
+    Reused by the breaker and by degradation tracking so transport causes are
+    reported as provider failures, never confused with weak evidence:
+
+      transient  — 429, 5xx, timeouts, connection/transport errors. The
+                   provider is reachable; the condition may clear.
+      hard       — 401/402/403, permanent 400 signatures, 404, oversize
+                   (413/PromptTooLargeError), and "no provider configured".
+                   Retrying the identical call cannot succeed.
+
+    PromptTooLargeError is hard at the provider level but the CALLER can fix
+    it by shrinking the payload; the breaker must not treat it as a provider
+    outage (see _record_provider_failure), and neither should degradation.
+    """
+    if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
+        return PROVIDER_TRANSIENT
+    if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
+        status = exc.response.status_code
+        if status == 429 or 500 <= status < 600:
+            return PROVIDER_TRANSIENT
+        if status in (400, 401, 402, 403, 404, 413):
+            return PROVIDER_HARD
+        return PROVIDER_TRANSIENT if 400 <= status < 500 else ""
+    if isinstance(exc, PromptTooLargeError):
+        return PROVIDER_HARD
+    if isinstance(exc, (httpx.HTTPError, RuntimeError)):
+        return PROVIDER_TRANSIENT
+    return ""
 
 
 def _retry_after_hint(exc: BaseException | None) -> float:
@@ -532,6 +592,7 @@ class LLMClient:
                     self._last_errors["custom"] = f"{type(exc).__name__}: {exc}"
                     size_failures += 1 if isinstance(exc, PromptTooLargeError) else 0
                     self._record_provider_failure(self.custom_breaker, exc)
+                    self._record_degradation(exc)
                     logger.warning(
                         "[LLM] Custom provider call failed (breaker failures=%d), falling back: %s",
                         self.custom_breaker._consecutive_failures,
@@ -555,6 +616,7 @@ class LLMClient:
                     self._last_errors["groq"] = f"{type(exc).__name__}: {exc}"
                     size_failures += 1 if isinstance(exc, PromptTooLargeError) else 0
                     self._record_provider_failure(self.groq_breaker, exc)
+                    self._record_degradation(exc)
                     logger.warning(
                         "[LLM] Groq call failed (breaker failures=%d), falling back: %s",
                         self.groq_breaker._consecutive_failures,
@@ -571,6 +633,7 @@ class LLMClient:
                 except Exception as exc:
                     self._last_errors["huggingface"] = f"{type(exc).__name__}: {exc}"
                     size_failures += 1 if isinstance(exc, PromptTooLargeError) else 0
+                    self._record_degradation(exc)
                     raise
 
         # Every attempted provider rejected the REQUEST SIZE: the providers
@@ -681,13 +744,33 @@ class LLMClient:
         signal inside a 90s budget); fast failures use the normal
         threshold counter. PromptTooLargeError records NOTHING: the provider
         is healthy — our payload was too big — and sizing retries must not
-        trip the breaker into skipping that provider."""
+        trip the breaker into skipping that provider. A 429 records a
+        rate-limit (brief, non-opening) rather than a failure: a throttle is
+        not an outage."""
         if isinstance(exc, PromptTooLargeError):
             return
         if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
             breaker.record_timeout()
+        elif _is_rate_limit(exc):
+            breaker.record_rate_limit()
         else:
             breaker.record_failure()
+
+    @staticmethod
+    def _record_degradation(exc: Exception) -> None:
+        """Attribute an exhausted provider leg to a transport cause.
+
+        Recorded ONLY when the exception escaped the per-provider retry loop
+        (a 429 that recovered in-place never reaches here, so a healthy retry
+        records nothing). The classification — transient vs hard — is exactly
+        what lets a run say "the provider failed" instead of silently reading
+        as weak evidence (reliability #4)."""
+        if isinstance(exc, PromptTooLargeError):
+            # Provider is healthy; caller shrinks the payload. Not degradation.
+            return
+        kind = classify_provider_failure(exc)
+        if kind:
+            record_provider_failure(kind, f"{type(exc).__name__}: {exc}"[:200])
 
     def _custom_config(self) -> Dict[str, str] | None:
         """Validated custom-provider trio, or None when not configured."""

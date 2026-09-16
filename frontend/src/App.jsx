@@ -141,6 +141,9 @@ function blankRun(query, mode) {
     report: "",
     confidence: null,
     degraded: [],
+    degradedReasons: {},
+    providerDegraded: false,
+    providerKinds: [],
     answerSupport: null,
     // v2 signals: dependency-wave plan shape, live budget ledger,
     // per-source citation health, contradiction count.
@@ -338,6 +341,10 @@ export default function App() {
             report: evt.report || "",
             confidence: typeof evt.confidence === "number" ? evt.confidence : null,
             degraded: Array.isArray(evt.degraded) ? evt.degraded : [],
+            degradedReasons: evt.degraded_reasons && typeof evt.degraded_reasons === "object"
+              ? evt.degraded_reasons : {},
+            providerDegraded: evt.provider_degraded === true,
+            providerKinds: Array.isArray(evt.provider_kinds) ? evt.provider_kinds : [],
             answerSupport: typeof evt.answer_support === "number" ? evt.answer_support : null,
             budget: evt.budget && typeof evt.budget === "object" ? evt.budget : m.run.budget,
             waveReport: Array.isArray(evt.wave_report) ? evt.wave_report : m.run.waveReport,
@@ -399,6 +406,7 @@ export default function App() {
       patchRun(tempId, {
         error: "", resumable: false, resuming: true, done: false,
         findings: [], verifiedCount: 0, degraded: [],
+        degradedReasons: {}, providerDegraded: false, providerKinds: [],
       });
       pushTrace({ text: `Resuming run ${resumeRun.runId.slice(0, 8)} from checkpoint`, kind: "active" });
     } else {
