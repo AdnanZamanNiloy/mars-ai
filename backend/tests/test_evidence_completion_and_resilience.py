@@ -28,6 +28,9 @@ REQUIRED_TITLES = [
     "Evidence Strength",
     "Limitations & Unknowns",
     "Counterarguments & Disputed Points",
+    "Open Questions & Missing Angles",
+    "Key Figures",
+    "Auditable Source Ledger",
 ]
 
 
@@ -111,7 +114,10 @@ def test_existing_aliases_satisfy_the_requirement():
         "## Key Findings\n\n- y [1].\n\n"
         "## Evidence & Confidence\n\nz [1].\n\n"
         "## Limitations\n\n- none measured.\n\n"
-        "## Standing objections\n\n- none.\n"
+        "## Standing objections\n\n- none.\n\n"
+        "## Open Questions & Missing Angles\n\n- none.\n\n"
+        "## Key Figures\n\n- 40% [1].\n\n"
+        "## Auditable Source Ledger\n\n- https://x (retrieved 2026-01-01).\n"
     )
     filled = ensure_required_sections(
         answer, ctx={}, usable_facts=[], contradictions=[],
@@ -120,8 +126,11 @@ def test_existing_aliases_satisfy_the_requirement():
     assert filled == answer
 
 
-def test_required_section_aliases_cover_all_five():
+def test_required_section_aliases_cover_all_eight():
+    # The uncertainty-first upgrade adds three mandatory sections (open
+    # questions, key figures, auditable ledger) to the original five.
     assert set(REQUIRED_SECTIONS.keys()) == set(REQUIRED_TITLES)
+    assert len(REQUIRED_SECTIONS) == 8
 
 
 # ---------------------------------------------------------------------------

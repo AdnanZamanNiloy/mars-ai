@@ -120,7 +120,31 @@ VALID_TOOLS = ["web_search", "fetch_content"]
 VALID_AXES = {
     "definition", "mechanism", "application", "criticism", "comparison",
     "evidence", "history", "outlook", "risk", "cost", "regulation",
+    # --- frontier six-axis research tracks (equal weight) ---
+    "capability", "infrastructure", "economics", "adoption", "safety",
+    "counter_evidence",
 }
+
+# The six mandatory frontier-research tracks for "current state and trends of
+# AI" style queries. Equal weight: every plan must carry at least one contract
+# per axis, regardless of how many the model volunteers. Counter-evidence is
+# forced on EVERY query, not only ambiguous ones.
+FRONTIER_AXES: Tuple[str, ...] = (
+    "capability",
+    "infrastructure",
+    "economics",
+    "adoption",
+    "regulation",
+    "safety",
+)
+# Always-on adversarial sub-track. This is the axis that keeps a report from
+# being a press release: it searches specifically for over-hype, plateau,
+# ROI-negative and capability-overstated arguments.
+COUNTER_EVIDENCE_AXIS = "counter_evidence"
+
+# Membership set for the front-half of the frontier taxonomy; the counter-
+# evidence track is added separately because it is always-on.
+FRONTIER_AXIS_SET = frozenset((*FRONTIER_AXES, COUNTER_EVIDENCE_AXIS))
 
 # Which search_type serves each axis when the planner has to synthesize a
 # missing angle itself.
@@ -136,7 +160,57 @@ AXIS_SEARCH_TYPE: Dict[str, str] = {
     "risk": "academic",
     "cost": "statistical",
     "regulation": "news",
+    # frontier tracks: capability/benchmarks are academic, infrastructure and
+    # economics are statistical, adoption news, safety academic, and the
+    # counter-evidence track is deliberately academic+news (skeptical essays,
+    # replication failures, plateau analyses live in both).
+    "capability": "academic",
+    "infrastructure": "statistical",
+    "economics": "statistical",
+    "adoption": "news",
+    "safety": "academic",
+    "counter_evidence": "academic",
 }
+
+# Literal search questions for each frontier track. Used both to synthesize a
+# missing contract and as the canonical wording the axis-coverage gate matches
+# against. Each is phrased to pull PRIMARY and non-Western material where it
+# exists, per the source-integrity requirement.
+FRONTIER_AXIS_QUESTIONS: Dict[str, str] = {
+    "capability": (
+        "frontier AI model capability trajectory and benchmark results "
+        "(reasoning, coding, multimodal, agentic, long-context, "
+        "inference-time scaling) primary technical reports"
+    ),
+    "infrastructure": (
+        "AI compute infrastructure and constraints: chips, datacenters, "
+        "energy and power demand, supply chain, manufacturing capacity "
+        "official reports and statistics"
+    ),
+    "economics": (
+        "AI economics and investment: capex, funding, valuations, ROI, "
+        "enterprise pilot success and failure rates, bubble indicators "
+        "financial filings and investor reports"
+    ),
+    "adoption": (
+        "AI adoption and diffusion: enterprise, consumer, education, "
+        "geographic and demographic unevenness official surveys and statistics"
+    ),
+    "regulation": (
+        "AI governance and regulation as reactive context: US, EU, China and "
+        "global rules, enforcement and compliance official regulatory texts"
+    ),
+    "safety": (
+        "AI safety, alignment and risk: progress versus capability, "
+        "incidents, evaluations and open debates primary research"
+    ),
+    "counter_evidence": (
+        "skeptical AI analysis: over-hype, capability plateau, scaling limits, "
+        "ROI-negative enterprise results, replication failures and strongest "
+        "counterarguments from independent researchers"
+    ),
+}
+
 
 # Domain -> specialist overlay in summarizer.SPECIALIST_PROMPT_ADDITIONS.
 DOMAIN_TO_SPECIALIST: Dict[str, str] = {
@@ -998,7 +1072,13 @@ def _contract(
     `dimension_to_axis`; a genuinely query-specific label is kept as a slug so
     it still gets its own report section (downstream keyed by axis string).
     """
-    axis = dimension_to_axis(axis)
+    # Frontier tracks are first-class axes: never fold them onto the legacy
+    # canonical alias ("safety" must not become "risk", "counter_evidence"
+    # must not become "criticism"). Those aliases exist for free-form model
+    # labels; the mandatory tracks are their own report sections and their
+    # coverage is checked by exact name.
+    requested = str(axis).strip()
+    axis = requested if requested in FRONTIER_AXIS_SET else dimension_to_axis(axis)
     search_type = (
         search_type if search_type in VALID_SEARCH_TYPES
         else axis_search_type(axis, default="encyclopedia")
@@ -1292,6 +1372,71 @@ def enforce_axis_coverage(
         logger.info("[Planner] injected required dimensions: %s", ", ".join(injected))
     return plan, injected
 
+
+def enforce_frontier_axes(
+    plan: List[Dict[str, Any]],
+    query: str,
+    *,
+    domain: str = "general",
+    minimum_sources: int = DEFAULT_MINIMUM_SOURCES,
+    today: str = "",
+    axes: Sequence[str] = FRONTIER_AXES,
+    include_counter_evidence: bool = True,
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Guarantee one contract per mandatory frontier axis, plus counter-evidence.
+
+    The six frontier tracks are equal-weight and never optional. This runs AFTER
+    the model's plan and `enforce_axis_coverage`, appending a literal, primary-
+    source-seeking contract for any missing track. It never reorders or removes
+    the model's contracts, so a plan that already covers all six is unchanged.
+
+    Counter-evidence is forced even when the model planned a `criticism` angle:
+    the two are not the same search. `criticism` asks for limitations of the
+    subject; the counter-evidence track asks for arguments that the whole
+    prevailing narrative is wrong (over-hype, plateau, negative ROI), which is
+    the one thing a hype-heavy corpus will never surface on its own.
+    """
+    present = {str(item.get("axis", "")) for item in plan}
+    # Also honour contracts the model labelled with a frontier synonym:
+    # dimension_to_axis maps "ai safety" -> risk and "counter argument" ->
+    # criticism, so check each contract's raw label AND its canonical mapping
+    # against the frontier axis. Exact frontier axis names always count.
+    normalized_present = set(present)
+    for item in plan:
+        raw = str(item.get("axis", ""))
+        normalized_present.add(dimension_to_axis(raw))
+        normalized_present.add(raw.replace(" ", "_"))
+    wanted = list(axes or ())
+    if include_counter_evidence:
+        wanted.append(COUNTER_EVIDENCE_AXIS)
+
+    injected: List[str] = []
+    next_id = max((int(item.get("id", 0)) for item in plan), default=0) + 1
+    for axis in wanted:
+        if axis in normalized_present:
+            continue
+        question = FRONTIER_AXIS_QUESTIONS.get(axis, "").strip()
+        if not question:
+            continue
+        plan.append(
+            _contract(
+                index=next_id,
+                question=question,
+                axis=axis,
+                search_type=axis_search_type(axis),
+                priority=1,
+                domain=domain,
+                coverage_goal=f"mandatory frontier track: {axis}",
+                minimum_sources=minimum_sources,
+            )
+        )
+        normalized_present.add(axis)
+        injected.append(axis)
+        next_id += 1
+
+    if injected:
+        logger.info("[Planner] injected frontier tracks: %s", ", ".join(injected))
+    return plan, injected
 
 
 def select_plan(
@@ -1704,14 +1849,27 @@ Return JSON only.
         required_questions=required_questions,
     )
 
-    # Axis enforcement may push the plan over budget; selection decides what
-    # survives, and required axes are protected inside it. `select_plan` maps
-    # each required label to its canonical axis the same way the contracts were
-    # mapped, so a dynamic dimension is matched against the contract its own
-    # enforcement step created.
+    # Select BEFORE frontier enforcement: the six mandatory tracks are not
+    # subject to the target budget, so truncating after injection would drop
+    # exactly the axes the frontier requirement exists to guarantee. The
+    # model's own plan is trimmed first, then the mandatory tracks are added on
+    # top — the plan may exceed `target` by at most the missing frontier count.
     final = select_plan(cleaned, target, required_axes)
+    # Mandatory six-axis coverage + the always-on counter-evidence track. Quick
+    # mode skips the mandatory tracks (latency-sensitive by design) but still
+    # gets counter-evidence, because a report with no opposing view is not a
+    # research report.
+    final, frontier_injected = enforce_frontier_axes(
+        final, query,
+        domain=dominant_domain,
+        minimum_sources=minimum_sources,
+        today=today,
+        include_counter_evidence=True,
+    )
+    injected = [*injected, *frontier_injected]
     final = sanitize_dependencies(final)
     final = _assign_intent_senses(final, intent)
+
 
     if not final:
         logger.warning("[Planner] All filtered out, fallback used")

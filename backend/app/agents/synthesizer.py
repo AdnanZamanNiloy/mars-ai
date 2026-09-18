@@ -1117,6 +1117,21 @@ REQUIRED_SECTIONS: Dict[str, tuple] = {
         "counterarguments", "disputed points", "standing objections",
         "conflicting evidence", "contradictions",
     ),
+    # Uncertainty-first additions. The open-questions section is generated from
+    # the critic's uncovered angles; the ledger makes every claim re-verifiable.
+    "Open Questions & Missing Angles": (
+        "open questions", "open questions & missing angles",
+        "open questions and missing angles", "missing angles",
+        "unanswered questions", "remaining gaps",
+    ),
+    "Key Figures": (
+        "key figures", "key quantitative figures", "key numbers",
+        "quantitative findings",
+    ),
+    "Auditable Source Ledger": (
+        "auditable source ledger", "source ledger", "source audit",
+        "evidence ledger", "full source list",
+    ),
 }
 
 
@@ -1282,6 +1297,70 @@ def _render_required_section(
                         lines.append(f"- {statement}")
         if len(lines) == 2:
             lines.append("- No credible counterarguments or source conflicts were detected.")
+        return "\n".join(lines)
+
+    if canonical == "Open Questions & Missing Angles":
+        lines = ["## Open Questions & Missing Angles", ""]
+        gaps = ctx.get("coverage_gaps")
+        listed = [str(g).strip() for g in gaps if str(g).strip()] if isinstance(gaps, (list, tuple)) else []
+        for gap in listed[:8]:
+            lines.append(f"- {gap}")
+        if not listed:
+            lines.append(
+                "- No planned angle was left unsourced for this evidence set; "
+                "residual uncertainty is captured in the confidence band above."
+            )
+        return "\n".join(lines)
+
+    if canonical == "Key Figures":
+        lines = ["## Key Figures", ""]
+        figures = [
+            f for f in (cited_facts or usable_facts)
+            if re.search(r"\d", str(f.get("claim", "") or ""))
+        ]
+        for fact in figures[:10]:
+            claim = re.sub(r"\s+", " ", str(fact.get("claim", "") or "")).strip()
+            if not claim:
+                continue
+            try:
+                index = int(fact.get("citation"))
+            except (TypeError, ValueError):
+                index = 0
+            marker = f" [{index}]" if index else ""
+            grade = str(fact.get("evidence_grade", "") or "")
+            grade_tag = f" (grade {grade})" if grade else ""
+            lines.append(f"- {claim}{marker}{grade_tag}")
+        if len(lines) == 2:
+            lines.append("- No quantitative figures were extracted from the evidence.")
+        return "\n".join(lines)
+
+    if canonical == "Auditable Source Ledger":
+        lines = ["## Auditable Source Ledger", ""]
+        seen: set = set()
+        for fact in usable_facts:
+            source = str(fact.get("source", "") or "").strip()
+            if not source or source in seen:
+                continue
+            seen.add(source)
+            fetched = str(fact.get("fetched_at", "") or "")
+            published = str(fact.get("published_at", "") or "")
+            pulled = str(fact.get("retrieved_at", "") or fetched or "unrecorded")
+            corroboration = int(fact.get("corroboration_count", 1) or 1)
+            flags = []
+            if corroboration <= 1:
+                flags.append("single-source / provisional")
+            if fact.get("temporal_projection"):
+                flags.append("projection (not observed)")
+            if fact.get("verified") is not True:
+                flags.append("unverified")
+            dates = []
+            if published:
+                dates.append(f"published {published}")
+            dates.append(f"retrieved {pulled}")
+            suffix = f" [{'; '.join(flags)}]" if flags else ""
+            lines.append(f"- {source} ({'; '.join(dates)}){suffix}")
+        if len(lines) == 2:
+            lines.append("- No sources were retained for this run.")
         return "\n".join(lines)
 
     # Executive Summary fallback (only when the writer omitted it entirely).

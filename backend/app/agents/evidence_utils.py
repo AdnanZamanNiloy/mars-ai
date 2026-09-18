@@ -1107,6 +1107,19 @@ def evidence_stats(facts: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     axes = {str(f.get("sub_question", "") or "").strip() for f in facts} - {""}
     corroborated = [f for f in facts if int(f.get("corroboration_count", 1) or 1) > 1]
     primary_docs = {u for u in documents if is_primary_source(u)}
+    single_source = [
+        f for f in facts if int(f.get("corroboration_count", 1) or 1) <= 1
+    ]
+    # Source-ledger composition: the share of the pool that each category
+    # contributes, by fact count. Regulation dominance is the failure this
+    # exists to catch (reports that read as legal summaries of an AI-trend
+    # query); non-Western under-representation is the other.
+    regulation_count = sum(
+        1 for f in facts if str(f.get("axis", "") or "") == "regulation"
+    )
+    non_western_count = sum(
+        1 for f in facts if _is_non_western_source(str(f.get("source", "") or ""))
+    )
 
     return {
         "total": len(facts),
@@ -1122,7 +1135,36 @@ def evidence_stats(facts: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
             sum(float(f.get("confidence", 0.0) or 0.0) for f in verified) / len(verified), 4
         ) if verified else 0.0,
         "corroborated": len(corroborated),
+        "single_source": len(single_source),
         "primary_documents": len(primary_docs),
         "primary_share": round(primary_source_share(urls), 4),
         "freshness": evidence_freshness(facts),
+        "regulation_share": round(regulation_count / len(facts), 4) if facts else 0.0,
+        "non_western_share": round(non_western_count / len(facts), 4) if facts else 0.0,
     }
+
+
+# Recognizable non-Western publishers/registries. This is a recall-oriented
+# seed list, not an exhaustive census: its job is to make the non-Western share
+# VISIBLE in the ledger, so a report built entirely from US/EU sources is not
+# presented as a global picture.
+_NON_WESTERN_MARKERS = (
+    "gov.cn", "xinhuanet", "chinadaily", "scmp.com", "caixin", "thepaper.cn",
+    "36kr", "alibabacloud", "baidu", "tencent", "huawei", "moonshot", "zhipu",
+    "deepseek", "qwen", "alibaba", "bytedance", "sensetime", "iflytek",
+    ".jp", ".kr", ".in", ".sg", ".cn", "riken", "naver", "kakao", "line.me",
+    "nii.ac.jp", "u-tokyo", "kaist", "nus.edu", "iitb", "iisc",
+    "gov.br", "scielo", "conicet", "african", "uneca", "gulfnews",
+)
+
+
+def _is_non_western_source(url: str) -> bool:
+    """True for a source published outside the US/EU anglosphere.
+
+    Deliberately heuristic and recall-oriented: the metric is surfaced in the
+    ledger so under-representation is visible, never used to silently drop
+    evidence.
+    """
+    low = str(url or "").lower()
+    return any(marker in low for marker in _NON_WESTERN_MARKERS)
+

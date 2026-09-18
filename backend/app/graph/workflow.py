@@ -1501,9 +1501,18 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             facts=state.get("facts", []),
             search_results=state.get("search_results", []),
         )
+        # Temporal integrity gate (hard validation against the system clock):
+        # future-dated ASSERTED events are dropped, future-dated projections are
+        # kept but labelled. Runs after verification so it sees published_at
+        # that verification surfaced.
+        from app.core.temporal import apply_temporal_gate
+
+        verified, temporal_stats = apply_temporal_gate(verified)
         stats = {
             "total": len(verified),
             "verified": sum(1 for f in verified if f.get("verified")),
+            "temporal_dropped": temporal_stats.get("dropped", 0),
+            "temporal_projections": temporal_stats.get("projections", 0),
         }
 
         # Raw content is discarded once verification completes — verification
@@ -1767,6 +1776,22 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             # limitations section is populated from real deficiencies.
             "coverage_gaps": _measured_coverage_gaps(state),
         }
+        # Source-ledger composition: regulation dominance and non-Western
+        # under-representation are surfaced on the report so a legal-summary
+        # drift is visible, and so the writer can flag a provisional band.
+        try:
+            from app.agents.evidence_utils import evidence_stats
+
+            ledger_stats = evidence_stats(all_facts)
+            base_context["source_ledger"] = ledger_stats
+            base_context["regulation_share"] = ledger_stats.get("regulation_share", 0.0)
+            base_context["primary_share"] = ledger_stats.get("primary_share", 0.0)
+            base_context["non_western_share"] = ledger_stats.get("non_western_share", 0.0)
+            base_context["temporal_dropped"] = int(
+                (state.get("verification_stats", {}) or {}).get("temporal_dropped", 0) or 0
+            )
+        except Exception as exc:  # ledger stats must never break synthesis
+            logger.warning("source_ledger_failed", error=str(exc), exc_info=exc)
         # Evidence grades (Step 4): the measured quality distribution drives
         # the writer's epistemic labeling. Computed once, failure-safe.
         evidence_distribution: Dict[str, int] = {}

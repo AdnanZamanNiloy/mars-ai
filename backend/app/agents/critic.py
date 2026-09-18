@@ -304,6 +304,44 @@ async def critic_agent(
     if gaps:
         gate_failures.append(f"uncovered_angles={len(gaps)}")
 
+    # --- frontier mandatory tracks (six axes + counter-evidence) -----------
+    # The plan always carries these contracts (planner.enforce_frontier_axes),
+    # but a contract with no facts is still an uncovered axis. Blocking: an AI
+    # trends report missing capability/economics/safety or the skeptical track
+    # is not decision-grade, so it can never pass on other strengths.
+    from app.agents.planner import (
+        COUNTER_EVIDENCE_AXIS,
+        FRONTIER_AXES,
+        dimension_to_axis,
+    )
+
+    covered_axes = {
+        str(f.get("sub_question", "") or "") for f in quality_facts
+    }
+    covered_canonical = {
+        dimension_to_axis(str(c.get("axis", ""))) for c in (plan or [])
+        if str(c.get("question", "")) in covered_axes
+    }
+    plan_axes = {
+        dimension_to_axis(str(c.get("axis", ""))) for c in (plan or [])
+        if str(c.get("axis", "")).strip()
+    }
+    for axis in FRONTIER_AXES:
+        if axis in plan_axes and axis not in covered_canonical:
+            gate_failures.append(f"frontier_axis_uncovered={axis}")
+    if COUNTER_EVIDENCE_AXIS in plan_axes and COUNTER_EVIDENCE_AXIS not in covered_canonical:
+        gate_failures.append("counter_evidence_missing")
+
+    # --- source-ledger composition ------------------------------------------
+    # Regulation must not dominate: a report that is >60% regulation-sourced is
+    # a legal summary, not an AI-trends brief. The brief's stated ceiling is
+    # 30%; 60% is the hard block (30% is surfaced as a warning by the report),
+    # because some genuinely regulatory queries legitimately exceed 30%.
+    if stats.get("regulation_share", 0.0) > 0.60:
+        gate_failures.append(
+            f"regulation_dominance={stats['regulation_share']:.2f}>0.60"
+        )
+
     # Measured confidence, when available, replaces the model's self-report.
     if confidence_report is not None:
         confidence = confidence_report.overall

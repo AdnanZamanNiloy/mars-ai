@@ -60,8 +60,9 @@ async def test_planner_uses_llm_for_non_trivial_query():
     result = await planner_agent(llm, QUERY)
     fallback = fallback_plan(QUERY)
     assert result != fallback, "Planner silently fell back to the fixed template (BUG-1 regression)"
-    assert result == [
-        {
+    # The model's own contract survives verbatim (mandatory frontier tracks are
+    # appended after it, so compare the first contract only).
+    assert result[0] == {
             "id": 1,
             "question": "Levelized cost per MWh of nuclear vs solar in Bangladesh 2024",
             "axis": "comparison",
@@ -87,33 +88,32 @@ async def test_planner_uses_llm_for_non_trivial_query():
             ),
             "wave": 0,
             "sense": "",
-        },
-        {
-            "id": 2,
-            "question": "Financing structure of the Rooppur nuclear plant in Bangladesh",
-            "axis": "mechanism",
-            "search_type": "news",
-            "priority": 2,
-            "depends_on": [],
-            "coverage_goal": "financing details",
-            "domain": "economics",
-            "minimum_sources": 2,
-            "stop_condition": "sufficient evidence for this axis",
-            "variants": [],
-            "agent": "financial_researcher",
-            "tools": ["web_search"],
-            "scope": [],
-            "output_format": "structured_findings",
-            "specialist": "financial",
-            "preferred_domains": ["reuters.com", "apnews.com", "ft.com"],
-            "primary_source_query": (
-                "Financing structure of the Rooppur nuclear plant in Bangladesh "
-                "site:reuters.com OR site:apnews.com"
-            ),
-            "wave": 0,
-            "sense": "",
-        },
-    ]
+        }
+    assert result[1] == {
+        "id": 2,
+        "question": "Financing structure of the Rooppur nuclear plant in Bangladesh",
+        "axis": "mechanism",
+        "search_type": "news",
+        "priority": 2,
+        "depends_on": [],
+        "coverage_goal": "financing details",
+        "domain": "economics",
+        "minimum_sources": 2,
+        "stop_condition": "sufficient evidence for this axis",
+        "variants": [],
+        "agent": "financial_researcher",
+        "tools": ["web_search"],
+        "scope": [],
+        "output_format": "structured_findings",
+        "specialist": "financial",
+        "preferred_domains": ["reuters.com", "apnews.com", "ft.com"],
+        "primary_source_query": (
+            "Financing structure of the Rooppur nuclear plant in Bangladesh "
+            "site:reuters.com OR site:apnews.com"
+        ),
+        "wave": 0,
+        "sense": "",
+    }
     assert llm.calls, "planner never called the LLM"
     assert all("PLANNER_SYSTEM_PROMPT" not in c for c in llm.calls)
 
@@ -151,7 +151,9 @@ async def test_planner_uses_llm_for_what_is_query():
     result = await planner_agent(llm, "What is retrieval augmented generation?")
     assert result != fallback_plan("What is retrieval augmented generation?")
     assert llm.calls, "planner bypassed the LLM on a definitional query"
-    assert len(result) == 2
+    # The model's two contracts survive; mandatory frontier tracks are appended.
+    assert len(result) >= 2
+    assert result[0]["question"] == LLM_PLAN["sub_questions"][0]["question"]
 
 
 def test_planner_prompt_has_methodology_teeth():
@@ -251,11 +253,21 @@ def _six_question_plan():
 
 
 async def test_planner_honours_target_count():
-    """The orchestrator's budget must reach the actual work: target_count caps
-    the plan instead of the old hardcoded five."""
+    """The orchestrator's budget caps the MODEL's plan. The mandatory frontier
+    tracks are then appended on top (they are never subject to the target)."""
+    from app.agents.planner import COUNTER_EVIDENCE_AXIS, FRONTIER_AXES
+
     llm = FakeLLM(_six_question_plan())
     result = await planner_agent(llm, QUERY, target_count=3)
-    assert len(result) <= 3
+    model_contracts = [
+        c for c in result
+        if str(c.get("axis", "")) not in set(FRONTIER_AXES) | {COUNTER_EVIDENCE_AXIS}
+    ]
+    assert len(model_contracts) <= 3
+    # Every mandatory track is present regardless of the target.
+    axes = {str(c.get("axis", "")) for c in result}
+    assert set(FRONTIER_AXES) <= axes
+    assert COUNTER_EVIDENCE_AXIS in axes
 
 
 async def test_planner_enforces_required_axes():
