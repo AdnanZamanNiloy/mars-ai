@@ -1,7 +1,7 @@
 {
   "suite": "mars-offline-benchmarks",
   "version": "2.0",
-  "ran_at": "2026-09-18T12:14:38.252149+00:00",
+  "ran_at": "2026-09-18T12:46:42.628922+00:00",
   "python": "3.12.13",
   "platform": "Linux-7.0.0-31-generic-x86_64-with-glibc2.43",
   "quick": false,
@@ -16,8 +16,8 @@
       "recall": 1.0,
       "f1": 1.0,
       "accuracy": 1.0,
-      "latency_ms": 2.98,
-      "per_case_us": 186.3,
+      "latency_ms": 3.12,
+      "per_case_us": 194.8,
       "misses": []
     },
     "hallucination": {
@@ -50,7 +50,7 @@
         "polarity": 3,
         "temporal": 1
       },
-      "latency_ms": 5.88,
+      "latency_ms": 5.48,
       "errors": []
     },
     "confidence_calibration": {
@@ -146,7 +146,7 @@
     "semantic_engine": {
       "pairs": 20,
       "spearman_vs_labels": 0.7094,
-      "pair_latency_us": 162.9,
+      "pair_latency_us": 180.5,
       "dedup": {
         "n": 10,
         "precision": 1.0,
@@ -155,8 +155,8 @@
         "threshold": 0.86
       },
       "matrix_ms": {
-        "100": 399.39,
-        "300": 459.31
+        "100": 411.53,
+        "300": 474.21
       },
       "score_label_sample": [
         {
@@ -235,21 +235,25 @@
       ]
     },
     "e2e_pipeline": {
-      "wall_sec": 8.06,
+      "wall_sec": 7.632,
       "graph_snapshots": 19,
       "iterations": 3,
-      "planned_sub_questions": 4,
+      "planned_sub_questions": 12,
       "planned_axes": [
+        "adoption",
+        "capability",
         "criticism",
         "definition",
-        "evidence"
+        "economics",
+        "evidence",
+        "infrastructure"
       ],
       "waves_executed": 2,
       "wave_detail": [
         {
           "wave": 0,
-          "contracts": 3,
-          "facts_extracted": 8,
+          "contracts": 8,
+          "facts_extracted": 19,
           "with_prerequisites": false
         },
         {
@@ -270,7 +274,7 @@
         "bad": 0,
         "unchecked": 0
       },
-      "confidence": 0.802,
+      "confidence": 0.792,
       "confidence_signals": {
         "source_quality": 0.75,
         "source_diversity": 1.0,
@@ -279,22 +283,22 @@
         "cross_source_agreement": 1.0,
         "freshness": 0.457,
         "critic_survival": 0.0,
-        "axis_coverage": 0.333,
+        "axis_coverage": 0.143,
         "claim_evidence_quality": 1.0
       },
-      "report_chars": 2980,
-      "llm_calls": 14,
+      "report_chars": 3127,
+      "llm_calls": 20,
       "llm_call_stages": {
+        "summarizer": 10,
         "critic": 6,
-        "summarizer": 4,
         "planner": 4
       },
       "budget": {
-        "llm_calls": 14,
-        "spent_tokens": 35950,
-        "spent_usd": 0.01662,
+        "llm_calls": 20,
+        "spent_tokens": 52207,
+        "spent_usd": 0.024083,
         "search_calls": 0,
-        "utilization": 0.2333
+        "utilization": 0.3333
       },
       "stopped_sufficient": false
     },
@@ -311,24 +315,24 @@
       "provider_calls_first_pass": 8,
       "provider_calls_second_pass": 8,
       "cache_hit_ratio_first_pass": 0.6667,
-      "uncached_pass_ms": 42.64,
+      "uncached_pass_ms": 44.32,
       "cached_pass_ms": 0.21,
-      "speedup": 203.0,
+      "speedup": 215.47,
       "tokens_saved_per_repeat": 70,
       "note": "second pass serves 24/24 from cache; provider_calls unchanged"
     },
     "latency": {
-      "matrix_60_facts_ms": 245.22,
-      "matrix_200_facts_ms": 581.48,
-      "cross_40x200_ms": 10.74,
-      "contradictions_60_facts_ms": 283.07,
-      "dedupe_60_facts_ms": 271.75,
-      "answer_support_40sent_ms": 0.27
+      "matrix_60_facts_ms": 226.84,
+      "matrix_200_facts_ms": 596.18,
+      "cross_40x200_ms": 11.91,
+      "contradictions_60_facts_ms": 275.51,
+      "dedupe_60_facts_ms": 258.08,
+      "answer_support_40sent_ms": 0.33
     },
     "memory": {
-      "rss_before_kib": 126440,
-      "rss_after_kib": 147620,
-      "delta_kib": 21180,
+      "rss_before_kib": 126968,
+      "rss_after_kib": 147984,
+      "delta_kib": 21016,
       "note": "ru_maxrss is process-lifetime max; delta bounds engine cost"
     }
   }
