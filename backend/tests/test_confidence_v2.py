@@ -352,7 +352,8 @@ def test_cross_source_agreement_prefilter_preserves_corroboration():
 
 def test_cross_source_agreement_scored_per_angle_not_per_claim():
     """A specific claim restated nowhere should not sink an angle that IS
-    independently corroborated. Angle-level scoring measures research coverage."""
+    independently corroborated. Angle-level scoring measures research coverage,
+    and any one corroborated claim establishes the angle is corroborated."""
     facts = [
         # Angle A: three claims, one of which is independently corroborated.
         {"claim": "Solar capacity grew 40%", "source": "https://iea.org/a",
@@ -366,8 +367,23 @@ def test_cross_source_agreement_scored_per_angle_not_per_claim():
          "corroboration_count": 2, "sub_question": "how much did wind grow"},
     ]
     result = _base(facts=facts, critique={"is_sufficient": False})
-    # Angle A = 1/3, Angle B = 1/1 -> mean 0.667, not the per-claim 1/4.
-    assert result["signals"]["cross_source_agreement"] == round((1 / 3 + 1) / 2, 3)
+    # Both angles have at least one corroborated claim -> 1.0, not per-claim 1/4.
+    assert result["signals"]["cross_source_agreement"] == 1.0
+
+
+def test_cross_source_agreement_angle_without_any_corroboration_is_zero():
+    """An angle whose every claim is single-publisher is not corroborated."""
+    facts = [
+        {"claim": "Solar capacity grew 40%", "source": "https://iea.org/a",
+         "corroboration_count": 2, "sub_question": "how much did solar grow"},
+        {"claim": "Wind added 50 GW", "source": "https://irena.org/b",
+         "corroboration_count": 1, "sub_question": "how much did wind grow"},
+        {"claim": "Wind costs fell 10%", "source": "https://irena.org/c",
+         "corroboration_count": 1, "sub_question": "how much did wind grow"},
+    ]
+    result = _base(facts=facts, critique={"is_sufficient": False})
+    # Solar angle corroborated, wind angle not -> 0.5.
+    assert result["signals"]["cross_source_agreement"] == 0.5
 
 
 def test_cross_source_agreement_uncorroborated_angles_stay_low():

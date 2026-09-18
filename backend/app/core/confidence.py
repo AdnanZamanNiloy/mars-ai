@@ -240,13 +240,17 @@ def _cross_source_agreement(facts: List[Dict[str, Any]]) -> float:
             by_angle.setdefault(angle, []).append(f)
 
         def _angle_score(group: List[Dict[str, Any]]) -> float:
-            # The angle's best-supported claim: if any fact for this angle has
-            # 2+ independent publishers, the angle is independently corroborated.
-            corroborated = sum(
-                1 for f in group
-                if _safe_int(f.get("corroboration_count", 1)) >= 2
-            )
-            return corroborated / len(group)
+            # An angle is independently corroborated when ANY of its claims is
+            # backed by 2+ independent publishers. Averaging 0/1 within the
+            # angle re-introduced the per-claim precision penalty Fix B
+            # removed: in a well-researched angle, most precise claims (a BLEU
+            # score, a component count) appear in one source while the angle's
+            # core assertion appears in several, so the mean stayed near 1/N.
+            # A single corroborated fact is sufficient evidence that the angle
+            # is not resting on one publisher.
+            return 1.0 if any(
+                _safe_int(f.get("corroboration_count", 1)) >= 2 for f in group
+            ) else 0.0
 
         if len(by_angle) > 1 or "" not in by_angle:
             return sum(_angle_score(g) for g in by_angle.values()) / len(by_angle)
