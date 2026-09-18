@@ -23,10 +23,10 @@ def test_weak_evidence_scores_low():
     result = compute_confidence(WEAK_FACTS, {"is_sufficient": False}, 3, 3)
     assert result["overall"] < 0.4
     assert result["signals"]["citation_coverage"] == 0.0
-    # Survival is evidence-grounded: one unverified fact has no coverage and no
-    # corroboration, so it survives nothing (the old constant 0.4 was
-    # uncorrelated with evidence quality).
-    assert result["signals"]["critic_survival"] == 0.0
+    # Survival is evidence-grounded: a bare fail with no named gaps is a hedge,
+    # not a demonstrated weakness (the old constant 0.4 was uncorrelated with
+    # evidence quality).
+    assert result["signals"]["critic_survival"] == 0.6
 
 
 def test_single_fact_or_single_domain_is_not_diverse():

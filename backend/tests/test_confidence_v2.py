@@ -194,23 +194,28 @@ def test_cross_source_agreement_falls_back_without_measured_count():
 
 
 def test_critic_survival_is_evidence_grounded_not_constant():
-    """A failed critic on a strong pool survives more than on an empty pool;
-    the old three-valued constant made both 0.4 at the ceiling."""
-    strong = _base(critique={"is_sufficient": False}, iteration=3, max_iterations=3)
-    weak = _base(
-        facts=[{"claim": "x", "source": "https://b.com/a", "verified": False,
-                "verification_score": 0.0}],
-        critique={"is_sufficient": False}, iteration=3, max_iterations=3,
-    )
-    assert strong["signals"]["critic_survival"] > weak["signals"]["critic_survival"]
+    """A fail with many named gaps survives less than a bare hedge with none.
+    The old constant made every fail identical at the ceiling."""
+    hedge = _base(critique={"is_sufficient": False})  # no gaps named
+    criticized = _base(critique={
+        "is_sufficient": False,
+        "gaps": ["uncovered angle: cost", "uncovered angle: regulation",
+                 "uncovered angle: critics"],
+        "gate_failures": ["domains=1<2", "verified=0"],
+    })
+    assert criticized["signals"]["critic_survival"] < hedge["signals"]["critic_survival"]
 
 
-def test_critic_survival_pass_is_one_and_fail_is_capped():
+def test_critic_survival_pass_is_one_and_fail_capped():
     assert _base(critique={"is_sufficient": True})["signals"]["critic_survival"] == 1.0
-    forced = _base(critique={"is_sufficient": False}, iteration=3, max_iterations=3)
-    assert forced["signals"]["critic_survival"] <= 0.4
-    early = _base(critique={"is_sufficient": False}, iteration=1, max_iterations=3)
-    assert early["signals"]["critic_survival"] <= 0.6
+    forced = _base(critique={
+        "is_sufficient": False,
+        "gaps": ["g1", "g2", "g3"],
+        "gate_failures": ["g4", "g5"],
+    }, iteration=3, max_iterations=3)
+    assert forced["signals"]["critic_survival"] <= 0.6
+    # A FAIL can never outrank a PASS.
+    assert forced["signals"]["critic_survival"] < 1.0
 
 
 def test_freshness_uses_fact_dates_and_shared_curve():
@@ -343,3 +348,34 @@ def test_cross_source_agreement_prefilter_preserves_corroboration():
                  "The chef prepared pasta with tomato sauce and basil tonight")
     assert _similarity(*unrelated) == 0.0
     assert old_similarity(*unrelated) < 0.55, "prefilter assumes this pair is out of band"
+
+
+def test_cross_source_agreement_scored_per_angle_not_per_claim():
+    """A specific claim restated nowhere should not sink an angle that IS
+    independently corroborated. Angle-level scoring measures research coverage."""
+    facts = [
+        # Angle A: three claims, one of which is independently corroborated.
+        {"claim": "Solar capacity grew 40%", "source": "https://iea.org/a",
+         "corroboration_count": 2, "sub_question": "how much did solar grow"},
+        {"claim": "Solar added 300 GW", "source": "https://iea.org/b",
+         "corroboration_count": 1, "sub_question": "how much did solar grow"},
+        {"claim": "Solar costs fell 20%", "source": "https://iea.org/c",
+         "corroboration_count": 1, "sub_question": "how much did solar grow"},
+        # Angle B: fully corroborated.
+        {"claim": "Wind capacity rose", "source": "https://irena.org/a",
+         "corroboration_count": 2, "sub_question": "how much did wind grow"},
+    ]
+    result = _base(facts=facts, critique={"is_sufficient": False})
+    # Angle A = 1/3, Angle B = 1/1 -> mean 0.667, not the per-claim 1/4.
+    assert result["signals"]["cross_source_agreement"] == round((1 / 3 + 1) / 2, 3)
+
+
+def test_cross_source_agreement_uncorroborated_angles_stay_low():
+    facts = [
+        {"claim": "a", "source": "https://x.com/1", "corroboration_count": 1,
+         "sub_question": "angle one"},
+        {"claim": "b", "source": "https://x.com/2", "corroboration_count": 1,
+         "sub_question": "angle two"},
+    ]
+    result = _base(facts=facts, critique={"is_sufficient": False})
+    assert result["signals"]["cross_source_agreement"] == 0.0

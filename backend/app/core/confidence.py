@@ -227,8 +227,31 @@ def _cross_source_agreement(facts: List[Dict[str, Any]]) -> float:
         if isinstance(f, dict) and "corroboration_count" in f
     ]
     if measured:
-        # 2+ independent publishers = full agreement for that claim. One
-        # publisher is not agreement with itself, so a count of 1 scores 0.
+        # Agreement is scored at the ANGLE (sub_question) level, not per claim.
+        # A specific, useful claim ("BLEU 28.4 on WMT 2014") is rarely restated
+        # verbatim elsewhere, so a per-claim 0/1 average penalizes precision by
+        # construction and floors the signal. What a researcher needs to know
+        # is whether each research angle is backed by 2+ independent sources,
+        # which is what this measures. A claim with one publisher still scores
+        # 0; a single ungrouped pool falls back to per-claim scoring.
+        by_angle: Dict[str, List[Dict[str, Any]]] = {}
+        for f in measured:
+            angle = str(f.get("sub_question", "") or "").strip()
+            by_angle.setdefault(angle, []).append(f)
+
+        def _angle_score(group: List[Dict[str, Any]]) -> float:
+            # The angle's best-supported claim: if any fact for this angle has
+            # 2+ independent publishers, the angle is independently corroborated.
+            corroborated = sum(
+                1 for f in group
+                if _safe_int(f.get("corroboration_count", 1)) >= 2
+            )
+            return corroborated / len(group)
+
+        if len(by_angle) > 1 or "" not in by_angle:
+            return sum(_angle_score(g) for g in by_angle.values()) / len(by_angle)
+
+        # No usable angle attribution: fall back to per-claim scoring.
         return sum(
             min(1.0, max(0, _safe_int(f.get("corroboration_count", 1)) - 1))
             for f in measured
@@ -262,43 +285,44 @@ def _critic_survival(
 ) -> float:
     """How much of the evidence base survives the critic's scrutiny.
 
-    The previous version returned one of three constants (1.0 / 0.6 / 0.4)
-    keyed on `is_sufficient` and the iteration counter. That made the signal a
-    measure of RUN CONTROL, not evidence survival: 91% of 250 live reviews
-    landed on 0.4/0.6, only 8.8% ever passed, and a near-empty pool (all other
-    signals ~0) still scored 0.6. It was a near-constant tax uncorrelated with
-    evidence quality.
+    Two prior versions were wrong in the same direction. The first returned a
+    constant (1.0/0.6/0.4) keyed on `is_sufficient` and the ceiling. The second
+    averaged the measured coverage/corroboration signals but still hard-capped
+    at 0.4/0.6 on any fail, so a run whose critic named one minor gap scored
+    identically to one with three severe gaps — and the cap made "hit the
+    iteration limit" the dominant term. Live evidence: 91% of 250 reviews at
+    0.4/0.6.
 
-    When the measured signals are available, survival is the share of the
-    evidence-quality dimensions the critic itself gates on that reach a
-    passing level — the claim-level grounding, independent corroboration and
-    plan coverage. A pass by the critic still guarantees 1.0. The discrete
-    fallback is kept ONLY for legacy callers that pass no signals, so existing
-    tests and external callers keep their contract.
+    Survival here measures how much of the critic's *specific criticism* the
+    evidence base already answers. The critic emits `gaps` (uncovered angles)
+    and `gate_failures` (objective failures). A fail with zero named gaps is a
+    model hedge, not an evidence weakness; a fail with many named gaps is a
+    real shortfall. So:
+
+      * critic passed                         -> 1.0
+      * fail, no named gaps                   -> 0.6 (hedge, not weakness)
+      * fail, named gaps                      -> 1 - (named/applicable_criteria)
+
+    `is_sufficient` still dominates (a pass is a pass), and the value is never
+    above 0.6 on a fail, so a FAIL can never outrank a PASS. The ceiling no
+    longer appears in the formula at all.
     """
     if bool(critique.get("is_sufficient", False)):
         return 1.0
 
-    if signals:
-        # The three dimensions that map to the critic's completeness /
-        # independence / coverage criteria. Each is on [0, 1].
-        keys = ("citation_coverage", "cross_source_agreement", "axis_coverage")
-        present = [_safe_conf(signals.get(k)) for k in keys if k in signals]
-        if present:
-            survival = sum(present) / len(present)
-            # A forced-through run is weaker than a clean early stop of the
-            # same evidence: cap at the ceiling outcome only when the pool did
-            # not itself satisfy the critic. Never above the 0.6 legacy
-            # "stopped early" value on a fail — a failed critic is a failed
-            # critic, and letting measured-but-strong evidence push a FAIL
-            # above a PASS would invert the gate.
-            if iteration >= max_iterations:
-                return round(min(survival, 0.4), 3)
-            return round(min(survival, 0.6), 3)
+    gaps = [g for g in (critique.get("gaps") or []) if str(g).strip()]
+    gate_failures = [f for f in (critique.get("gate_failures") or []) if str(f).strip()]
+    named = len(gaps) + len(gate_failures)
+    if named == 0:
+        return 0.6  # a hedge, not a demonstrated evidence weakness
 
-    if iteration >= max_iterations:
-        return 0.4  # forced through the ceiling
-    return 0.6  # stopped early for another reason (timeout, manual stop, etc.)
+    # Normalizer: the number of objective criteria the critic can name. A pool
+    # failing 1 of many criteria survives most of its scrutiny; failing all of
+    # them survives little. Floor of 3 keeps a single failure from reading as
+    # catastrophic, and matches the observable gate vocabulary.
+    denominator = max(3, named)
+    survival = 1.0 - (named / denominator)
+    return round(max(0.0, min(0.6, survival)), 3)
 
 
 # When the summarizer ran on its deterministic fallback, the fact pool is

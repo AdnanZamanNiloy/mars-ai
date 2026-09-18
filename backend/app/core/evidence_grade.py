@@ -164,12 +164,24 @@ def independent_corroboration(
     """
     domains: List[str] = []
     seen: Set[str] = set()
+    seen_domains: Set[str] = set()
 
     def _add(url: str) -> None:
-        d = registrable_domain(url)
-        if d and d not in seen:
-            seen.add(d)
-            domains.append(d)
+        key = _independence_key(url)
+        domain = registrable_domain(url)
+        if not key:
+            return
+        # Both axes: one publisher, and one document identity. Same domain is
+        # never independent even when slugs differ; a mirror across hosts is
+        # never independent even when domains differ.
+        if domain and domain in seen_domains:
+            return
+        if key in seen:
+            return
+        seen.add(key)
+        if domain:
+            seen_domains.add(domain)
+        domains.append(domain or key)
 
     if primary_source:
         _add(primary_source)
@@ -178,36 +190,108 @@ def independent_corroboration(
     return domains, len(domains)
 
 
-def is_new_publisher(url: str, existing_urls: Iterable[str]) -> bool:
-    """True when `url`'s registrable domain is absent from `existing_urls`.
+_ARXIV_ID_RE = re.compile(r"(?:arxiv[:/]|abs/|pdf/)(\d{4}\.\d{4,5})(v\d+)?", re.IGNORECASE)
+_DOI_RE = re.compile(r"(?:doi\.org/|doi[:/])(10\.\d{4,9}/[^\s?#]+)", re.IGNORECASE)
 
-    The procurement side of independence: before treating a search result as
-    corroboration, callers ask whether it comes from a publisher the claim
-    already has. It reuses `registrable_domain`, so it agrees with
-    `independent_corroboration` by construction. Empty/unparseable URLs are
-    never new publishers (nothing to corroborate with).
+
+def document_fingerprint(url: str) -> str:
+    """A stable identity for the DOCUMENT behind a URL, not the host.
+
+    Independence is about distinct WORKS, not distinct domains: the same paper
+    hosted on arxiv.org and on papers.neurips.cc (and mirrored at doi.org) is
+    ONE source, and counting its mirrors as corroboration is a false
+    independence signal. This returns a work identity from, in order:
+
+      1. DOI (10.xxxx/...)              — the canonical work id
+      2. arXiv id (2401.12345)          — primary preprint id
+      3. a normalized title/tail slug   — best-effort for non-DOI pages
+
+    Returns "" when no identity can be extracted (callers then fall back to
+    domain-only independence, preserving prior behavior).
     """
-    domain = registrable_domain(url or "")
-    if not domain:
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+    # arXiv first: a DOI-form arXiv id ("10.48550/arXiv.1706.03762") and the
+    # native "arxiv.org/abs/1706.03762" both carry the same work id, so they
+    # must fingerprint identically.
+    arxiv = _ARXIV_ID_RE.search(raw)
+    if arxiv:
+        return "arxiv:" + arxiv.group(1).lower()
+    doi = _DOI_RE.search(raw)
+    if doi:
+        doi_val = doi.group(1).lower().rstrip(".")
+        embedded_arxiv = re.search(r"arxiv\.(\d{4}\.\d{4,5})", doi_val)
+        if embedded_arxiv:
+            return "arxiv:" + embedded_arxiv.group(1)
+        return "doi:" + doi_val
+    # Slug identity: the last path segment, stripped of extension and query.
+    # Catches proceedings/lecture mirrors like ".../7181-attention-is-all-you-need.pdf".
+    path = re.sub(r"[?#].*$", "", raw).rstrip("/")
+    segment = path.rsplit("/", 1)[-1].lower()
+    segment = re.sub(r"\.(pdf|html?|md|txt|php|aspx)$", "", segment)
+    segment = re.sub(r"[^a-z0-9]+", "-", segment).strip("-")
+    if len(segment) >= 8:
+        return "slug:" + segment
+    return ""
+
+
+def _independence_key(url: str) -> str:
+    """The unit of independence: the document if identifiable, else domain.
+
+    A documented work identity always wins over the host, so a mirror of the
+    same paper cannot corroborate itself. When no identity is extractable the
+    registrable domain is used, exactly as before.
+    """
+    fp = document_fingerprint(url)
+    if fp:
+        return fp
+    return registrable_domain(url or "")
+
+
+def _shares_domain(a: str, b: str) -> bool:
+    da, db = registrable_domain(a or ""), registrable_domain(b or "")
+    return bool(da) and da == db
+
+
+def is_new_publisher(url: str, existing_urls: Iterable[str]) -> bool:
+    """True when `url` adds a source the claim does not already have.
+
+    Independence requires BOTH axes to differ: a different registrable domain
+    AND a different document identity. Two URLs on one domain are never
+    independent, and mirrors of one document across hosts are never
+    independent. Empty/unparseable URLs are never new publishers.
+    """
+    key = _independence_key(url)
+    if not key:
         return False
     for existing in existing_urls or ():
-        if registrable_domain(str(existing or "")) == domain:
+        existing = str(existing or "")
+        if not existing:
+            continue
+        if _shares_domain(url, existing) or _independence_key(existing) == key:
             return False
     return True
 
 
 def distinct_publisher_count(sources: Iterable[str]) -> int:
-    """Number of DISTINCT registrable domains among source URLs.
+    """Number of DISTINCT independent sources among source URLs.
 
     The one true corroboration count. Any module that reports a numeric
     corroboration figure (dedupe, synthesis badges) must derive it here, not
-    from `len(urls)`: two URLs from one publisher are one source.
+    from `len(urls)`: two URLs from one publisher are one source, and mirrors
+    of one document are one source regardless of host.
+
+    Deduplicates on the document identity when one exists (so arXiv + DOI of
+    one paper count once) and on the registrable domain otherwise (so two
+    pages of one publisher count once). Distinct works on a shared host (two
+    different arXiv papers) are genuinely distinct sources and count twice.
     """
     seen: Set[str] = set()
     for url in sources or ():
-        d = registrable_domain(str(url or ""))
-        if d:
-            seen.add(d)
+        key = _independence_key(str(url or ""))
+        if key:
+            seen.add(key)
     return len(seen)
 
 

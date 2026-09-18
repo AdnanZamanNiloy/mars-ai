@@ -156,3 +156,69 @@ def test_coverage_gaps_flags_contradiction():
     )
     gaps = coverage_gaps_from_records([r])
     assert gaps and any("contradicted" in g.lower() for g in gaps)
+
+
+def test_document_fingerprint_links_arxiv_and_doi_mirrors():
+    from app.core.evidence_grade import document_fingerprint
+
+    native = document_fingerprint("https://arxiv.org/abs/1706.03762")
+    pdf = document_fingerprint("https://arxiv.org/pdf/1706.03762v5")
+    doi = document_fingerprint("https://doi.org/10.48550/arXiv.1706.03762")
+    assert native == "arxiv:1706.03762"
+    assert pdf == native
+    assert doi == native
+
+
+def test_distinct_publisher_count_does_not_count_mirrors_of_one_work():
+    from app.core.evidence_grade import distinct_publisher_count
+
+    mirrors = [
+        "https://arxiv.org/abs/1706.03762",
+        "https://doi.org/10.48550/arXiv.1706.03762",
+    ]
+    assert distinct_publisher_count(mirrors) == 1
+
+
+def test_distinct_publisher_count_counts_distinct_works():
+    from app.core.evidence_grade import distinct_publisher_count
+
+    different = [
+        "https://arxiv.org/abs/1706.03762",
+        "https://arxiv.org/abs/2401.12345",
+    ]
+    assert distinct_publisher_count(different) == 2
+
+
+def test_is_new_publisher_rejects_mirror_across_hosts():
+    from app.core.evidence_grade import is_new_publisher
+
+    existing = ["https://arxiv.org/abs/1706.03762"]
+    assert is_new_publisher("https://doi.org/10.48550/arXiv.1706.03762", existing) is False
+
+
+def test_is_new_publisher_still_rejects_same_domain():
+    from app.core.evidence_grade import is_new_publisher
+
+    assert is_new_publisher(
+        "https://blog.example.com/deep", ["https://www.example.com/"]
+    ) is False
+
+
+def test_independent_corroboration_merges_mirrors():
+    _, count = independent_corroboration(
+        ["https://doi.org/10.48550/arXiv.1706.03762"],
+        primary_source="https://arxiv.org/abs/1706.03762",
+    )
+    assert count == 1
+
+
+def test_apply_corroboration_rejects_mirror_of_same_work():
+    from app.core.evidence_grade import apply_corroboration
+
+    fact = {
+        "claim": "The Transformer was introduced in 2017.",
+        "source": "https://arxiv.org/abs/1706.03762",
+        "corroboration_count": 1,
+    }
+    assert apply_corroboration(fact, "https://doi.org/10.48550/arXiv.1706.03762") is False
+    assert fact["corroboration_count"] == 1
