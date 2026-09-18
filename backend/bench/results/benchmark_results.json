@@ -1,7 +1,7 @@
 {
   "suite": "mars-offline-benchmarks",
   "version": "2.0",
-  "ran_at": "2026-09-18T13:10:01.418036+00:00",
+  "ran_at": "2026-09-18T14:04:47.263591+00:00",
   "python": "3.12.13",
   "platform": "Linux-7.0.0-31-generic-x86_64-with-glibc2.43",
   "quick": false,
@@ -16,8 +16,8 @@
       "recall": 1.0,
       "f1": 1.0,
       "accuracy": 1.0,
-      "latency_ms": 2.89,
-      "per_case_us": 180.7,
+      "latency_ms": 2.53,
+      "per_case_us": 158.2,
       "misses": []
     },
     "hallucination": {
@@ -50,7 +50,7 @@
         "polarity": 3,
         "temporal": 1
       },
-      "latency_ms": 5.98,
+      "latency_ms": 7.78,
       "errors": []
     },
     "confidence_calibration": {
@@ -146,7 +146,7 @@
     "semantic_engine": {
       "pairs": 20,
       "spearman_vs_labels": 0.7094,
-      "pair_latency_us": 154.6,
+      "pair_latency_us": 159.2,
       "dedup": {
         "n": 10,
         "precision": 1.0,
@@ -155,8 +155,8 @@
         "threshold": 0.86
       },
       "matrix_ms": {
-        "100": 416.32,
-        "300": 479.83
+        "100": 388.11,
+        "300": 455.21
       },
       "score_label_sample": [
         {
@@ -235,7 +235,7 @@
       ]
     },
     "e2e_pipeline": {
-      "wall_sec": 6.042,
+      "wall_sec": 9.187,
       "graph_snapshots": 19,
       "iterations": 3,
       "planned_sub_questions": 12,
@@ -286,17 +286,17 @@
         "axis_coverage": 0.143,
         "claim_evidence_quality": 1.0
       },
-      "report_chars": 3127,
+      "report_chars": 3275,
       "llm_calls": 20,
       "llm_call_stages": {
         "summarizer": 10,
-        "planner": 4,
-        "critic": 6
+        "critic": 6,
+        "planner": 4
       },
       "budget": {
         "llm_calls": 20,
-        "spent_tokens": 52207,
-        "spent_usd": 0.024083,
+        "spent_tokens": 52286,
+        "spent_usd": 0.024114,
         "search_calls": 0,
         "utilization": 0.3333
       },
@@ -315,24 +315,24 @@
       "provider_calls_first_pass": 8,
       "provider_calls_second_pass": 8,
       "cache_hit_ratio_first_pass": 0.6667,
-      "uncached_pass_ms": 45.08,
-      "cached_pass_ms": 0.22,
-      "speedup": 204.13,
+      "uncached_pass_ms": 42.39,
+      "cached_pass_ms": 0.21,
+      "speedup": 206.71,
       "tokens_saved_per_repeat": 70,
       "note": "second pass serves 24/24 from cache; provider_calls unchanged"
     },
     "latency": {
-      "matrix_60_facts_ms": 235.9,
-      "matrix_200_facts_ms": 629.06,
-      "cross_40x200_ms": 10.62,
-      "contradictions_60_facts_ms": 294.83,
-      "dedupe_60_facts_ms": 294.86,
-      "answer_support_40sent_ms": 0.3
+      "matrix_60_facts_ms": 223.87,
+      "matrix_200_facts_ms": 565.47,
+      "cross_40x200_ms": 10.42,
+      "contradictions_60_facts_ms": 252.27,
+      "dedupe_60_facts_ms": 240.44,
+      "answer_support_40sent_ms": 0.25
     },
     "memory": {
-      "rss_before_kib": 126464,
-      "rss_after_kib": 147260,
-      "delta_kib": 20796,
+      "rss_before_kib": 126720,
+      "rss_after_kib": 147780,
+      "delta_kib": 21060,
       "note": "ru_maxrss is process-lifetime max; delta bounds engine cost"
     }
   }
