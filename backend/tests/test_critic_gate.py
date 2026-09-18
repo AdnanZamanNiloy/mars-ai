@@ -35,10 +35,25 @@ def _fact(i: int, host: str, verified: bool, confidence: float) -> dict:
         "verified": verified,
     }
 
+# Primary-source facts satisfying the three mandatory frontier requirements
+# (capability, energy/compute, ROI). Appended by fixtures that need to reach a
+# different gate without tripping the required-primary-source block.
+_PRIMARY_REQUIREMENT_FACTS = [
+    {"claim": "Frontier model reasoning benchmark scores improved in 2025",
+     "sub_question": "capability", "source": "https://arxiv.org/abs/2501.00001",
+     "confidence": 0.9, "verified": True},
+    {"claim": "Datacenter energy and power demand rose in 2025",
+     "sub_question": "infrastructure", "source": "https://www.iea.org/reports/energy-and-ai",
+     "confidence": 0.9, "verified": True},
+    {"claim": "Enterprise AI pilot failure rates and ROI remained uncertain",
+     "sub_question": "economics", "source": "https://arxiv.org/abs/2502.00002",
+     "confidence": 0.9, "verified": True},
+]
 
 def _run(facts, verdict=True):
     llm = FakeLLM(verdict)
-    return asyncio.run(critic_agent(llm, "What is RAG?", facts, iteration=1, max_iterations=3))
+    return asyncio.run(critic_agent(
+        llm, "What is RAG?", facts, iteration=1, max_iterations=3))
 
 
 def test_gate_blocks_unverified_evidence():
@@ -57,7 +72,8 @@ def test_gate_blocks_single_source():
 
 def test_gate_passes_verified_multi_source():
     facts = [_fact(0, "en.wikipedia.org", True, 0.9), _fact(1, "en.wikipedia.org", True, 0.9),
-             _fact(2, "arxiv.org", True, 0.9), _fact(3, "arxiv.org", True, 0.9)]
+             _fact(2, "arxiv.org", True, 0.9), _fact(3, "arxiv.org", True, 0.9),
+             *_PRIMARY_REQUIREMENT_FACTS]
     result = _run(facts)
     assert result["is_sufficient"] is True
     assert result["confidence"] >= 0.78
@@ -67,7 +83,8 @@ def test_strong_stats_override_noisy_insufficient():
     """Pre-existing philosophy, kept: stellar verified multi-domain stats
     override a noisy insufficient verdict — but the gate still applies."""
     facts = [_fact(0, "en.wikipedia.org", True, 0.9), _fact(1, "en.wikipedia.org", True, 0.9),
-             _fact(2, "arxiv.org", True, 0.9), _fact(3, "arxiv.org", True, 0.9)]
+             _fact(2, "arxiv.org", True, 0.9), _fact(3, "arxiv.org", True, 0.9),
+             *_PRIMARY_REQUIREMENT_FACTS]
     result = _run(facts, verdict=False)
     assert result["is_sufficient"] is True
 
@@ -100,7 +117,7 @@ def test_comparative_query_without_definition_can_pass():
          "confidence": 0.9, "verified": True},
     ]
     result = asyncio.run(critic_agent(FakeLLM(True), "Compare the economics of nuclear vs solar energy in Bangladesh",
-                                      facts, iteration=1, max_iterations=3, query_type="comparative"))
+                                      [*facts, *_PRIMARY_REQUIREMENT_FACTS], iteration=1, max_iterations=3, query_type="comparative"))
     assert result["is_sufficient"] is True
 
 

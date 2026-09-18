@@ -1258,6 +1258,37 @@ def _finding_justification(fact: Dict[str, Any]) -> str:
     return "; ".join(parts)
 
 
+def _missing_skeptical_angles(ctx: Dict[str, Any]) -> List[str]:
+    """Skeptical/counter-evidence angles the report itself admits are missing.
+
+    Scans the coverage gaps and red-team findings for vocabulary indicating an
+    absent counter-evidence angle. When any exists, the report cannot also claim
+    it found no credible opposing views: that would be a self-contradiction.
+    """
+    cues = (
+        "counter", "skeptic", "sceptic", "oppos", "disagree", "dissent",
+        "critic", "hype", "plateau", "roi", "bubble", "risk", "limitation",
+        "alternative", "contradict", "over-hype", "overhype",
+    )
+    found: List[str] = []
+    sources: List[str] = []
+    gaps = ctx.get("coverage_gaps")
+    if isinstance(gaps, (list, tuple)):
+        sources.extend(str(g).strip() for g in gaps if str(g).strip())
+    findings = ctx.get("redteam_findings")
+    if isinstance(findings, list):
+        for item in findings:
+            if isinstance(item, dict):
+                text = str(item.get("statement", "") or "").strip()
+                if text:
+                    sources.append(text)
+    for text in sources:
+        low = text.lower()
+        if any(cue in low for cue in cues):
+            found.append(text)
+    return found
+
+
 def _ledger_warnings(ctx: Dict[str, Any]) -> str:
     """Deterministic ledger warnings appended to Evidence Strength.
 
@@ -1422,14 +1453,26 @@ def _render_required_section(
         if len(lines) == 2:
             # Guard: never claim the absence of counterarguments unless a
             # dedicated counter-evidence search actually ran AND returned
-            # nothing. An empty section with no failed search is an UNKNOWN,
-            # not a clean bill of health.
+            # nothing AND no missing skeptical angle remains anywhere in the
+            # report. An empty section with no failed search is an UNKNOWN, not
+            # a clean bill of health; and if Limitations/Open-Questions name a
+            # missing skeptical angle, the absence is contradicted by our own
+            # report and must never be asserted.
             counter_searched = bool(ctx.get("counter_evidence_attempted"))
-            if counter_searched:
+            missing_skeptical = _missing_skeptical_angles(ctx)
+            if missing_skeptical:
+                lines.append(
+                    "- Counter-evidence is INCOMPLETE: this report itself lists "
+                    f"{len(missing_skeptical)} unresolved skeptical angle(s) "
+                    f"({'; '.join(missing_skeptical[:3])}). No conclusion about the "
+                    "absence of credible opposing claims can be drawn."
+                )
+            elif counter_searched:
                 lines.append(
                     "- A dedicated counter-evidence search was run and returned no "
-                    "credible opposing claims or source conflicts. This is an "
-                    "absence of found counter-evidence, not proof none exists."
+                    "credible opposing claims or source conflicts, and no missing "
+                    "skeptical angle remains in this report. This is an absence of "
+                    "found counter-evidence, not proof none exists."
                 )
             else:
                 lines.append(

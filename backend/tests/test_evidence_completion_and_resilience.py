@@ -392,3 +392,60 @@ def test_counterargument_guard_never_claims_absence_without_search():
     )
     assert "counter-evidence search was run" in searched
     assert "not proof none exists" in searched
+
+
+def test_counterargument_guard_blocked_by_listed_skeptical_angle():
+    """Even after a counter-evidence search ran, if the report itself lists a
+    missing skeptical angle it must never claim no credible opposing claims."""
+    from app.agents.synthesizer import _render_required_section
+
+    ctx = {
+        "counter_evidence_attempted": True,
+        "coverage_gaps": ["no evidence for angle: skeptical ROI-negative results"],
+    }
+    out = _render_required_section(
+        "Counterarguments & Disputed Points",
+        ctx=ctx, usable_facts=[], contradictions=[],
+    )
+    assert "INCOMPLETE" in out
+    assert "No credible" not in out
+    assert "returned no credible" not in out
+
+
+def test_counterargument_guard_clean_only_when_searched_and_no_gap():
+    from app.agents.synthesizer import _render_required_section
+
+    out = _render_required_section(
+        "Counterarguments & Disputed Points",
+        ctx={"counter_evidence_attempted": True, "coverage_gaps": []},
+        usable_facts=[], contradictions=[],
+    )
+    assert "returned no credible" in out
+
+
+def test_missing_required_primary_sources_blocks_all_three():
+    from app.agents.critic import _missing_required_primary_sources
+
+    missing = _missing_required_primary_sources([
+        {"claim": "AI capability and benchmarks", "sub_question": "capability",
+         "source": "https://blog.example/x"},
+        {"claim": "Datacenter energy and power demand", "sub_question": "infrastructure",
+         "source": "https://news.example/y"},
+        {"claim": "Enterprise ROI and pilot failures", "sub_question": "economics",
+         "source": "https://medium.example/z"},
+    ])
+    assert set(missing) == {
+        "frontier_capability_2025_26",
+        "energy_compute_constraints",
+        "roi_or_pilot_failure",
+    }
+
+
+def test_required_primary_source_satisfied_by_a_paper():
+    from app.agents.critic import _missing_required_primary_sources
+
+    missing = _missing_required_primary_sources([
+        {"claim": "frontier model reasoning benchmark results",
+         "source": "https://arxiv.org/abs/2501.00001"},
+    ])
+    assert "frontier_capability_2025_26" not in missing

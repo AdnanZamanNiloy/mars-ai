@@ -342,6 +342,16 @@ async def critic_agent(
             f"regulation_dominance={stats['regulation_share']:.2f}>0.60"
         )
 
+    # --- required primary sources per frontier requirement ------------------
+    # The brief requires at least one high-quality PRIMARY source on three
+    # specific frontier questions before finalizing. A report can be long and
+    # well-cited yet have no paper/official report/filing behind capability,
+    # compute/energy, or ROI evidence. Blocking: without these the report is
+    # secondary commentary, whatever its other strengths.
+    primary_gaps = _missing_required_primary_sources(quality_facts)
+    for gap in primary_gaps:
+        gate_failures.append(f"missing_primary_source={gap}")
+
     # Measured confidence, when available, replaces the model's self-report.
     if confidence_report is not None:
         confidence = confidence_report.overall
@@ -391,6 +401,63 @@ async def critic_agent(
         "model_confidence": model_confidence,
         "conflicts": conflict_summary,
     }
+
+
+# The three frontier questions the brief requires at least one high-quality
+# PRIMARY source on before a report may finalize. Each entry is (label,
+# cue-words). A cue match on a fact's claim OR sub_question tags it to the
+# requirement; primacy is then checked on the source. Deliberately lexical and
+# recall-oriented — the gate blocks only when NO primary source exists for a
+# requirement, not on precision of the match.
+REQUIRED_PRIMARY_SOURCES: tuple = (
+    (
+        "frontier_capability_2025_26",
+        ("capability", "benchmark", "reasoning", "coding", "multimodal",
+         "agentic", "long-context", "context length", "inference-time",
+         "scaling", "frontier model"),
+    ),
+    (
+        "energy_compute_constraints",
+        ("energy", "power", "electricity", "datacenter", "data center",
+         "compute", "chip", "gpu", "supply chain", "infrastructure"),
+    ),
+    (
+        "roi_or_pilot_failure",
+        ("roi", "return on investment", "pilot", "capex", "spend", "funding",
+         "valuation", "bubble", "economics", "investment", "cost"),
+    ),
+)
+
+
+def _missing_required_primary_sources(facts: Sequence[Dict[str, Any]]) -> List[str]:
+    """Requirements with no high-quality PRIMARY source behind them.
+
+    A requirement is satisfied when at least one fact attributed to it (by claim
+    or sub_question cue) cites a primary source (`is_primary_source`). Returns
+    the labels of requirements with no such source, so the critic can block
+    finalization. Deterministic and total.
+    """
+    from app.agents.sources import is_primary_source
+
+    missing: List[str] = []
+    for label, cues in REQUIRED_PRIMARY_SOURCES:
+        satisfied = False
+        for fact in facts or ():
+            if not isinstance(fact, dict):
+                continue
+            text = (
+                str(fact.get("claim", "") or "") + " "
+                + str(fact.get("sub_question", "") or "")
+                + " " + str(fact.get("axis", "") or "")
+            ).lower()
+            if not any(cue in text for cue in cues):
+                continue
+            if is_primary_source(str(fact.get("source", "") or "")):
+                satisfied = True
+                break
+        if not satisfied:
+            missing.append(label)
+    return missing
 
 
 def _compact_facts(facts: Sequence[Dict[str, Any]], limit: int = 12) -> List[Dict[str, Any]]:
