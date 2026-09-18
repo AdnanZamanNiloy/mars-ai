@@ -1,10 +1,12 @@
 /* MARS landing — full-screen cinematic entry. Pure presentational:
  * no data fetching, no backend calls. onStart enters the workspace. */
 
-const GITHUB_URL = "https://github.com/AdnanZamanNiloy/mars-ai";
-const DOCS_URL = "https://github.com/AdnanZamanNiloy/mars-ai#readme";
+import { Planet } from "./Sidebar";
+import ThemeToggle from "./ThemeToggle";
 
-export default function Landing({ onStart }) {
+const GITHUB_URL = "https://github.com/AdnanZamanNiloy/mars-ai";
+
+export default function Landing({ onStart, onDocs }) {
   return (
     <div className="landing">
       <div className="landing-atmosphere" aria-hidden="true">
@@ -22,15 +24,34 @@ export default function Landing({ onStart }) {
       </div>
 
       <header className="landing-nav">
-        <span className="landing-brand">MARS</span>
-        <nav className="landing-links">
-          <a href={DOCS_URL} target="_blank" rel="noreferrer">Docs</a>
-          <a href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub</a>
+        <a
+          className="landing-brand brand"
+          href="#/"
+          onClick={(e) => { e.preventDefault(); }}
+          aria-label="MARS — Multi-Agent Research System, home"
+        >
+          <Planet size={44} />
+          <div>
+            <div className="brand-name">MARS</div>
+            <div className="brand-sub">Multi-Agent Research System</div>
+          </div>
+        </a>
+        <nav className="landing-links" aria-label="Primary">
+          <a className="landing-link" href="#/docs" onClick={(e) => { e.preventDefault(); onDocs?.(); }}>
+            <span className="link-dot" aria-hidden="true" /> Docs
+          </a>
+          <a className="landing-link" href={GITHUB_URL} target="_blank" rel="noreferrer">
+            <span className="link-dot" aria-hidden="true" /> GitHub
+          </a>
+          <ThemeToggle className="landing-theme-toggle" />
         </nav>
       </header>
 
       <main className="landing-hero">
-        <div className="landing-planet" aria-hidden="true" />
+        <div className="landing-planet" aria-hidden="true">
+          <span className="planet-ring" />
+          <span className="planet-glow" />
+        </div>
         <h1 className="landing-title">MARS</h1>
         <p className="landing-subtitle">Multi-Agent Research System</p>
         <p className="landing-tagline">Complex questions. Coordinated intelligence.</p>
@@ -46,7 +67,13 @@ export default function Landing({ onStart }) {
       </main>
 
       <footer className="landing-foot">
-        <span>Planner · Search · Verifier · Critic · Synthesizer</span>
+        <span className="foot-agents">
+          <span>Planner</span>
+          <span>Search</span>
+          <span>Verifier</span>
+          <span>Critic</span>
+          <span>Synthesizer</span>
+        </span>
       </footer>
     </div>
   );

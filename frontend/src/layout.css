@@ -23,7 +23,7 @@
 
 .brand { display: flex; align-items: center; gap: 12px; padding: 2px 6px 0; }
 .brand-home { cursor: pointer; border-radius: 10px; }
-.brand-home:hover { background: rgba(255, 255, 255, 0.04); }
+.brand-home:hover { background: var(--row-hover); }
 .brand-home:focus-visible { outline: 2px solid var(--mars); outline-offset: 2px; }
 .brand-name { font-size: 17px; font-weight: 800; letter-spacing: 5px; color: #E8794F; }
 .brand-sub { font-size: 10.5px; line-height: 1.5; color: var(--t3); margin-top: 3px; }
@@ -61,13 +61,13 @@
   background: transparent;
   color: var(--t2);
   font-size: 13.5px;
-  font-weight: 500;
+  font-weight: 700;
   cursor: pointer;
   text-align: left;
   transition: background 0.13s, color 0.13s;
 }
-.side-nav button:hover { background: #16161d; color: var(--t1); }
-.side-nav button.active { background: #1b1b23; color: var(--t1); }
+.side-nav button:hover { background: var(--row-hover); color: var(--t1); }
+.side-nav button.active { background: var(--row-active); color: var(--t1); }
 .side-nav button.active svg { color: var(--mars-soft); }
 .side-nav svg { color: var(--t3); flex: none; }
 .side-nav .count {
@@ -75,7 +75,7 @@
   font-size: 11px;
   font-weight: 650;
   color: var(--t3);
-  background: #1e1e26;
+  background: var(--inset);
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 1px 8px;
@@ -90,6 +90,7 @@
   margin-bottom: 6px;
 }
 .side-section-head b { font-size: 12.5px; font-weight: 650; color: var(--t2); }
+.side-section-head.has-above { margin-top: 20px; }
 
 .mission-row {
   display: flex;
@@ -104,20 +105,92 @@
   text-align: left;
   transition: background 0.13s;
 }
-.mission-row:hover { background: #16161d; }
-.mission-row.active { background: #1b1b23; }
+.mission-row:hover { background: var(--row-hover); }
+.mission-row.active { background: var(--row-active); }
 .mission-row .dot { margin-top: 5px; }
 .mission-row .body { flex: 1; min-width: 0; }
 .mission-row .name {
   display: block;
   font-size: 13px;
   font-weight: 550;
-  color: #dcdce2;
+  color: var(--t1);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .mission-row .sub { display: flex; justify-content: space-between; gap: 8px; margin-top: 3px; font-size: 11px; color: var(--t3); }
+
+/* Three-dot mission actions: the wrap hugs each row so the absolutely
+ * positioned menu anchors beside the selected item. */
+.mission-menu-wrap { position: relative; }
+.mission-menu-wrap + .mission-menu-wrap { margin-top: 6px; }
+.mission-menu-wrap .mission-row { padding-right: 30px; }
+.mission-menu-btn {
+  position: absolute;
+  top: 7px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--t3);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.13s, color 0.13s, background 0.13s;
+}
+.mission-menu-wrap:hover .mission-menu-btn,
+.mission-menu-wrap.open .mission-menu-btn,
+.mission-menu-btn:focus-visible { opacity: 1; }
+.mission-menu-btn:hover { background: var(--row-hover); color: var(--t1); }
+.mission-menu {
+  position: absolute;
+  top: calc(100% - 2px);
+  right: 4px;
+  min-width: 150px;
+  padding: 6px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
+  z-index: 40;
+}
+.mission-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--t1);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.mission-menu-item:hover { background: var(--row-hover); }
+.mission-menu-item svg { color: var(--t3); flex: none; }
+.mission-menu-item.danger { color: var(--danger); }
+.mission-menu-item.danger svg { color: var(--danger); }
+.mission-rename-input {
+  display: block;
+  width: 100%;
+  padding: 1px 5px;
+  margin: -1px 0;
+  background: var(--bg-soft);
+  border: 1px solid var(--mars);
+  border-radius: 6px;
+  color: var(--t1);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  outline: none;
+}
 
 .side-foot { margin-top: auto; padding: 20px 8px 0; }
 .side-foot .ver { font-size: 11px; color: var(--t4); margin-top: 8px; }
@@ -194,7 +267,7 @@
 .intel-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 2px 4px 0; }
 .intel-head h2 { font-size: 16px; font-weight: 650; margin: 0; letter-spacing: -0.1px; }
 .intel-head p { font-size: 12px; color: var(--t3); margin: 5px 0 0; }
-.intel-head p strong { color: #cfcfd6; font-weight: 600; }
+.intel-head p strong { color: var(--t2); font-weight: 600; }
 .icon-btn {
   width: 27px;
   height: 27px;
@@ -208,7 +281,7 @@
   color: var(--t3);
   cursor: pointer;
 }
-.icon-btn:hover { background: #1c1c24; color: #fff; }
+.icon-btn:hover { background: var(--row-active); color: var(--t1); }
 
 .intel-expand {
   position: absolute;
@@ -273,4 +346,18 @@
   min-width: 0;
   overflow: hidden;
   position: relative;
+}
+
+/* Standalone docs embedded at #/docs: full-viewport frame. The docs page
+ * brings its own chrome (sidebar/topbar), so the console shell stays out. */
+.docs-view {
+  height: 100dvh;
+  width: 100%;
+  background: var(--bg);
+}
+.docs-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
 }

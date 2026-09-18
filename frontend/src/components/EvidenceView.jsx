@@ -44,7 +44,7 @@ export default function EvidenceView({ messages, onInspect }) {
         <p>{rows.length} claims · {verifiedCount} verified · across this session</p>
       </div>
       {rows.length === 0 ? (
-        <p className="empty">No evidence yet — run a mission or replay one to inspect its claims here.</p>
+        <p className="empty">No evidence yet — run a research or replay one to inspect its claims here.</p>
       ) : (
         <>
           <div className="chip-row" style={{ marginBottom: 16 }}>
@@ -53,7 +53,7 @@ export default function EvidenceView({ messages, onInspect }) {
                 key={k}
                 type="button"
                 className="chip"
-                style={filter === k ? { borderColor: "#52525b", color: "#fff", background: "rgba(255,255,255,.05)" } : undefined}
+                style={filter === k ? { borderColor: "var(--line-hover)", color: "var(--t1)", background: "var(--row-hover)" } : undefined}
                 onClick={() => setFilter(k)}
               >
                 {label}

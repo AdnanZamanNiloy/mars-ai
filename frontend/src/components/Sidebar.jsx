@@ -1,5 +1,5 @@
-import { timeAgo } from "../lib";
-import { IconAgents, IconCompass, IconMissions, IconPlus } from "./icons";
+import { useEffect, useState } from "react";
+import { IconAgents, IconCompass, IconMissions, IconMore, IconPencil, IconPin, IconPlus, IconTrash } from "./icons";
 
 export function Planet({ size = 40, ring = false }) {
   return (
@@ -10,7 +10,7 @@ export function Planet({ size = 40, ring = false }) {
 }
 
 const NAV = [
-  { id: "missions", label: "Missions", icon: IconMissions },
+  { id: "missions", label: "Research", icon: IconMissions },
   { id: "providers", label: "Providers", icon: IconCompass },
   { id: "agents", label: "Agents", icon: IconAgents },
 ];
@@ -23,8 +23,113 @@ const DOT = {
   aborted: "idle",
 };
 
-export default function Sidebar({ view, onNavigate, missions, activeRunId, onOpenMission, onNew, open, onClose }) {
+export default function Sidebar({ view, onNavigate, missions, activeRunId, onOpenMission, onNew, open, onClose, onRename, onTogglePin, onDelete }) {
   const ordered = [...missions].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned));
+  const [menuRunId, setMenuRunId] = useState(null);
+  const [editing, setEditing] = useState(null);
+
+  const pinned = ordered.filter((m) => m.pinned);
+  const recent = ordered.filter((m) => !m.pinned).slice(0, 6);
+
+  const renderRow = (m) => {
+    const label = m.title || m.query;
+    const isEditing = editing === m.runId;
+    return (
+      <div key={m.runId} className={`mission-menu-wrap${menuRunId === m.runId ? " open" : ""}`}>
+        <button
+          className={`mission-row${m.runId === activeRunId ? " active" : ""}${m.pinned ? " pinned" : ""}`}
+          onClick={() => { onOpenMission(m.runId); onClose?.(); }}
+          title={label}
+        >
+          <span className={`dot ${DOT[m.status] || "idle"}`} />
+          <span className="body">
+            {isEditing ? (
+              <input
+                className="mission-rename-input"
+                defaultValue={label}
+                autoFocus
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const clean = e.currentTarget.value.trim();
+                    if (clean) onRename?.(m.runId, clean);
+                    setEditing(null);
+                  } else if (e.key === "Escape") {
+                    setEditing(null);
+                  }
+                }}
+                onBlur={(e) => {
+                  const clean = e.currentTarget.value.trim();
+                  if (clean && clean !== label) onRename?.(m.runId, clean);
+                  setEditing(null);
+                }}
+              />
+            ) : (
+              <span className="name">{label}</span>
+            )}
+          </span>
+        </button>
+        <button
+          type="button"
+          className="mission-menu-btn"
+          aria-label={`Actions for ${label}`}
+          aria-haspopup="menu"
+          aria-expanded={menuRunId === m.runId}
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuRunId((cur) => (cur === m.runId ? null : m.runId));
+          }}
+        >
+          <IconMore size={15} />
+        </button>
+        {menuRunId === m.runId ? (
+          <div className="mission-menu" role="menu">
+            <button
+              type="button"
+              className="mission-menu-item"
+              role="menuitem"
+              onClick={() => { onTogglePin?.(m.runId); setMenuRunId(null); }}
+            >
+              <IconPin size={15} /> {m.pinned ? "Unpin" : "Pin"}
+            </button>
+            <button
+              type="button"
+              className="mission-menu-item"
+              role="menuitem"
+              onClick={() => { setEditing(m.runId); setMenuRunId(null); }}
+            >
+              <IconPencil size={15} /> Rename
+            </button>
+            <button
+              type="button"
+              className="mission-menu-item danger"
+              role="menuitem"
+              onClick={() => { onDelete?.(m.runId); setMenuRunId(null); }}
+            >
+              <IconTrash size={15} /> Delete
+            </button>
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
+  useEffect(() => {
+    if (menuRunId == null) return;
+    const onDown = (e) => {
+      if (!e.target.closest(".mission-menu-wrap")) setMenuRunId(null);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") setMenuRunId(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuRunId]);
+
   return (
     <aside className={`sidebar${open ? " open" : ""}`}>
       <div
@@ -62,33 +167,24 @@ export default function Sidebar({ view, onNavigate, missions, activeRunId, onOpe
       </nav>
 
       <div className="side-section">
-        <div className="side-section-head">
-          <b>Recent Missions</b>
+        {pinned.length > 0 ? (
+          <>
+            <div className="side-section-head">
+              <b>Pinned</b>
+            </div>
+            {pinned.map(renderRow)}
+          </>
+        ) : null}
+
+        <div className={`side-section-head${pinned.length > 0 ? " has-above" : ""}`}>
+          <b>Recent Research</b>
         </div>
         {missions.length === 0 ? (
-          <p className="empty">No missions yet — your runs will appear here.</p>
+          <p className="empty">No research yet — your runs will appear here.</p>
+        ) : recent.length === 0 ? (
+          <p className="empty">No recent research — everything is pinned.</p>
         ) : (
-          ordered.slice(0, 6).map((m) => {
-            const label = m.title || m.query;
-            return (
-              <button
-                key={m.runId}
-                className={`mission-row${m.runId === activeRunId ? " active" : ""}${m.pinned ? " pinned" : ""}`}
-                onClick={() => { onOpenMission(m.runId); onClose?.(); }}
-                title={label}
-              >
-                <span className={`dot ${DOT[m.status] || "idle"}`} />
-                <span className="body">
-                  <span className="name">{label}</span>
-                  <span className="sub">
-                    <span>{statusLabel(m.status)}</span>
-                    {m.pinned ? <span>Pinned</span> : null}
-                    <span>{timeAgo(m.updatedAt)}</span>
-                  </span>
-                </span>
-              </button>
-            );
-          })
+          recent.map(renderRow)
         )}
       </div>
 
@@ -97,15 +193,4 @@ export default function Sidebar({ view, onNavigate, missions, activeRunId, onOpe
       </div>
     </aside>
   );
-}
-
-function statusLabel(status) {
-  switch (status) {
-    case "running": return "Research active";
-    case "resumable": return "Interrupted — resumable";
-    case "completed": return "Completed";
-    case "failed": return "Failed";
-    case "aborted": return "Aborted";
-    default: return status || "Unknown";
-  }
 }

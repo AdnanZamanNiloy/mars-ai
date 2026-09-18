@@ -39,7 +39,7 @@ export default function IntelligencePanel({
     <aside className="intel">
       <div className="intel-head">
         <div>
-          <h2>Mission Intelligence</h2>
+          <h2>Research Intelligence</h2>
           <p>
             {run ? (
               run.replay ? (
@@ -48,7 +48,7 @@ export default function IntelligencePanel({
                 <><strong>{working} agents working</strong> · Real-time research</>
               )
             ) : (
-              "No active mission"
+              "No active research"
             )}
           </p>
         </div>

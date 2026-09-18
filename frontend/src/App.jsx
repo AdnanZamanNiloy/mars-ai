@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchTrace, resumeResearch, startResearch } from "./api";
 import { MODE_META, loadKnowledge, loadMissions, parseReport, removeKnowledgeItem, removeMission, saveKnowledgeItem, updateMission, upsertMission } from "./lib";
-import Sidebar, { Planet } from "./components/Sidebar";
+import Sidebar from "./components/Sidebar";
 import Composer from "./components/Composer";
 import { ErrorCard, MarsMessageShell, ThinkingSteps, TypingRow, UserMessage } from "./components/Thread";
 import AnswerCard, { ReplayAnswerCard } from "./components/AnswerCard";
@@ -14,12 +14,13 @@ import KnowledgeView from "./components/KnowledgeView";
 import AgentsView from "./components/AgentsView";
 import ProvidersView from "./components/ProvidersView";
 import Landing from "./components/Landing";
+import DocsView from "./components/DocsView";
 import { IconChevronDown, IconChevronLeft, IconDoc, IconFolder, IconLayers, IconMenu, IconPencil, IconPin, IconTrash } from "./components/icons";
 
 let seq = 1;
 const nid = () => `m${Date.now()}-${seq++}`;
 
-const VALID_VIEWS = ["landing", "workspace", "missions", "evidence", "knowledge", "agents", "providers"];
+const VALID_VIEWS = ["landing", "workspace", "missions", "evidence", "knowledge", "agents", "providers", "docs"];
 
 const LIBRARY = [
   { id: "evidence", label: "Evidence", icon: IconLayers },
@@ -197,6 +198,21 @@ export default function App() {
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  /* Plain anchor navigation (landing "Docs" link, docs-iframe "Console"
+   * exit targeting the top window) changes the hash without pushState,
+   * which fires `hashchange` but not `popstate` — sync the view here.
+   * `go()` uses pushState, which never fires hashchange, so no loop. */
+  useEffect(() => {
+    const onHash = () => {
+      const next = viewFromHash();
+      if (viewRef.current !== next) {
+        viewRef.current = next;
+        setViewState(next);
+      }
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, []);
   const [missions, setMissions] = useState(() => loadMissions());
   const [knowledge, setKnowledge] = useState(() => loadKnowledge());
@@ -445,7 +461,7 @@ export default function App() {
           }
           return { ...m, run };
         }));
-        pushTrace({ text: "Mission aborted by user", kind: "warn" });
+        pushTrace({ text: "Research aborted by user", kind: "warn" });
       } else {
         handleEvent(tempId, { type: "error", message: err instanceof Error ? err.message : "Unknown stream error" });
       }
@@ -540,7 +556,7 @@ export default function App() {
 
   /* Fixed page title: the current research question on the workspace view,
    * plain view names elsewhere. The menu acts on the displayed mission. */
-  const VIEW_TITLES = { missions: "Missions", evidence: "Evidence", knowledge: "Knowledge", agents: "Agents", providers: "Providers" };
+  const VIEW_TITLES = { missions: "Research", evidence: "Evidence", knowledge: "Knowledge", agents: "Agents", providers: "Providers" };
   const titleMessage = [...messages].reverse().find((m) =>
     (m.kind === "run" && m.run?.query) ||
     (m.kind === "replay" && m.query) ||
@@ -587,7 +603,9 @@ export default function App() {
 
   return (
     view === "landing" ? (
-      <Landing onStart={() => go("workspace")} />
+      <Landing onStart={() => go("workspace")} onDocs={() => go("docs")} />
+    ) : view === "docs" ? (
+      <DocsView />
     ) : (
     <div className="shell">
       <ErrorBoundary>
@@ -600,6 +618,9 @@ export default function App() {
         onNew={startNew}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        onRename={renameMission}
+        onTogglePin={toggleMissionPin}
+        onDelete={deleteMission}
       />
       {sidebarOpen ? <button className="scrim" onClick={() => setSidebarOpen(false)} aria-label="Close menu" /> : null}
       </ErrorBoundary>
@@ -878,7 +899,6 @@ function PageTitle({ title, mission, view, onNavigate, showLibrary, onRename, on
 function WelcomeHero({ composer }) {
   return (
     <div className="hero-card anim-rise">
-      <Planet size={88} ring />
       <h2>What should MARS <span className="accent">investigate</span>?</h2>
       <p>
         A team of research agents plans the inquiry, gathers sources, verifies claims,

@@ -1,7 +1,7 @@
 import { MODE_META, confidenceLabel, timeAgo } from "../lib";
 import { IconClock, IconX } from "./icons";
 
-/* Missions = this browser's real run history (localStorage). Opening one
+/* Research = this browser's real run history (localStorage). Opening one
  * replays its persisted backend trace — never fabricated. */
 
 const DOT = {
@@ -28,10 +28,10 @@ export default function MissionsView({ missions, onOpen, onRemove, onNew }) {
     return (
       <div className="view anim-rise">
         <div className="view-head">
-          <h2>Missions</h2>
+          <h2>Research</h2>
           <p>Every research run started from this browser</p>
         </div>
-        <p className="empty">No missions yet. Start your first research run to see it here.</p>
+        <p className="empty">No research yet. Start your first research run to see it here.</p>
         <div style={{ textAlign: "center", marginTop: 16 }}>
           <button className="btn-primary" onClick={onNew}>Start new research</button>
         </div>
@@ -41,8 +41,8 @@ export default function MissionsView({ missions, onOpen, onRemove, onNew }) {
   return (
     <div className="view anim-rise">
       <div className="view-head">
-        <h2>Missions</h2>
-        <p>{missions.length} run{missions.length === 1 ? "" : "s"} · click any mission to replay its trace</p>
+        <h2>Research</h2>
+        <p>{missions.length} run{missions.length === 1 ? "" : "s"} · click any research to replay its trace</p>
       </div>
       {missions.map((m) => {
         const parent = m.parentRunId ? missions.find((p) => p.runId === m.parentRunId) : null;
