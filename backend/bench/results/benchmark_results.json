@@ -1,9 +1,9 @@
 {
   "suite": "mars-offline-benchmarks",
   "version": "2.0",
-  "ran_at": "2026-09-12T11:08:35.648311+00:00",
-  "python": "3.12.14",
-  "platform": "Linux-5.10.134-013.15.kangaroo.al8.x86_64-x86_64-with-glibc2.41",
+  "ran_at": "2026-09-18T08:44:19.685901+00:00",
+  "python": "3.12.13",
+  "platform": "Linux-7.0.0-31-generic-x86_64-with-glibc2.43",
   "quick": false,
   "components": {
     "verification": {
@@ -16,8 +16,8 @@
       "recall": 1.0,
       "f1": 1.0,
       "accuracy": 1.0,
-      "latency_ms": 2.45,
-      "per_case_us": 152.9,
+      "latency_ms": 3.89,
+      "per_case_us": 243.0,
       "misses": []
     },
     "hallucination": {
@@ -50,7 +50,7 @@
         "polarity": 3,
         "temporal": 1
       },
-      "latency_ms": 4.02,
+      "latency_ms": 5.62,
       "errors": []
     },
     "confidence_calibration": {
@@ -59,15 +59,15 @@
       "in_band_rate": 1.0,
       "monotonic_ordering": true,
       "scores": {
-        "strong": 0.823,
-        "moderate": 0.714,
-        "weak": 0.283,
-        "conflicted": 0.75
+        "strong": 0.815,
+        "moderate": 0.698,
+        "weak": 0.213,
+        "conflicted": 0.74
       },
       "rows": [
         {
           "scenario": "strong",
-          "overall": 0.823,
+          "overall": 0.815,
           "band": [
             0.7,
             1.0
@@ -79,13 +79,14 @@
             "citation_coverage": 1.0,
             "claim_verification_strength": 0.8,
             "cross_source_agreement": 0.333,
+            "freshness": 0.0,
             "critic_survival": 1.0,
-            "freshness": 0.0
+            "claim_evidence_quality": 0.75
           }
         },
         {
           "scenario": "moderate",
-          "overall": 0.714,
+          "overall": 0.698,
           "band": [
             0.45,
             0.75
@@ -97,13 +98,14 @@
             "citation_coverage": 1.0,
             "claim_verification_strength": 0.517,
             "cross_source_agreement": 0.0,
-            "critic_survival": 0.6,
-            "freshness": 0.0
+            "freshness": 0.0,
+            "critic_survival": 0.5,
+            "claim_evidence_quality": 0.75
           }
         },
         {
           "scenario": "weak",
-          "overall": 0.283,
+          "overall": 0.213,
           "band": [
             0.0,
             0.45
@@ -115,13 +117,14 @@
             "citation_coverage": 0.0,
             "claim_verification_strength": 0.1,
             "cross_source_agreement": 0.0,
-            "critic_survival": 0.6,
-            "freshness": 0.0
+            "freshness": 0.0,
+            "critic_survival": 0.0,
+            "claim_evidence_quality": 0.1
           }
         },
         {
           "scenario": "conflicted",
-          "overall": 0.75,
+          "overall": 0.74,
           "band": [
             0.0,
             0.8
@@ -133,8 +136,9 @@
             "citation_coverage": 1.0,
             "claim_verification_strength": 0.8,
             "cross_source_agreement": 0.667,
+            "freshness": 0.0,
             "critic_survival": 0.6,
-            "freshness": 0.0
+            "claim_evidence_quality": 0.75
           }
         }
       ]
@@ -142,7 +146,7 @@
     "semantic_engine": {
       "pairs": 20,
       "spearman_vs_labels": 0.7094,
-      "pair_latency_us": 140.7,
+      "pair_latency_us": 185.8,
       "dedup": {
         "n": 10,
         "precision": 1.0,
@@ -151,8 +155,8 @@
         "threshold": 0.86
       },
       "matrix_ms": {
-        "100": 648.65,
-        "300": 667.91
+        "100": 400.23,
+        "300": 487.54
       },
       "score_label_sample": [
         {
@@ -193,22 +197,47 @@
         }
       ]
     },
-    "llm_cache": {
-      "prompts": 24,
-      "unique": 8,
-      "provider_calls_first_pass": 8,
-      "provider_calls_second_pass": 8,
-      "cache_hit_ratio_first_pass": 0.6667,
-      "uncached_pass_ms": 95.46,
-      "cached_pass_ms": 15.24,
-      "speedup": 6.26,
-      "tokens_saved_per_repeat": 70,
-      "note": "second pass serves 24/24 from cache; provider_calls unchanged"
+    "intent_classification": {
+      "accuracy": 1.0,
+      "cases": [
+        {
+          "query": "What is transformer?",
+          "ambiguity": true,
+          "action": "research_both",
+          "domain": "machine_learning",
+          "expected_domain": "machine_learning",
+          "ok": true
+        },
+        {
+          "query": "python snake feeding habits",
+          "ambiguity": false,
+          "action": "research_dominant",
+          "domain": "science",
+          "expected_domain": "science",
+          "ok": true
+        },
+        {
+          "query": "compare nuclear vs solar economics in Bangladesh",
+          "ambiguity": false,
+          "action": "research_dominant",
+          "domain": "general",
+          "expected_domain": "general",
+          "ok": true
+        },
+        {
+          "query": "What is apple?",
+          "ambiguity": true,
+          "action": "research_both",
+          "domain": "general",
+          "expected_domain": "general",
+          "ok": true
+        }
+      ]
     },
     "e2e_pipeline": {
-      "wall_sec": 0.264,
-      "graph_snapshots": 13,
-      "iterations": 2,
+      "wall_sec": 6.851,
+      "graph_snapshots": 19,
+      "iterations": 3,
       "planned_sub_questions": 4,
       "planned_axes": [
         "criticism",
@@ -241,45 +270,65 @@
         "bad": 0,
         "unchecked": 0
       },
-      "confidence": 0.775,
+      "confidence": 0.842,
       "confidence_signals": {
         "source_quality": 0.75,
         "source_diversity": 1.0,
         "citation_coverage": 1.0,
         "claim_verification_strength": 1.0,
-        "cross_source_agreement": 0.5,
-        "critic_survival": 1.0,
-        "freshness": 0.0,
-        "axis_coverage": 0.0
+        "cross_source_agreement": 1.0,
+        "freshness": 0.457,
+        "critic_survival": 0.4,
+        "axis_coverage": 0.333,
+        "claim_evidence_quality": 1.0
       },
-      "report_chars": 2173,
-      "llm_calls": 9,
+      "report_chars": 2980,
+      "llm_calls": 14,
       "llm_call_stages": {
-        "planner": 2,
-        "critic": 3,
+        "planner": 4,
+        "critic": 6,
         "summarizer": 4
       },
       "budget": {
-        "llm_calls": 9,
-        "spent_tokens": 22423,
-        "spent_usd": 0.010409,
+        "llm_calls": 14,
+        "spent_tokens": 35972,
+        "spent_usd": 0.016629,
         "search_calls": 0,
-        "utilization": 0.15
+        "utilization": 0.2333
       },
-      "stopped_sufficient": true
+      "stopped_sufficient": false
+    },
+    "answer_quality": {
+      "good_overall": 88,
+      "good_passed": true,
+      "bad_overall": 58,
+      "bad_passed": false,
+      "ordering_ok": true
+    },
+    "llm_cache": {
+      "prompts": 24,
+      "unique": 8,
+      "provider_calls_first_pass": 8,
+      "provider_calls_second_pass": 8,
+      "cache_hit_ratio_first_pass": 0.6667,
+      "uncached_pass_ms": 43.14,
+      "cached_pass_ms": 0.22,
+      "speedup": 199.39,
+      "tokens_saved_per_repeat": 70,
+      "note": "second pass serves 24/24 from cache; provider_calls unchanged"
     },
     "latency": {
-      "matrix_60_facts_ms": 365.71,
-      "matrix_200_facts_ms": 924.84,
-      "cross_40x200_ms": 16.01,
-      "contradictions_60_facts_ms": 406.48,
-      "dedupe_60_facts_ms": 396.0,
-      "answer_support_40sent_ms": 0.4
+      "matrix_60_facts_ms": 217.87,
+      "matrix_200_facts_ms": 564.64,
+      "cross_40x200_ms": 10.41,
+      "contradictions_60_facts_ms": 256.13,
+      "dedupe_60_facts_ms": 240.1,
+      "answer_support_40sent_ms": 0.25
     },
     "memory": {
-      "rss_before_kib": 114584,
-      "rss_after_kib": 136388,
-      "delta_kib": 21804,
+      "rss_before_kib": 126284,
+      "rss_after_kib": 146932,
+      "delta_kib": 20648,
       "note": "ru_maxrss is process-lifetime max; delta bounds engine cost"
     }
   }
