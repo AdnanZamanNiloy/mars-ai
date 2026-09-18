@@ -136,6 +136,187 @@ def test_historical_weights_untouched_by_absent_signals():
     assert result["weights"]["source_diversity"] == 0.15
 
 
+def test_cross_source_agreement_uses_measured_corroboration():
+    """Fix: CSA must read the measured corroboration the pipeline records, not
+    re-derive it by pairwise claim similarity. A single claim held by 3
+    publishers is full independent corroboration."""
+    facts = [{
+        "claim": "The Eiffel Tower is 330 metres tall",
+        "source": "https://en.wikipedia.org/wiki/Eiffel_Tower",
+        "corroboration_count": 3,
+        "corroborating_sources": [
+            "https://en.wikipedia.org/wiki/Eiffel_Tower",
+            "https://www.britannica.com/topic/Eiffel-Tower",
+            "https://structurae.net/en/structures/eiffel-tower",
+        ],
+    }]
+    result = _base(facts=facts, critique={"is_sufficient": False})
+    assert result["signals"]["cross_source_agreement"] == 1.0
+
+
+def test_cross_source_agreement_single_publisher_is_zero():
+    facts = [{
+        "claim": "A lone claim from one publisher",
+        "source": "https://randomblog.com/a",
+        "corroboration_count": 1,
+    }]
+    result = _base(facts=facts, critique={"is_sufficient": False})
+    assert result["signals"]["cross_source_agreement"] == 0.0
+
+
+def test_cross_source_agreement_two_publishers_is_full():
+    facts = [{
+        "claim": "A claim two independent publishers assert",
+        "source": "https://a.example/news",
+        "corroboration_count": 2,
+    }]
+    result = _base(facts=facts, critique={"is_sufficient": False})
+    assert result["signals"]["cross_source_agreement"] == 1.0
+
+
+def test_cross_source_agreement_falls_back_without_measured_count():
+    """Legacy facts with no corroboration_count still use the pairwise path."""
+    disjoint = [
+        {"claim": "The Transformer is a neural network architecture from 2017",
+         "source": "https://arxiv.org/abs/1"},
+        {"claim": "A transformer changes AC voltage by electromagnetic induction",
+         "source": "https://www.britannica.com/topic/transformer"},
+    ]
+    result = _base(facts=disjoint, critique={"is_sufficient": False})
+    # Genuinely disjoint claims are not corroboration -> fallback scores 0.
+    assert result["signals"]["cross_source_agreement"] == 0.0
+    same = [
+        {"claim": "Solar capacity grew 40% in 2024", "source": "https://iea.org/x"},
+        {"claim": "Solar capacity expanded by 40 percent during 2024", "source": "https://irena.org/y"},
+    ]
+    result2 = _base(facts=same, critique={"is_sufficient": False})
+    assert result2["signals"]["cross_source_agreement"] == 1.0
+
+
+def test_critic_survival_is_evidence_grounded_not_constant():
+    """A failed critic on a strong pool survives more than on an empty pool;
+    the old three-valued constant made both 0.4 at the ceiling."""
+    strong = _base(critique={"is_sufficient": False}, iteration=3, max_iterations=3)
+    weak = _base(
+        facts=[{"claim": "x", "source": "https://b.com/a", "verified": False,
+                "verification_score": 0.0}],
+        critique={"is_sufficient": False}, iteration=3, max_iterations=3,
+    )
+    assert strong["signals"]["critic_survival"] > weak["signals"]["critic_survival"]
+
+
+def test_critic_survival_pass_is_one_and_fail_is_capped():
+    assert _base(critique={"is_sufficient": True})["signals"]["critic_survival"] == 1.0
+    forced = _base(critique={"is_sufficient": False}, iteration=3, max_iterations=3)
+    assert forced["signals"]["critic_survival"] <= 0.4
+    early = _base(critique={"is_sufficient": False}, iteration=1, max_iterations=3)
+    assert early["signals"]["critic_survival"] <= 0.6
+
+
+def test_freshness_uses_fact_dates_and_shared_curve():
+    """Freshness is measured over facts actually in the pool, using the same
+    exponential curve as the verifier (not a separate linear one)."""
+    from app.agents.sources import freshness_score
+
+    facts = [
+        {"claim": "c1", "source": "https://a.com/1", "verified": True,
+         "verification_score": 0.8, "published_at": "2026-09-01", "search_type": "default"},
+        {"claim": "c2", "source": "https://b.com/2", "verified": True,
+         "verification_score": 0.8, "published_at": "2026-09-01", "search_type": "default"},
+    ]
+    result = _base(facts=facts)
+    assert result["signals"]["freshness"] == freshness_score("2026-09-01", "default")
+
+
+def test_freshness_ignores_undated_search_results_when_facts_present():
+    facts = [
+        {"claim": "c1", "source": "https://a.com/1", "verified": True,
+         "verification_score": 0.8, "published_at": "2026-09-01", "search_type": "default"},
+    ]
+    with_dates = _base(facts=facts, source_dates=["2001-01-01", "1999-01-01"])
+    # Fact-level dates win over irrelevant stale search-result dates.
+    assert with_dates["signals"]["freshness"] > 0.9
+
+
+def test_freshness_unmeasured_stays_zero_and_weightless():
+    result = _base(facts=[
+        {"claim": "c1", "source": "https://a.com/1", "verified": True, "verification_score": 0.8},
+    ])
+    assert result["signals"]["freshness"] == 0.0
+    assert result["weights"]["freshness"] == 0.0
+    assert any("freshness" in n for n in result["notes"])
+
+
+def test_axis_coverage_requires_min_two_facts_per_axis():
+    """One verified fact per angle is not "covered": the axis needs
+    AXIS_MIN_FACTS before it counts."""
+    from app.core.confidence import AXIS_MIN_FACTS
+    assert AXIS_MIN_FACTS == 2
+
+    # Two DISTINCT axes (definition, evidence), one fact each.
+    plan = [
+        {"question": "what is solar", "axis": "definition"},
+        {"question": "how much did solar grow", "axis": "evidence"},
+    ]
+    one_per_axis = [
+        {"claim": "solar is a renewable energy source", "source": "https://iea.org/x",
+         "verified": True, "verification_score": 0.8, "sub_question": "what is solar"},
+        {"claim": "solar grew", "source": "https://irena.org/y", "verified": True,
+         "verification_score": 0.8, "sub_question": "how much did solar grow"},
+    ]
+    result = _base(facts=one_per_axis, sub_questions=plan)
+    assert result["signals"]["axis_coverage"] == 0.0
+
+    two_per_axis = [
+        {**one_per_axis[0]},
+        {"claim": "solar is a photovoltaic energy source", "source": "https://energy.gov/a",
+         "verified": True, "verification_score": 0.8, "sub_question": "what is solar"},
+        {**one_per_axis[1]},
+        {"claim": "solar capacity grew last year", "source": "https://ember.org/z",
+         "verified": True, "verification_score": 0.8, "sub_question": "how much did solar grow"},
+    ]
+    result2 = _base(facts=two_per_axis, sub_questions=plan)
+    assert result2["signals"]["axis_coverage"] == 1.0
+
+
+def test_source_diversity_counts_registrable_domains_not_subdomains():
+    """arxiv.org + ar5iv.labs.arxiv.org are ONE publisher; subdomains must not
+    inflate diversity."""
+    facts = [
+        {"claim": "a", "source": "https://arxiv.org/abs/1", "verified": True, "verification_score": 0.8},
+        {"claim": "b", "source": "https://ar5iv.labs.arxiv.org/html/1", "verified": True, "verification_score": 0.8},
+        {"claim": "c", "source": "https://www.britannica.com/x", "verified": True, "verification_score": 0.8},
+        {"claim": "d", "source": "https://kids.britannica.com/y", "verified": True, "verification_score": 0.8},
+    ]
+    result = _base(facts=facts)
+    # Two registrable publishers across four facts -> 2 / min(4,5) = 0.5,
+    # not the old raw-host 4/4 = 1.0.
+    assert result["signals"]["source_diversity"] == 0.5
+
+
+def test_quote_matching_uses_corroboration_excerpt(monkeypatch):
+    """A quote present only in the retained excerpt (raw content blanked) must
+    verify, instead of failing as "direct quote not found"."""
+    from app.agents import verifier
+
+    quote = "solar capacity grew forty percent during the year"
+    excerpt = f"Intro text. {quote}. More text."
+    fact = {
+        "claim": "Solar capacity grew by forty percent during the year.",
+        "source": "https://example.gov/report",
+        "direct_quote": quote,
+        "corroboration_excerpt": excerpt,
+    }
+    results = [{
+        "url": "https://example.gov/report",
+        "content": "",
+        "snippet": "Solar capacity grew.",
+        "title": "Solar report",
+    }]
+    out = verifier.verify_facts([fact], results)
+    assert out[0]["verification_checks"]["quote_verified"] is True
+
+
 def test_cross_source_agreement_prefilter_preserves_corroboration():
     """The cheap prefilter in _similarity must be score-preserving: pairs
     inside the corroboration band keep their exact SequenceMatcher score,

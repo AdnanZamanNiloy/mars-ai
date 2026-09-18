@@ -35,6 +35,9 @@ logger = get_logger(__name__)
 # dedupe merge threshold (0.86) so identical claims were already collapsed.
 CORROBORATION_SIMILARITY = 0.55
 
+# Minimum verified facts a planned axis needs before it counts as covered.
+AXIS_MIN_FACTS = 2
+
 WEIGHTS: Dict[str, float] = {
     "source_quality": 0.20,
     "source_diversity": 0.15,
@@ -63,33 +66,48 @@ CONTRADICTION_PENALTY_MODERATE = 0.03  # per moderate conflict
 CONTRADICTION_PENALTY_CAP = 0.18
 SEVERE_CONTRADICTION_SEVERITY = 0.60
 
-# Recency curve: fresh under a month, decaying to zero at two years.
-FRESHNESS_HALF_LIFE_DAYS = 730
 
-
-def _freshness(source_dates: List[str] | None) -> tuple[float, bool]:
+def _freshness(
+    source_dates: List[str] | None,
+    facts: List[Dict[str, Any]] | None = None,
+) -> tuple[float, bool]:
     """Mean recency over parseable dates. (0.0, False) when none parse —
-    unknown stays unmeasured, never faked."""
-    from datetime import date
+    unknown stays unmeasured, never faked.
 
-    from app.agents.evidence_utils import parse_published_date
+    Dates are taken from the FACTS actually in the pool when available (each
+    fact carries `published_at`), not from the raw search-result list. The old
+    behavior averaged every dated search result, including ones that never
+    produced a fact, so a stale irrelevant page dragged down (or a fresh
+    irrelevant page flattered) a signal that is supposed to describe the
+    evidence. Falls back to `source_dates` for legacy callers.
 
-    ages: List[float] = []
-    today = date.today()
-    for raw in source_dates or []:
-        iso = parse_published_date(raw)
-        if not iso:
-            continue
-        try:
-            age_days = (today - date.fromisoformat(iso)).days
-        except (TypeError, ValueError):
-            continue
-        if age_days < 0:
-            age_days = 0  # future-dated metadata is a provider quirk, not freshness
-        ages.append(max(0.0, 1.0 - age_days / FRESHNESS_HALF_LIFE_DAYS))
-    if not ages:
+    Uses the SAME exponential recency curve as the verifier
+    (`sources.freshness_score`, per search_type), removing the prior split
+    where the confidence engine's linear 730-day curve scored a source 0.0
+    while the verifier scored the identical source ~0.5-0.7.
+    """
+    from app.agents.sources import freshness_score
+
+    items: List[tuple[str, str]] = []
+    pool = [f for f in (facts or []) if isinstance(f, dict)]
+    if pool:
+        for f in pool:
+            published = str(f.get("published_at", "") or "")
+            if published.strip():
+                items.append((published, str(f.get("search_type", "default") or "default")))
+    else:
+        items = [(str(raw), "default") for raw in (source_dates or []) if str(raw).strip()]
+
+    scores: List[float] = []
+    for published, search_type in items:
+        from app.agents.evidence_utils import parse_published_date
+
+        if not parse_published_date(published):
+            continue  # unparseable stays unmeasured
+        scores.append(freshness_score(published, search_type))
+    if not scores:
         return 0.0, False
-    return round(sum(ages) / len(ages), 3), True
+    return round(sum(scores) / len(scores), 3), True
 
 
 def _safe_conf(value: Any) -> float:
@@ -97,6 +115,13 @@ def _safe_conf(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _safe_int(value: Any, default: int = 1) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _similarity(a: str, b: str) -> float:
@@ -129,12 +154,27 @@ def _source_quality(facts: List[Dict[str, Any]]) -> float:
 
 
 def _source_diversity(facts: List[Dict[str, Any]]) -> float:
-    domains = {extract_domain(str(f.get("source", ""))) for f in facts if f.get("source")}
-    domains.discard("")
+    """Distinct PUBLISHERS (registrable domains) relative to fact count.
+
+    Uses registrable domains, not raw hosts, matching the evidence spine:
+    `arxiv.org` and `ar5iv.labs.arxiv.org` are one publisher, as are
+    `www.britannica.com` and `kids.britannica.com`. The previous raw-host
+    version counted subdomains as independent sources, so a pool dominated by
+    one organisation's subdomains could read 1.0. Returns 0.0 when there is
+    only one fact or one publisher — a single publisher is never diverse.
+    """
+    from app.core.evidence_grade import registrable_domain
+
+    domains: set[str] = set()
+    for f in facts:
+        source = str(f.get("source", ""))
+        if not source:
+            continue
+        domain = registrable_domain(source) or extract_domain(source)
+        if domain:
+            domains.add(domain)
     if len(facts) < 2 or len(domains) < 2:
-        # A single fact or a single domain is by definition not diverse.
         return 0.0
-    # Distinct domains relative to fact count, capped at 5 facts.
     return min(1.0, len(domains) / max(2.0, min(len(facts), 5)))
 
 
@@ -157,12 +197,43 @@ def _claim_verification_strength(facts: List[Dict[str, Any]]) -> float:
 
 
 def _cross_source_agreement(facts: List[Dict[str, Any]]) -> float:
-    """Fraction of claims corroborated by a similar claim from a DIFFERENT publisher.
+    """Fraction of claims independently corroborated by a DIFFERENT publisher.
 
-    Independence is measured at the registrable-domain level (blog.example.com
-    and www.example.com are one publisher), matching the evidence spine — a
-    raw host comparison would count a site's own pages as corroboration.
+    Two ways to measure this, tried in order:
+
+    1. MEASURED CORROBORATION (preferred). Dedup and the corroboration
+       acquisition pass already record, per fact, how many distinct
+       registrable-domain publishers assert it (`corroboration_count`, written
+       by `dedupe_semantic_facts` / `apply_corroboration`). That count is the
+       signal a human means by "cross-source agreement", and the O(n^2)
+       pairwise re-derivation below is blind to it — it asks whether two
+       *different* claims are similar, which by construction they usually are
+       not (verified live: median 0.077, 34% exactly zero). When any fact
+       carries the measured count, this is authoritative.
+    2. PAIRWISE FALLBACK. Only for legacy callers whose facts predate the
+       corroboration fields: fraction of claims with a similar claim from a
+       different registrable domain. Independence is at the registrable-domain
+       level (blog.example.com and www.example.com are one publisher).
+
+    Neither path can manufacture agreement: a claim with one publisher stays
+    at 1 corroborator, and the fallback still requires a genuinely similar
+    second claim.
     """
+    if not facts:
+        return 0.0
+
+    measured = [
+        f for f in facts
+        if isinstance(f, dict) and "corroboration_count" in f
+    ]
+    if measured:
+        # 2+ independent publishers = full agreement for that claim. One
+        # publisher is not agreement with itself, so a count of 1 scores 0.
+        return sum(
+            min(1.0, max(0, _safe_int(f.get("corroboration_count", 1)) - 1))
+            for f in measured
+        ) / len(measured)
+
     if len(facts) < 2:
         return 0.0
     from app.core.evidence_grade import registrable_domain
@@ -183,10 +254,48 @@ def _cross_source_agreement(facts: List[Dict[str, Any]]) -> float:
     return corroborated / len(claims)
 
 
-def _critic_survival(critique: Dict[str, Any], iteration: int, max_iterations: int) -> float:
-    """1.0 if the critic passed the run on its own; lower when forced through loops/ceilings."""
+def _critic_survival(
+    critique: Dict[str, Any],
+    iteration: int,
+    max_iterations: int,
+    signals: Dict[str, Any] | None = None,
+) -> float:
+    """How much of the evidence base survives the critic's scrutiny.
+
+    The previous version returned one of three constants (1.0 / 0.6 / 0.4)
+    keyed on `is_sufficient` and the iteration counter. That made the signal a
+    measure of RUN CONTROL, not evidence survival: 91% of 250 live reviews
+    landed on 0.4/0.6, only 8.8% ever passed, and a near-empty pool (all other
+    signals ~0) still scored 0.6. It was a near-constant tax uncorrelated with
+    evidence quality.
+
+    When the measured signals are available, survival is the share of the
+    evidence-quality dimensions the critic itself gates on that reach a
+    passing level — the claim-level grounding, independent corroboration and
+    plan coverage. A pass by the critic still guarantees 1.0. The discrete
+    fallback is kept ONLY for legacy callers that pass no signals, so existing
+    tests and external callers keep their contract.
+    """
     if bool(critique.get("is_sufficient", False)):
         return 1.0
+
+    if signals:
+        # The three dimensions that map to the critic's completeness /
+        # independence / coverage criteria. Each is on [0, 1].
+        keys = ("citation_coverage", "cross_source_agreement", "axis_coverage")
+        present = [_safe_conf(signals.get(k)) for k in keys if k in signals]
+        if present:
+            survival = sum(present) / len(present)
+            # A forced-through run is weaker than a clean early stop of the
+            # same evidence: cap at the ceiling outcome only when the pool did
+            # not itself satisfy the critic. Never above the 0.6 legacy
+            # "stopped early" value on a fail — a failed critic is a failed
+            # critic, and letting measured-but-strong evidence push a FAIL
+            # above a PASS would invert the gate.
+            if iteration >= max_iterations:
+                return round(min(survival, 0.4), 3)
+            return round(min(survival, 0.6), 3)
+
     if iteration >= max_iterations:
         return 0.4  # forced through the ceiling
     return 0.6  # stopped early for another reason (timeout, manual stop, etc.)
@@ -253,9 +362,13 @@ def _axis_coverage(sub_questions: List[Dict[str, Any]] | None, facts: List[Dict[
     Facts attribute to a contract's axis via the fact's own `sub_question`
     (stamped by the summarizer from the source record and preserved by dedup).
     Only verified facts count — unless verification never ran, in which case
-    the pool is judged as-is. The previous implementation delegated to the
-    depth controller's URL-based attribution against a synthetic state with an
-    empty search_results list, so the signal was structurally always 0.0.
+    the pool is judged as-is.
+
+    An axis counts as covered only when at least AXIS_MIN_FACTS verified facts
+    support it. The previous "any single fact" rule let every axis reach 1.0
+    with one claim each, so a plan whose angles were each touched once — but
+    not actually investigated — reported full coverage. A single fact about an
+    angle is not coverage of that angle.
     """
     axis_by_question: Dict[str, str] = {}
     for q in sub_questions or []:
@@ -271,12 +384,14 @@ def _axis_coverage(sub_questions: List[Dict[str, Any]] | None, facts: List[Dict[
     if any("verified" in f for f in pool):
         pool = [f for f in pool if f.get("verified")]
 
-    covered = {
-        axis_by_question[str(f.get("sub_question", "")).strip()]
-        for f in pool
-        if str(f.get("sub_question", "")).strip() in axis_by_question
-    }
-    return min(1.0, len(covered) / len(set(axis_by_question.values())))
+    facts_per_axis: Dict[str, int] = {}
+    for f in pool:
+        axis = axis_by_question.get(str(f.get("sub_question", "")).strip())
+        if axis:
+            facts_per_axis[axis] = facts_per_axis.get(axis, 0) + 1
+
+    covered = sum(1 for n in facts_per_axis.values() if n >= AXIS_MIN_FACTS)
+    return min(1.0, covered / len(set(axis_by_question.values())))
 
 
 def _grade_records(facts: List[Dict[str, Any]], contradictions: List[Dict[str, Any]] | None) -> float | None:
@@ -372,7 +487,7 @@ def compute_confidence(
     degradation reasons still report provider-transient vs weak-evidence
     separately so the two causes are never conflated.
     """
-    freshness_value, measured = _freshness(source_dates)
+    freshness_value, measured = _freshness(source_dates, facts)
     weights = dict(WEIGHTS_FRESH if measured else WEIGHTS)
 
     support_rate: float | None = None
@@ -391,9 +506,13 @@ def compute_confidence(
         "citation_coverage": round(_citation_coverage(facts), 3),
         "claim_verification_strength": round(_claim_verification_strength(facts), 3),
         "cross_source_agreement": round(_cross_source_agreement(facts), 3),
-        "critic_survival": round(_critic_survival(critique, iteration, max_iterations), 3),
         "freshness": freshness_value,
     }
+    # Critic survival reads the measured dimensions above, so it is computed
+    # after they exist (it was a 3-valued constant when computed inline).
+    signals["critic_survival"] = round(
+        _critic_survival(critique, iteration, max_iterations, signals), 3
+    )
 
     # --- v3 signal wiring (only when the inputs exist) --------------------
     if support_rate is not None:
