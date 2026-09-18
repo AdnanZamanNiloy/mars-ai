@@ -1191,6 +1191,135 @@ def _normalized_aliases(canonical: str) -> tuple:
     return tuple(_normalize_heading(alias) for alias in REQUIRED_SECTIONS[canonical])
 
 
+def _finding_confidence(fact: Dict[str, Any]) -> float:
+    """Per-claim confidence in [0, 1], from measured signals only.
+
+    Base is the claim's own confidence; verification and independent
+    corroboration each lift it (a verified, multi-source claim is more
+    trustworthy than an unverified single-source one), and a single-source or
+    unverified claim is capped in the provisional band. Never invented: a fact
+    with no confidence field reads 0.0, not a flattering default.
+    """
+    try:
+        base = float(fact.get("confidence", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        base = 0.0
+    base = max(0.0, min(1.0, base))
+    if fact.get("verified") is True:
+        base += 0.05
+    try:
+        corroboration = int(fact.get("corroboration_count", 1) or 1)
+    except (TypeError, ValueError):
+        corroboration = 1
+    if corroboration >= 2:
+        base += 0.05
+    # A single-source or unverified claim must never read as high-confidence:
+    # cap it so a provisional finding cannot masquerade as established.
+    if corroboration <= 1 or fact.get("verified") is not True:
+        base = min(base, 0.60)
+    return round(max(0.0, min(1.0, base)), 2)
+
+
+def _finding_grade(fact: Dict[str, Any]) -> str:
+    """A/B/C/D evidence grade for one fact (empty when ungraded)."""
+    grade = str(fact.get("evidence_grade", "") or "").strip().upper()
+    if grade in ("A", "B", "C", "D"):
+        return grade
+    evidence = fact.get("evidence")
+    if isinstance(evidence, dict):
+        grade = str(evidence.get("grade", "") or "").strip().upper()
+        if grade in ("A", "B", "C", "D"):
+            return grade
+    return ""
+
+
+def _finding_justification(fact: Dict[str, Any]) -> str:
+    """Short, measured justification for a finding's confidence.
+
+    States what was actually checked — verification, independent corroboration,
+    source grade — so a skeptical reader can see WHY the number is what it is
+    instead of trusting a bare score.
+    """
+    parts: List[str] = []
+    if fact.get("verified") is True:
+        parts.append("verified against source")
+    else:
+        parts.append("unverified")
+    try:
+        corroboration = int(fact.get("corroboration_count", 1) or 1)
+    except (TypeError, ValueError):
+        corroboration = 1
+    if corroboration >= 2:
+        parts.append(f"{corroboration} independent sources")
+    else:
+        parts.append("single source")
+    if fact.get("temporal_projection"):
+        parts.append("projection, not observed")
+    return "; ".join(parts)
+
+
+def _ledger_warnings(ctx: Dict[str, Any]) -> str:
+    """Deterministic ledger warnings appended to Evidence Strength.
+
+    Two composition failures are surfaced, never hidden: regulation dominance
+    (>30% of evidence), which turns a trends brief into a legal summary, and
+    non-Western under-representation, which turns a global picture into a US/EU
+    one. Both are warnings, not silent omissions.
+    """
+    warnings: List[str] = []
+    try:
+        regulation = float(ctx.get("regulation_share", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        regulation = 0.0
+    if regulation > 0.30:
+        warnings.append(
+            f"Warning: regulation-sourced evidence is {regulation:.0%} of the pool "
+            "(>30%). Regulatory material is reactive context, not the lead story; "
+            "read capability/economics/adoption findings with that skew in mind."
+        )
+    try:
+        non_western = float(ctx.get("non_western_share", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        non_western = 0.0
+    if non_western < 0.10:
+        warnings.append(
+            f"Warning: non-Western sources are {non_western:.0%} of the pool. The "
+            "picture may be US/EU-centric; treat global claims as provisional."
+        )
+    try:
+        primary = float(ctx.get("primary_share", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        primary = 0.0
+    if primary < 0.30:
+        warnings.append(
+            f"Warning: only {primary:.0%} of sources are primary (papers, official "
+            "reports, filings); secondary summaries dominate."
+        )
+    return ("\n\n" + " ".join(warnings)) if warnings else ""
+
+
+def _render_finding_line(fact: Dict[str, Any]) -> str:
+    """One Key-Findings bullet: claim + citation + confidence + grade + why.
+
+    Every finding carries a per-claim confidence score and an A/B/C evidence
+    grade with a short measured justification, so the reader can triage which
+    findings to trust and which are provisional. Returns "" for an empty claim.
+    """
+    claim = re.sub(r"\s+", " ", str(fact.get("claim", "") or "")).strip()
+    if not claim:
+        return ""
+    try:
+        index = int(fact.get("citation"))
+    except (TypeError, ValueError):
+        index = 0
+    marker = f" [{index}]" if index else ""
+    confidence = _finding_confidence(fact)
+    grade = _finding_grade(fact)
+    grade_tag = f", grade {grade}" if grade else ""
+    justification = _finding_justification(fact)
+    return f"- {claim}{marker} — confidence {confidence:.2f}{grade_tag} ({justification})"
+
+
 def _render_required_section(
     canonical: str,
     *,
@@ -1223,15 +1352,9 @@ def _render_required_section(
         source_facts = list(cited_facts) if cited_facts else list(usable_facts)
         top = _stratified_top_facts(source_facts, per_angle=2, cap=8)
         for fact in top:
-            claim = re.sub(r"\s+", " ", str(fact.get("claim", "") or "")).strip()
-            if not claim:
-                continue
-            try:
-                index = int(fact.get("citation"))
-            except (TypeError, ValueError):
-                index = 0
-            marker = f" [{index}]" if index else ""
-            lines.append(f"- {claim}{marker}")
+            rendered = _render_finding_line(fact)
+            if rendered:
+                lines.append(rendered)
         if len(lines) == 2:
             lines.append("- No verified findings were extracted from the available evidence.")
         return "\n".join(lines)
@@ -1246,6 +1369,7 @@ def _render_required_section(
                 f"Evidence grades: A={a}, B={b}, C={c}, D={d} "
                 "(A/B = verified and strongly/independently sourced)."
             )
+        body += _ledger_warnings(ctx)
         return "## Evidence Strength\n\n" + body
 
     if canonical == "Limitations & Unknowns":
@@ -1296,7 +1420,25 @@ def _render_required_section(
                     if statement:
                         lines.append(f"- {statement}")
         if len(lines) == 2:
-            lines.append("- No credible counterarguments or source conflicts were detected.")
+            # Guard: never claim the absence of counterarguments unless a
+            # dedicated counter-evidence search actually ran AND returned
+            # nothing. An empty section with no failed search is an UNKNOWN,
+            # not a clean bill of health.
+            counter_searched = bool(ctx.get("counter_evidence_attempted"))
+            if counter_searched:
+                lines.append(
+                    "- A dedicated counter-evidence search was run and returned no "
+                    "credible opposing claims or source conflicts. This is an "
+                    "absence of found counter-evidence, not proof none exists."
+                )
+            else:
+                lines.append(
+                    "- No counter-evidence search was completed for this run, so "
+                    "the absence of counterarguments here is UNKNOWN, not "
+                    "established. Treat the dominant narrative as unopposed by "
+                    "default and re-run with the counter-evidence track before "
+                    "relying on it."
+                )
         return "\n".join(lines)
 
     if canonical == "Open Questions & Missing Angles":
@@ -1319,17 +1461,9 @@ def _render_required_section(
             if re.search(r"\d", str(f.get("claim", "") or ""))
         ]
         for fact in figures[:10]:
-            claim = re.sub(r"\s+", " ", str(fact.get("claim", "") or "")).strip()
-            if not claim:
-                continue
-            try:
-                index = int(fact.get("citation"))
-            except (TypeError, ValueError):
-                index = 0
-            marker = f" [{index}]" if index else ""
-            grade = str(fact.get("evidence_grade", "") or "")
-            grade_tag = f" (grade {grade})" if grade else ""
-            lines.append(f"- {claim}{marker}{grade_tag}")
+            rendered = _render_finding_line(fact)
+            if rendered:
+                lines.append(rendered)
         if len(lines) == 2:
             lines.append("- No quantitative figures were extracted from the evidence.")
         return "\n".join(lines)

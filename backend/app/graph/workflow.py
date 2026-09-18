@@ -1775,6 +1775,10 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             # Mandatory-section inputs: measured coverage gaps so the
             # limitations section is populated from real deficiencies.
             "coverage_gaps": _measured_coverage_gaps(state),
+            # Counter-argument guard: whether a dedicated counter-evidence
+            # search actually ran, so the report never claims "no credible
+            # counterarguments" from an unsearched pool.
+            "counter_evidence_attempted": bool(state.get("counter_evidence_attempted")),
         }
         # Source-ledger composition: regulation dominance and non-Western
         # under-representation are surfaced on the report so a legal-summary

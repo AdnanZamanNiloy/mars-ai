@@ -314,3 +314,81 @@ def test_synthesizer_fallback_always_caps():
     )
     assert result["overall"] <= DEGRADED_CAP
     assert any("capped" in n for n in result["notes"])
+
+
+# ---------------------------------------------------------------------------
+# E. Per-finding confidence + A/B/C grade, ledger warnings, counter-arg guard
+# ---------------------------------------------------------------------------
+
+def test_key_findings_carry_confidence_grade_and_justification():
+    from app.agents.synthesizer import _render_finding_line
+
+    corroborated = {
+        "claim": "AI capex reached $200B in 2025", "citation": 3,
+        "confidence": 0.9, "verified": True, "corroboration_count": 3,
+        "evidence_grade": "A",
+    }
+    line = _render_finding_line(corroborated)
+    assert "confidence" in line
+    assert "grade A" in line
+    assert "3 independent sources" in line
+    assert "[3]" in line
+
+
+def test_single_source_finding_is_capped_provisional():
+    from app.agents.synthesizer import _render_finding_line, _finding_confidence
+
+    provisional = {
+        "claim": "A lone unverified claim", "citation": 5,
+        "confidence": 0.95, "verified": False, "corroboration_count": 1,
+    }
+    assert _finding_confidence(provisional) <= 0.60
+    assert "single source" in _render_finding_line(provisional)
+
+
+def test_grade_absent_is_omitted_not_invented():
+    from app.agents.synthesizer import _render_finding_line
+
+    line = _render_finding_line(
+        {"claim": "A plain factual claim here", "citation": 1, "confidence": 0.7,
+         "verified": True, "corroboration_count": 2}
+    )
+    assert "grade " not in line
+
+
+def test_ledger_warns_on_regulation_dominance():
+    from app.agents.synthesizer import _ledger_warnings
+
+    text = _ledger_warnings(
+        {"regulation_share": 0.45, "non_western_share": 0.3, "primary_share": 0.5}
+    )
+    assert "45%" in text
+    assert ">30%" in text
+
+
+def test_ledger_silent_when_composition_healthy():
+    from app.agents.synthesizer import _ledger_warnings
+
+    assert _ledger_warnings(
+        {"regulation_share": 0.1, "non_western_share": 0.3, "primary_share": 0.6}
+    ) == ""
+
+
+def test_counterargument_guard_never_claims_absence_without_search():
+    from app.agents.synthesizer import _render_required_section
+
+    unsearched = _render_required_section(
+        "Counterarguments & Disputed Points",
+        ctx={"counter_evidence_attempted": False},
+        usable_facts=[], contradictions=[],
+    )
+    assert "UNKNOWN" in unsearched
+    assert "No credible counterarguments" not in unsearched
+
+    searched = _render_required_section(
+        "Counterarguments & Disputed Points",
+        ctx={"counter_evidence_attempted": True},
+        usable_facts=[], contradictions=[],
+    )
+    assert "counter-evidence search was run" in searched
+    assert "not proof none exists" in searched
