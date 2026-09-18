@@ -128,10 +128,10 @@ export default function IntelligencePanel({
 const SIGNAL_LABELS = {
   source_quality: "Source quality",
   source_diversity: "Source diversity",
-  citation_coverage: "Citation coverage",
+  citation_coverage: "Claims verified",
   citation_support: "Citation support",
   axis_coverage: "Axis coverage",
-  claim_verification_strength: "Claim verification",
+  claim_verification_strength: "Source-term overlap",
   cross_source_agreement: "Cross-source agreement",
   critic_survival: "Critic survival",
   freshness: "Freshness",

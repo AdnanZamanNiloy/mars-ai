@@ -228,7 +228,18 @@ def verify_facts(
         if quote_state is None and fact.get("direct_quote"):
             from app.agents.summarizer import _quote_supported
 
-            quote_state = _quote_supported(str(fact.get("direct_quote", "")), source_text)
+            # Match against content first, then the retained corroboration
+            # excerpt. Raw page content is blanked after the first verification
+            # pass (workflow.verifier_node), but the excerpt preserves the head
+            # of the page — the largest source of "direct quote not found"
+            # failures (58 of 233 live failures) was valid quotes being judged
+            # against snippet-only text.
+            checked_text = source_text
+            if _quote_supported(str(fact.get("direct_quote", "")), checked_text) is False:
+                excerpt = str(fact.get("corroboration_excerpt", "") or "")
+                if excerpt and excerpt not in checked_text:
+                    checked_text = (checked_text + " " + excerpt).strip()
+            quote_state = _quote_supported(str(fact.get("direct_quote", "")), checked_text)
         checks["quote_verified"] = quote_state
 
         fresh = freshness_score(
