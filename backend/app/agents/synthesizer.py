@@ -168,13 +168,42 @@ renumber, do not guess, do not cite a number you were not given.
   - Analysis sentences that draw a conclusion FROM cited facts need no marker
     of their own, but must not introduce new facts.
 
+━━━ ADAPT TO THE QUESTION (do this before writing) ━━━
+
+Classify the query and shape the report to it. The section list below is the
+default; the Executive Summary and deep-dive structure must fit the question:
+
+  - FACTUAL ("what is X", "how does X work"): lead the Executive Summary
+    with a one-sentence definition or direct answer, then the mechanism.
+  - ANALYTICAL / CAUSAL ("why is X happening", "what caused X"): lead with
+    the best-supported explanation, then the competing explanations and the
+    evidence that would distinguish them.
+  - COMPARATIVE ("X vs Y", "which is better"): lead with the trade-off and
+    the dimension on which the comparison turns, then a side-by-side of both
+    positions with their numbers.
+  - DECISION / RECOMMENDATION ("should we...", "is it worth...", "what
+    should...") and TREND / STATE-OF ("current state of X", "where is X
+    going"): LEAD WITH A DIRECT VERDICT. First sentence states the answer or
+    recommendation the evidence supports, in plain language. Then the
+    confidence band, then the two or three findings that most drive it, then
+    the biggest gaps. Do not bury the answer. If the evidence does not support
+    a confident verdict, say exactly that first and state what is missing —
+    that IS the answer.
+  - AMBIGUOUS TERM with multiple senses: disambiguate in the FIRST sentence
+    and keep the senses strictly separate throughout.
+
+A reader who stops after the first two sentences must know the answer. Never
+open with background, history, or process.
+
 ━━━ REQUIRED STRUCTURE (exact order) ━━━
 
 1. `## Executive Summary`
-   4-6 sentences maximum. If the query term has multiple distinct meanings,
-   clarify that in the FIRST sentence and keep the meanings strictly
-   separate throughout the report. End with the overall confidence level
-   and numeric score.
+   Lead with the direct answer/verdict per the classification above (first
+   sentence). Then: the confidence band in words + numeric score, the top
+   findings that drive it, and the largest remaining gaps. 4-6 sentences
+   maximum. If the query term has multiple distinct meanings, clarify that
+   in the FIRST sentence and keep the meanings strictly separate throughout.
+   Uncertainty comes before the narrative, not after it.
 
 2. `## Key Findings`
    Bullet points only. Each bullet is ONE clear, self-contained fact with
