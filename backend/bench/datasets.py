@@ -327,3 +327,44 @@ CALIBRATION_SCENARIOS = [
         "penalty_expected": True,
     },
 ]
+
+# ---------------------------------------------------------------------------
+# 8. Query-router routing: (query, expected_path, reason_tokens)
+#     expected_path is what decide_route SHOULD conclude. Stable general
+#     knowledge MAY be answered directly; anything depending on time,
+#     sourced numbers, decisions, contested topics, or ambiguity MUST be
+#     researched. reason_tokens are substrings that must appear in the
+#     decision's signals' hard_blockers (or "clear" for an unblocked query).
+# ---------------------------------------------------------------------------
+
+ROUTER_ROUTING_CASES = [
+    # --- must research: freshness ---
+    ("What is the latest price of gold?", "research", ["freshness"]),
+    ("How many electric vehicles were sold in 2025?", "research", ["freshness"]),
+    ("What is the current population of Bangladesh?", "research", ["freshness"]),
+    ("Which company has the highest market cap right now?", "research", ["freshness"]),
+    ("What happened in the AI industry this year?", "research", ["freshness"]),
+    # --- must research: quantitative ---
+    ("What is the market size of the battery industry?", "research", ["quantitative"]),
+    ("What percentage of energy comes from solar in Germany?", "research", ["quantitative"]),
+    ("How much did global EV sales grow last year?", "research", ["quantitative"]),
+    # --- must research: decision framing ---
+    ("Should we invest in nuclear energy for our grid?", "research", ["decision"]),
+    ("Which database should I choose for this project?", "research", ["decision"]),
+    # --- must research: contested / high-stakes ---
+    ("Is this supplement safe to take daily?", "research", ["contested"]),
+    ("Is the keto diet harmful?", "research", ["contested"]),
+    # --- must research: query type (comparative/analytical/exploratory) ---
+    ("Compare solar and nuclear energy costs", "research", ["query_type"]),
+    ("What is the impact of remote work on productivity?", "research", ["query_type"]),
+    ("Give me an overview of the quantum computing landscape", "research", ["query_type"]),
+    # --- must research: ambiguity (intent supplied below) ---
+    ("What is transformer?", "research", ["ambiguity"], {"ambiguity": True, "query_type": "factual"}),
+    ("What is apple?", "research", ["ambiguity"], {"ambiguity": True, "query_type": "factual"}),
+    # --- may answer directly: stable general knowledge (no hard blocker) ---
+    ("What is a for-loop?", "clear", ["clear"]),
+    ("What is a Python list comprehension?", "clear", ["clear"]),
+    ("Explain how TCP handles packet loss.", "clear", ["clear"]),
+    ("What is the capital of France?", "clear", ["clear"]),
+]
+

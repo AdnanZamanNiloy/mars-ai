@@ -1,6 +1,6 @@
 # MARS-AI Benchmark Results
 
-*Suite: mars-offline-benchmarks v2.0 — generated 2026-09-18T14:04:47Z*
+*Suite: mars-offline-benchmarks v2.0 — generated 2026-09-19T16:48:22Z*
 
 Deterministic, network-free measurement of the intelligence and performance
 properties of the upgraded pipeline. All metrics run on hand-labeled
@@ -17,8 +17,8 @@ reproducible with `python bench/run_offline.py` from `backend/`.
 | Contradiction detection | P=1.0000 R=1.0000 F1=1.0000 across 3 kinds ['numeric', 'polarity', 'temporal'] |
 | Confidence calibration | 100% in expected band, monotonic ordering: True |
 | Semantic engine | Spearman 0.7094 vs labels, dedup F1 0.7500 @ 0.86 |
-| LLM response cache | 66% hit ratio on repeat-heavy workload, 206.71x repeat-pass speedup |
-| End-to-end pipeline (mocked LLM) | 3 iterations (intelligent stop), 2 dependency waves, support rate 1.0000 |
+| Query router | routing accuracy 1.0000 across 21 labeled queries, missed-research 0 |
+| LLM response cache | 66% hit ratio on repeat-heavy workload, 254.0x repeat-pass speedup |
 
 Raw numbers: `benchmark_results.json` alongside this file.
 
@@ -29,7 +29,7 @@ Raw numbers: `benchmark_results.json` alongside this file.
 8 true positives, 0 false accepts, 0 false rejects, 8 true rejects.
 Hard checks: weighted lexical overlap, source authority, unit-aware numeric grounding,
 polarity consistency vs the most-similar source sentence, direct-quote location.
-Per-claim latency 158.2 µs. Misses: 0.
+Per-claim latency 165.9 µs. Misses: 0.
 
 ### Hallucination adversarial set
 
@@ -40,7 +40,7 @@ Rejected 6/6; leak rate 0.0000.
 
 Numeric (unit-aware), polarity and temporal detectors over the shared semantic
 engine. Kinds detected this run: {'numeric': 2, 'polarity': 3, 'temporal': 1}. Pairwise scan latency
-7.7800 ms for 12 labeled pairs.
+4.3500 ms for 12 labeled pairs.
 
 ### Confidence engine v2
 
@@ -51,15 +51,15 @@ citation support and axis coverage blend in when present.
 
 | Operation | Latency |
 |---|---|
-| Similarity matrix, 60 facts | 223.9 ms |
-| Similarity matrix, 200 facts | 565.5 ms |
-| Cross-similarity, 40 sentences x 200 claims | 10.4 ms |
-| Contradiction scan, 60 facts | 252.3 ms |
-| Dedup pass, 60 facts | 240.4 ms |
-| Answer-support check, 40 sentences | 0.2500 ms |
-| Pair similarity (single) | 159.2 µs |
+| Similarity matrix, 60 facts | 218.2 ms |
+| Similarity matrix, 200 facts | 572.4 ms |
+| Cross-similarity, 40 sentences x 200 claims | 10.6 ms |
+| Contradiction scan, 60 facts | 280.5 ms |
+| Dedup pass, 60 facts | 242.1 ms |
+| Answer-support check, 40 sentences | 0.2800 ms |
+| Pair similarity (single) | 153.5 µs |
 
-Peak-RSS delta across a 300-fact matrix workload: 21060 KiB —
+Peak-RSS delta across a 300-fact matrix workload: 21936 KiB —
 the engine fits comfortably in the 8 GB RAM budget with the whole stack.
 
 ## Known limitations (measured, not hidden)

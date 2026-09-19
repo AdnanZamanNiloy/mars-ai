@@ -408,3 +408,80 @@ async def test_provider_thresholds_file_loads_and_gates_at_one():
     assert report["passed"] is True
     assert report["thresholds"]["provider"]["provider_classification_pass_rate"] == 1.0
 
+
+# ---------------------------------------------------------------------------
+# Query-router golden coverage (bench/eval_router.py)
+# The safety-critical direction: an evidence-requiring query must NEVER route
+# direct. A missed research run is a quality regression; an ungrounded answer
+# is a correctness bug.
+# ---------------------------------------------------------------------------
+
+def test_router_all_labeled_cases_pass():
+    from bench import eval_router
+
+    report = eval_router.evaluate()
+    failed = [c for c in report["cases"] if not c["passed"]]
+    assert not failed, failed
+    assert report["metrics"]["router_routing_pass_rate"] == 1.0
+
+
+def test_router_never_direct_routes_evidence_queries():
+    """The invariant the whole feature rests on: every expected-research case
+    must block a direct answer."""
+    from bench import eval_router
+
+    report = eval_router.evaluate()
+    assert report["missed_research"] == []
+    assert report["metrics"]["missed_research_count"] == 0
+
+
+def test_router_gate_bites_on_a_broken_fixture():
+    """Flip one research fixture to 'clear' and assert the pass rate drops
+    and the threshold gate fails — proving the gate measures what it claims."""
+    from bench import eval_router
+
+    original = eval_router.evaluate
+
+    def _broken():
+        report = original()
+        # Force one expected-research case to report a direct route.
+        for case in report["cases"]:
+            if case["expected_path"] == "research":
+                case["path_ok"] = False
+                case["passed"] = False
+                report["missed_research"].append(case["query"])
+                break
+        passed = sum(1 for c in report["cases"] if c["passed"])
+        report["metrics"]["router_routing_pass_rate"] = round(
+            passed / max(1, len(report["cases"])), 4
+        )
+        report["metrics"]["missed_research_count"] = len(report["missed_research"])
+        report["threshold_failures"] = eval_router.check_thresholds(report, report["thresholds"])
+        report["passed"] = not report["threshold_failures"]
+        return report
+
+    try:
+        report = _broken()
+    finally:
+        eval_router.evaluate = original
+    assert report["passed"] is False
+    assert any(f["metric"] == "router_routing_pass_rate" for f in report["threshold_failures"])
+
+
+def test_router_missing_metric_fails():
+    from bench import eval_router
+
+    failures = eval_router.check_thresholds(
+        {"metrics": {}}, {"router": {"router_routing_pass_rate": 1.0}}
+    )
+    assert failures and failures[0]["actual"] is None
+
+
+def test_router_evaluator_exits_zero():
+    from bench import eval_router
+
+    assert eval_router.main.__module__ == "bench.eval_router"
+    report = eval_router.evaluate()
+    assert report["passed"] is True
+    assert report["threshold_failures"] == []
+

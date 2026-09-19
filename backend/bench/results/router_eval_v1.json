@@ -1,0 +1,313 @@
+{
+  "suite": "mars-router-eval",
+  "version": "v1",
+  "ran_at": "2026-09-19T16:47:54.755786+00:00",
+  "cases": [
+    {
+      "query": "What is the latest price of gold?",
+      "expected_path": "research",
+      "actual_path": "research",
+      "blockers": [
+        "freshness",
+        "quantitative"
+      ],
+      "expected_tokens": [
+        "freshness"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "How many electric vehicles were sold in 2025?",
+      "expected_path": "research",
+      "actual_path": "research",
+      "blockers": [
+        "freshness",
+        "quantitative"
+      ],
+      "expected_tokens": [
+        "freshness"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "What is the current population of Bangladesh?",
+      "expected_path": "research",
+      "actual_path": "research",
+      "blockers": [
+        "freshness",
+        "quantitative"
+      ],
+      "expected_tokens": [
+        "freshness"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "Which company has the highest market cap right now?",
+      "expected_path": "research",
+      "actual_path": "research",
+      "blockers": [
+        "freshness"
+      ],
+      "expected_tokens": [
+        "freshness"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "What happened in the AI industry this year?",
+      "expected_path": "research",
+      "actual_path": "research",
+      "blockers": [
+        "freshness"
+      ],
+      "expected_tokens": [
+        "freshness"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "What is the market size of the battery industry?",
+      "expected_path": "research",
+      "actual_path": "research",
+      "blockers": [
+        "quantitative"
+      ],
+      "expected_tokens": [
+        "quantitative"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "What percentage of energy comes from solar in Germany?",
+      "expected_path": "research",
+      "actual_path": "research",
+      "blockers": [
+        "quantitative"
+      ],
+      "expected_tokens": [
+        "quantitative"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "How much did global EV sales grow last year?",
+      "expected_path": "research",
+      "actual_path": "research",
+      "blockers": [
+        "quantitative"
+      ],
+      "expected_tokens": [
+        "quantitative"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "Should we invest in nuclear energy for our grid?",
+      "expected_path": "research",
+      "actual_path": "research",
+      "blockers": [
+        "decision",
+        "query_type"
+      ],
+      "expected_tokens": [
+        "decision"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "Which database should I choose for this project?",
+      "expected_path": "research",
+      "actual_path": "research",
+      "blockers": [
+        "quantitative",
+        "decision",
+        "query_type"
+      ],
+      "expected_tokens": [
+        "decision"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "Is this supplement safe to take daily?",
+      "expected_path": "research",
+      "actual_path": "research",
+      "blockers": [
+        "contested"
+      ],
+      "expected_tokens": [
+        "contested"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "Is the keto diet harmful?",
+      "expected_path": "research",
+      "actual_path": "research",
+      "blockers": [
+        "contested"
+      ],
+      "expected_tokens": [
+        "contested"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "Compare solar and nuclear energy costs",
+      "expected_path": "research",
+      "actual_path": "research",
+      "blockers": [
+        "quantitative",
+        "query_type"
+      ],
+      "expected_tokens": [
+        "query_type"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "What is the impact of remote work on productivity?",
+      "expected_path": "research",
+      "actual_path": "research",
+      "blockers": [
+        "query_type"
+      ],
+      "expected_tokens": [
+        "query_type"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "Give me an overview of the quantum computing landscape",
+      "expected_path": "research",
+      "actual_path": "research",
+      "blockers": [
+        "query_type"
+      ],
+      "expected_tokens": [
+        "query_type"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "What is transformer?",
+      "expected_path": "research",
+      "actual_path": "research",
+      "blockers": [
+        "ambiguity"
+      ],
+      "expected_tokens": [
+        "ambiguity"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "What is apple?",
+      "expected_path": "research",
+      "actual_path": "research",
+      "blockers": [
+        "ambiguity"
+      ],
+      "expected_tokens": [
+        "ambiguity"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "What is a for-loop?",
+      "expected_path": "clear",
+      "actual_path": "research",
+      "blockers": [],
+      "expected_tokens": [
+        "clear"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "What is a Python list comprehension?",
+      "expected_path": "clear",
+      "actual_path": "research",
+      "blockers": [],
+      "expected_tokens": [
+        "clear"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "Explain how TCP handles packet loss.",
+      "expected_path": "clear",
+      "actual_path": "research",
+      "blockers": [],
+      "expected_tokens": [
+        "clear"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    },
+    {
+      "query": "What is the capital of France?",
+      "expected_path": "clear",
+      "actual_path": "research",
+      "blockers": [],
+      "expected_tokens": [
+        "clear"
+      ],
+      "path_ok": true,
+      "tokens_ok": true,
+      "passed": true
+    }
+  ],
+  "metrics": {
+    "router_routing_pass_rate": 1.0,
+    "missed_research_count": 0
+  },
+  "missed_research": [],
+  "thresholds": {
+    "version": "v1",
+    "router": {
+      "router_routing_pass_rate": 1.0
+    }
+  },
+  "threshold_failures": [],
+  "passed": true
+}

@@ -1,10 +1,10 @@
 {
   "suite": "mars-offline-benchmarks",
   "version": "2.0",
-  "ran_at": "2026-09-18T14:04:47.263591+00:00",
+  "ran_at": "2026-09-19T16:48:22.167499+00:00",
   "python": "3.12.13",
   "platform": "Linux-7.0.0-31-generic-x86_64-with-glibc2.43",
-  "quick": false,
+  "quick": true,
   "components": {
     "verification": {
       "n": 16,
@@ -16,8 +16,8 @@
       "recall": 1.0,
       "f1": 1.0,
       "accuracy": 1.0,
-      "latency_ms": 2.53,
-      "per_case_us": 158.2,
+      "latency_ms": 2.65,
+      "per_case_us": 165.9,
       "misses": []
     },
     "hallucination": {
@@ -50,7 +50,7 @@
         "polarity": 3,
         "temporal": 1
       },
-      "latency_ms": 7.78,
+      "latency_ms": 4.35,
       "errors": []
     },
     "confidence_calibration": {
@@ -146,7 +146,7 @@
     "semantic_engine": {
       "pairs": 20,
       "spearman_vs_labels": 0.7094,
-      "pair_latency_us": 159.2,
+      "pair_latency_us": 153.5,
       "dedup": {
         "n": 10,
         "precision": 1.0,
@@ -155,8 +155,8 @@
         "threshold": 0.86
       },
       "matrix_ms": {
-        "100": 388.11,
-        "300": 455.21
+        "100": 376.3,
+        "300": 453.79
       },
       "score_label_sample": [
         {
@@ -234,73 +234,13 @@
         }
       ]
     },
-    "e2e_pipeline": {
-      "wall_sec": 9.187,
-      "graph_snapshots": 19,
-      "iterations": 3,
-      "planned_sub_questions": 12,
-      "planned_axes": [
-        "adoption",
-        "capability",
-        "criticism",
-        "definition",
-        "economics",
-        "evidence",
-        "infrastructure"
-      ],
-      "waves_executed": 2,
-      "wave_detail": [
-        {
-          "wave": 0,
-          "contracts": 8,
-          "facts_extracted": 19,
-          "with_prerequisites": false
-        },
-        {
-          "wave": 1,
-          "contracts": 1,
-          "facts_extracted": 4,
-          "with_prerequisites": true
-        }
-      ],
-      "facts_extracted": 4,
-      "facts_verified": 4,
-      "contradictions_found": 0,
-      "answer_support_rate": 1.0,
-      "citation_health": {
-        "ok": 0,
-        "warn": 0,
-        "broken": 3,
-        "bad": 0,
-        "unchecked": 0
-      },
-      "confidence": 0.792,
-      "confidence_signals": {
-        "source_quality": 0.75,
-        "source_diversity": 1.0,
-        "citation_coverage": 1.0,
-        "claim_verification_strength": 1.0,
-        "cross_source_agreement": 1.0,
-        "freshness": 0.457,
-        "critic_survival": 0.0,
-        "axis_coverage": 0.143,
-        "claim_evidence_quality": 1.0
-      },
-      "report_chars": 3275,
-      "llm_calls": 20,
-      "llm_call_stages": {
-        "summarizer": 10,
-        "critic": 6,
-        "planner": 4
-      },
-      "budget": {
-        "llm_calls": 20,
-        "spent_tokens": 52286,
-        "spent_usd": 0.024114,
-        "search_calls": 0,
-        "utilization": 0.3333
-      },
-      "stopped_sufficient": false
+    "query_router": {
+      "cases": 21,
+      "routing_pass_rate": 1.0,
+      "missed_research_count": 0,
+      "missed_research": [],
+      "passed": true,
+      "failed_cases": []
     },
     "answer_quality": {
       "good_overall": 88,
@@ -315,24 +255,24 @@
       "provider_calls_first_pass": 8,
       "provider_calls_second_pass": 8,
       "cache_hit_ratio_first_pass": 0.6667,
-      "uncached_pass_ms": 42.39,
-      "cached_pass_ms": 0.21,
-      "speedup": 206.71,
+      "uncached_pass_ms": 61.59,
+      "cached_pass_ms": 0.24,
+      "speedup": 254.0,
       "tokens_saved_per_repeat": 70,
       "note": "second pass serves 24/24 from cache; provider_calls unchanged"
     },
     "latency": {
-      "matrix_60_facts_ms": 223.87,
-      "matrix_200_facts_ms": 565.47,
-      "cross_40x200_ms": 10.42,
-      "contradictions_60_facts_ms": 252.27,
-      "dedupe_60_facts_ms": 240.44,
-      "answer_support_40sent_ms": 0.25
+      "matrix_60_facts_ms": 218.24,
+      "matrix_200_facts_ms": 572.35,
+      "cross_40x200_ms": 10.61,
+      "contradictions_60_facts_ms": 280.53,
+      "dedupe_60_facts_ms": 242.05,
+      "answer_support_40sent_ms": 0.28
     },
     "memory": {
-      "rss_before_kib": 126720,
-      "rss_after_kib": 147780,
-      "delta_kib": 21060,
+      "rss_before_kib": 88428,
+      "rss_after_kib": 110364,
+      "delta_kib": 21936,
       "note": "ru_maxrss is process-lifetime max; delta bounds engine cost"
     }
   }

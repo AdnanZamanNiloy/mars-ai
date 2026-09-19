@@ -633,6 +633,10 @@ def write_markdown_report(report: Dict[str, Any], results_dir: Path) -> Path:
     a(f"| Contradiction detection | P={_fmt(co['precision'])} R={_fmt(co['recall'])} F1={_fmt(co['f1'])} across {len(co['kinds_detected'])} kinds {list(co['kinds_detected'])} |")
     a(f"| Confidence calibration | {int(cf['in_band_rate'] * 100)}% in expected band, monotonic ordering: {cf['monotonic_ordering']} |")
     a(f"| Semantic engine | Spearman {_fmt(se['spearman_vs_labels'])} vs labels, dedup F1 {_fmt(se['dedup']['f1'])} @ 0.86 |")
+    rt = c.get("query_router")
+    if rt:
+        a(f"| Query router | routing accuracy {_fmt(rt['routing_pass_rate'])} across {rt['cases']} labeled queries, "
+          f"missed-research {rt['missed_research_count']} |")
     a(f"| LLM response cache | {int((cache['cache_hit_ratio_first_pass'] or 0) * 100)}% hit ratio on repeat-heavy workload, {cache['speedup']}x repeat-pass speedup |")
     if e2e:
         a(f"| End-to-end pipeline (mocked LLM) | {e2e['iterations']} iterations (intelligent stop), {e2e['waves_executed']} dependency waves, support rate {_fmt(e2e['answer_support_rate'])} |")
@@ -735,6 +739,7 @@ def run_all(quick: bool = False, out_dir: str | None = None) -> Dict[str, Any]:
         ("confidence_calibration", lambda: bench_confidence(settings)),
         ("semantic_engine", lambda: bench_semantic(settings)),
         ("intent_classification", lambda: bench_intent(settings)),
+        ("query_router", lambda: bench_router(settings)),
         ("answer_quality", lambda: bench_quality(settings)),
         ("llm_cache", lambda: asyncio.run(_bench_cache(settings))),
         ("latency", lambda: bench_latency(settings)),
@@ -849,6 +854,27 @@ QUALITY_SUPPORT = {
 }
 
 
+def bench_router(settings: Settings) -> Dict[str, Any]:
+    """Query-router deterministic gate on labeled queries: evidence-requiring
+    queries must never clear for a direct answer, and stable general-knowledge
+    queries must carry no hard blocker. The full evaluator lives in
+    bench/eval_router.py; this folds its aggregate into the main suite."""
+    from bench.eval_router import evaluate as evaluate_router
+
+    result = evaluate_router()
+    return {
+        "cases": len(result["cases"]),
+        "routing_pass_rate": result["metrics"]["router_routing_pass_rate"],
+        "missed_research_count": result["metrics"]["missed_research_count"],
+        "missed_research": result["missed_research"],
+        "passed": result["passed"],
+        "failed_cases": [
+            {"query": c["query"], "expected": c["expected_path"], "got": c["actual_path"]}
+            for c in result["cases"] if not c["passed"]
+        ],
+    }
+
+
 def bench_quality(settings: Settings) -> Dict[str, Any]:
     """The answer-quality gate on labeled good/bad drafts: the good draft must
     pass at the default threshold; the statistics dump must fail."""
@@ -869,7 +895,6 @@ def bench_quality(settings: Settings) -> Dict[str, Any]:
         "bad_passed": bad.passed,
         "ordering_ok": good.overall > bad.overall,
     }
-
 
 
 def main() -> int:
