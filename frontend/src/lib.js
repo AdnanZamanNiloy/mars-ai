@@ -78,6 +78,38 @@ export function confidenceLabel(value) {
 const MISSIONS_KEY = "mars.missions.v1";
 const MAX_MISSIONS = 30;
 
+/* The active chat's stable session id. One chat = one id, reused for every
+ * follow-up question; only "New Chat" mints a fresh one. Kept in its own key
+ * so an interrupted write to the session list can't lose the active chat. */
+const ACTIVE_SESSION_KEY = "mars.activeSession.v1";
+
+export function newSessionId() {
+  try {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  } catch {
+    /* fall through to timestamp id */
+  }
+  return `s${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export function loadActiveSessionId() {
+  try {
+    return localStorage.getItem(ACTIVE_SESSION_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function saveActiveSessionId(sessionId) {
+  try {
+    if (sessionId) localStorage.setItem(ACTIVE_SESSION_KEY, sessionId);
+    else localStorage.removeItem(ACTIVE_SESSION_KEY);
+  } catch {
+    /* storage unavailable — the chat just won't survive a reload */
+  }
+  return sessionId || "";
+}
+
 export function loadMissions() {
   try {
     const raw = localStorage.getItem(MISSIONS_KEY);
@@ -88,10 +120,11 @@ export function loadMissions() {
   }
 }
 
-/* A mission is a record of a REAL run this browser started: its run_id lets
- * us replay the full trace from the backend at any time. */
+/* A mission is a record of one REAL chat session this browser started: its
+ * sessionId groups every question asked in the same chat, and runId points at
+ * the most recent run so the backend can still supply that run's trace. */
 export function upsertMission(mission) {
-  const list = loadMissions().filter((m) => m.runId !== mission.runId);
+  const list = loadMissions().filter((m) => m.sessionId !== mission.sessionId);
   list.unshift({ ...mission, updatedAt: new Date().toISOString() });
   try {
     localStorage.setItem(MISSIONS_KEY, JSON.stringify(list.slice(0, MAX_MISSIONS)));
@@ -101,8 +134,8 @@ export function upsertMission(mission) {
   return list.slice(0, MAX_MISSIONS);
 }
 
-export function removeMission(runId) {
-  const list = loadMissions().filter((m) => m.runId !== runId);
+export function removeMission(sessionId) {
+  const list = loadMissions().filter((m) => m.sessionId !== sessionId);
   try {
     localStorage.setItem(MISSIONS_KEY, JSON.stringify(list));
   } catch {
@@ -112,9 +145,9 @@ export function removeMission(runId) {
 }
 
 /* Patch fields (title, pinned) on one mission, preserving order. */
-export function updateMission(runId, patch) {
+export function updateMission(sessionId, patch) {
   const list = loadMissions().map((m) =>
-    m.runId === runId ? { ...m, ...patch, updatedAt: new Date().toISOString() } : m);
+    m.sessionId === sessionId ? { ...m, ...patch, updatedAt: new Date().toISOString() } : m);
   try {
     localStorage.setItem(MISSIONS_KEY, JSON.stringify(list.slice(0, MAX_MISSIONS)));
   } catch {

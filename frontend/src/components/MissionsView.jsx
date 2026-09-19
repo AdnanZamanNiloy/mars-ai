@@ -29,7 +29,7 @@ export default function MissionsView({ missions, onOpen, onRemove, onNew }) {
       <div className="view anim-rise">
         <div className="view-head">
           <h2>Research</h2>
-          <p>Every research run started from this browser</p>
+          <p>Every research chat started from this browser</p>
         </div>
         <p className="empty">No research yet. Start your first research run to see it here.</p>
         <div style={{ textAlign: "center", marginTop: 16 }}>
@@ -42,13 +42,13 @@ export default function MissionsView({ missions, onOpen, onRemove, onNew }) {
     <div className="view anim-rise">
       <div className="view-head">
         <h2>Research</h2>
-        <p>{missions.length} run{missions.length === 1 ? "" : "s"} · click any research to replay its trace</p>
+        <p>{missions.length} chats{missions.length === 1 ? "" : "s"} · click any research to replay its trace</p>
       </div>
       {missions.map((m) => {
-        const parent = m.parentRunId ? missions.find((p) => p.runId === m.parentRunId) : null;
+        const parent = m.parentRunId ? missions.find((p) => p.sessionId === m.parentRunId) : null;
         return (
-        <div key={m.runId} className="mission-card" onClick={() => onOpen(m.runId)} role="button" tabIndex={0}
-          onKeyDown={(e) => { if (e.key === "Enter") onOpen(m.runId); }}>
+        <div key={m.sessionId} className="mission-card" onClick={() => onOpen(m.sessionId)} role="button" tabIndex={0}
+          onKeyDown={(e) => { if (e.key === "Enter") onOpen(m.sessionId); }}>
           <span className={`dot ${DOT[m.status] || "idle"}`} style={{ marginTop: 6 }} />
           <span className="body">
             <p className="q">{m.title || m.query}</p>
@@ -74,7 +74,7 @@ export default function MissionsView({ missions, onOpen, onRemove, onNew }) {
             className="icon-btn"
             title="Remove from history"
             aria-label="Remove from history"
-            onClick={(e) => { e.stopPropagation(); onRemove(m.runId); }}
+            onClick={(e) => { e.stopPropagation(); onRemove(m.sessionId); }}
           >
             <IconX size={14} />
           </button>

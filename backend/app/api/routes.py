@@ -19,7 +19,10 @@ from app.core.degradation import (
 )
 from app.db.sqlite import (
     complete_research_run,
+    ensure_session,
     get_run_trace,
+    get_session,
+    list_sessions,
     load_state_for_resume,
     mark_challenged_claims,
     mark_run_resumable_reset,
@@ -36,6 +39,7 @@ from app.db.sqlite import (
     save_sources,
     save_verification_results,
     start_research_run,
+    touch_session,
 )
 from app.core.logging import bind_request_context, get_logger, unbind_request_context
 from app.graph.workflow import build_initial_state, graph_recursion_limit
@@ -71,6 +75,10 @@ class ResearchRequest(BaseModel):
     deep_research: bool = False
     # Research Modes (3.7 + vision §28): quick | standard | deep | executive | audit | redteam
     mode: str = Field(default="standard", pattern="^(quick|standard|deep|executive|audit|redteam)$")
+    # Chat identity: all questions in one chat share this id so the backend
+    # appends them to one session instead of minting a session per question.
+    # Optional for backward compatibility — absent means "generate one".
+    session_id: str | None = Field(default=None, max_length=120)
 
 
 @router.get("/health")
@@ -239,6 +247,31 @@ async def research_trace(run_id: str, request: Request) -> Dict[str, Any]:
     return trace
 
 
+@router.get("/sessions")
+async def sessions_list(request: Request) -> Dict[str, Any]:
+    """Sidebar data: one row per chat session (newest activity first).
+
+    Previously the UI derived one entry per run, which is why three
+    questions in one chat produced three separate sidebar chats.
+    """
+    settings = getattr(request.app.state, "settings", None)
+    if settings is None:
+        raise HTTPException(status_code=500, detail="Workflow is not initialized")
+    return {"sessions": await list_sessions(settings.database_url)}
+
+
+@router.get("/sessions/{session_id}")
+async def session_detail(session_id: str, request: Request) -> Dict[str, Any]:
+    """Full ordered chat history for one session, so reload restores it."""
+    settings = getattr(request.app.state, "settings", None)
+    if settings is None:
+        raise HTTPException(status_code=500, detail="Workflow is not initialized")
+    session = await get_session(settings.database_url, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Unknown session_id: {session_id}")
+    return session
+
+
 @router.post("/research/stream")
 @limiter.limit(get_settings().rate_limit)
 async def stream_research(request: Request, payload: ResearchRequest) -> StreamingResponse:
@@ -249,6 +282,9 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
         raise HTTPException(status_code=500, detail="Workflow is not initialized")
 
     request_id = str(uuid.uuid4())
+    # Reuse the chat's session id when the client supplies one; otherwise the
+    # backend owns a fresh session so old clients still get a stable grouping.
+    session_id = str(payload.session_id).strip() if payload.session_id else str(uuid.uuid4())
 
     def event_line(event_type: str, **data: Any) -> str:
         payload_data = {"type": event_type, **data}
@@ -303,6 +339,15 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 except Exception as exc:
                     logger.warning("persistence_failed", error=str(exc), exc_info=exc)
 
+            async def _finish_run(status: str, confidence: float, cost: float) -> None:
+                """Terminal run write + session touch in one place, so every exit
+                path (completed/failed/timeout) keeps the chat's updated_at fresh."""
+                await _persist(complete_research_run(
+                    settings.database_url, request_id, status,
+                    confidence=confidence, estimated_cost=cost,
+                ))
+                await _persist(touch_session(settings.database_url, session_id))
+
             # Node-level event trail (2.10): stream_mode="values" yields full
             # state after each node, so node completions are derived from the
             # first snapshot in which each marker appears.
@@ -337,6 +382,9 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 if snapshot.get("final_report") and _once("finalize"):
                     await _persist(record_event(settings.database_url, request_id, "finalize", "end", payload=""))
 
+            await _persist(ensure_session(
+                settings.database_url, session_id, title=payload.query,
+            ))
             await _persist(start_research_run(
                 settings.database_url,
                 request_id,
@@ -344,9 +392,10 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 complexity=str(state.get("orchestration", {}).get("complexity_level", "unknown")),
                 agent_count=int(state.get("orchestration", {}).get("target_agents", 0)),
                 max_iterations=int(state.get("max_iterations", 3)),
+                session_id=session_id,
             ))
 
-            yield event_line("progress", request_id=request_id, message="Query received")
+            yield event_line("progress", request_id=request_id, session_id=session_id, message="Query received")
 
             # Pre-flight provider probe: a run with zero reachable LLM
             # providers is doomed to degrade to extraction — fail in seconds
@@ -355,10 +404,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
             if llm_client is not None:
                 probe_ok, probe_detail = await llm_client.probe_all()
                 if not probe_ok:
-                    await _persist(complete_research_run(
-                        settings.database_url, request_id, "failed",
-                        confidence=0.0, estimated_cost=None,
-                    ))
+                    await _finish_run("failed", 0.0, None)
                     yield event_line(
                         "error",
                         message=(
@@ -541,11 +587,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                                 ))
                                 saved_facts = len(facts)
             except TimeoutError:
-                await _persist(complete_research_run(
-                    settings.database_url, request_id, "timeout",
-                    confidence=0.0,
-                    estimated_cost=round(usage.snapshot().get("spent_usd", 0.0) or 0.0, 6),
-                ))
+                await _finish_run("timeout", 0.0, round(usage.snapshot().get("spent_usd", 0.0) or 0.0, 6))
                 yield event_line(
                     "error",
                     message=(
@@ -566,13 +608,12 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                         confidence=0.0, estimated_cost=cost,
                     )
                 )
+                asyncio.get_running_loop().create_task(
+                    touch_session(settings.database_url, session_id)
+                )
                 raise
             except Exception as exc:
-                await _persist(complete_research_run(
-                    settings.database_url, request_id, "failed",
-                    confidence=0.0,
-                    estimated_cost=round(usage.snapshot().get("spent_usd", 0.0) or 0.0, 6),
-                ))
+                await _finish_run("failed", 0.0, round(usage.snapshot().get("spent_usd", 0.0) or 0.0, 6))
                 message = str(exc)
                 if "No LLM provider configured" in message:
                     yield event_line(
@@ -591,11 +632,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
             confidence = float(final_state.get("confidence", 0.0))
             budget_snapshot = usage.snapshot()
 
-            await _persist(complete_research_run(
-                settings.database_url, request_id, "completed",
-                confidence=confidence,
-                estimated_cost=round(float(budget_snapshot.get("spent_usd", 0.0) or 0.0), 6),
-            ))
+            await _finish_run("completed", confidence, round(float(budget_snapshot.get("spent_usd", 0.0) or 0.0), 6))
             # Challenged flags land once contradictions are known (end of run).
             await _persist(mark_challenged_claims(
                 settings.database_url, request_id, last_snapshot.get("contradictions") or [],
@@ -705,6 +742,7 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
     await mark_run_resumable_reset(settings.database_url, run_id)
 
     request_id = run_id  # resume continues the SAME run identity
+    resume_session_id = state.get("session_id") or ""
 
     def event_line(event_type: str, **data: Any) -> str:
         return json.dumps({"type": event_type, **data}, ensure_ascii=True) + "\n"
@@ -726,8 +764,14 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
             except Exception as exc:
                 logger.warning("persistence_failed", error=str(exc), exc_info=exc)
 
+        async def _finish(status: str, confidence: float, cost: float) -> None:
+            await _persist_complete(settings.database_url, request_id, status, confidence, cost)
+            if resume_session_id:
+                await _persist(touch_session(settings.database_url, resume_session_id))
+
         try:
-            yield event_line("progress", request_id=request_id, message=f"Resuming run {request_id[:8]}")
+            yield event_line("progress", request_id=request_id, session_id=resume_session_id,
+                             message=f"Resuming run {request_id[:8]}")
 
             # Same pre-flight as a fresh stream: a resumed run with zero
             # reachable providers would just fail again, minutes later.
@@ -735,7 +779,7 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
             if llm_client is not None:
                 probe_ok, probe_detail = await llm_client.probe_all()
                 if not probe_ok:
-                    await _persist_complete(settings.database_url, request_id, "failed", 0.0, None)
+                    await _finish("failed", 0.0, None)
                     yield event_line(
                         "error",
                         message=(
@@ -811,23 +855,27 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
                                                   breakdown=snapshot.get("confidence_breakdown") or {})
 
             except TimeoutError:
-                await _persist_complete(settings.database_url, request_id, "timeout", 0.0, None)
+                await _finish("timeout", 0.0, None)
                 yield event_line("error", message="Resumed run timed out. Try again or raise RESEARCH_TIMEOUT_SEC.")
                 return
             except asyncio.CancelledError:
                 asyncio.get_running_loop().create_task(
                     _persist_complete(settings.database_url, request_id, "timeout", 0.0, None)
                 )
+                if resume_session_id:
+                    asyncio.get_running_loop().create_task(
+                        touch_session(settings.database_url, resume_session_id)
+                    )
                 raise
             except Exception as exc:
-                await _persist_complete(settings.database_url, request_id, "failed", 0.0, None)
+                await _finish("failed", 0.0, None)
                 yield event_line("error", message=f"Resumed run failed: {exc}")
                 return
 
             final_state = last_snapshot
             report = str(final_state.get("final_report", ""))
             confidence = float(final_state.get("confidence", 0.0))
-            await _persist_complete(settings.database_url, request_id, "completed", confidence, None)
+            await _finish("completed", confidence, None)
             await _persist(mark_challenged_claims(
                 settings.database_url, request_id, last_snapshot.get("contradictions") or [],
             ))

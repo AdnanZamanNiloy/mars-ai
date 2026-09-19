@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchTrace, resumeResearch, startResearch } from "./api";
-import { MODE_META, loadKnowledge, loadMissions, parseReport, removeKnowledgeItem, removeMission, saveKnowledgeItem, updateMission, upsertMission } from "./lib";
+import { fetchSession, listSessions, resumeResearch, startResearch } from "./api";
+import { MODE_META, loadActiveSessionId, loadKnowledge, loadMissions, newSessionId, parseReport, removeKnowledgeItem, removeMission, saveActiveSessionId, saveKnowledgeItem, updateMission, upsertMission } from "./lib";
 import Sidebar from "./components/Sidebar";
 import Composer from "./components/Composer";
 import { ErrorCard, MarsMessageShell, ThinkingSteps, TypingRow, UserMessage } from "./components/Thread";
@@ -220,6 +220,7 @@ export default function App() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   const [missions, setMissions] = useState(() => loadMissions());
+  const [sessionId, setSessionId] = useState(() => loadActiveSessionId());
   const [knowledge, setKnowledge] = useState(() => loadKnowledge());
   const [messages, setMessages] = useState([]);
   const [composer, setComposer] = useState("");
@@ -235,8 +236,83 @@ export default function App() {
   const threadRef = useRef(null);
   const runRef = useRef(null); // tempId of the in-flight run
   const parentRef = useRef(null); // parent runId for challenge runs
+  const sessionIdRef = useRef(sessionId); // stable chat id for async handlers
+
+  const setActiveSession = useCallback((id) => {
+    sessionIdRef.current = id || "";
+    saveActiveSessionId(id || "");
+    setSessionId(id || "");
+  }, []);
 
   const saveMissions = useCallback((list) => setMissions(list), []);
+
+  /* Refresh the sidebar chat list from the backend on mount so chats created
+   * on another tab or before a localStorage clear are still discoverable. */
+  useEffect(() => {
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const remote = await listSessions(controller.signal);
+        if (!Array.isArray(remote) || remote.length === 0) return;
+        setMissions((prev) => {
+          const bySession = new Map(remote.map((s) => [s.id, s]));
+          const merged = remote.map((s) => {
+            const local = prev.find((m) => m.sessionId === s.id) || {};
+            return {
+              ...local,
+              sessionId: s.id,
+              runId: local.runId || (s.run_ids && s.run_ids[s.run_ids.length - 1]) || null,
+              query: local.query || s.query || s.title,
+              title: local.title || "",
+              status: s.status || local.status || "completed",
+              confidence: s.confidence ?? local.confidence ?? null,
+              runCount: s.run_count || 0,
+            };
+          });
+          // Keep local-only pinned order for chats the backend hasn't seen.
+          for (const m of prev) {
+            if (m.sessionId && !bySession.has(m.sessionId)) merged.push(m);
+          }
+          return merged.slice(0, 30);
+        });
+      } catch {
+        /* offline or backend not ready — localStorage remains the source */
+      }
+    })();
+    return () => controller.abort();
+  }, []);
+
+  /* Restore the active chat's full history on reload. Only runs when there
+   * is a persisted session and the thread is still empty. */
+  useEffect(() => {
+    const id = sessionIdRef.current;
+    if (!id) return;
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const session = await fetchSession(id, controller.signal);
+        const restored = (session.messages || []);
+        if (restored.length === 0) return;
+        setMessages((prev) => {
+          if (prev.length > 0) return prev; // user already started typing
+          return restored.map((m) => m.role === "user"
+            ? { id: m.id, kind: "user", text: m.text, at: m.created_at }
+            : {
+                id: m.id, kind: "replay", runId: m.run_id,
+                trace: {
+                  query: m.query, status: m.status, confidence: m.confidence,
+                  final_report: m.report ? { report_markdown: m.report, confidence: m.confidence } : null,
+                },
+                query: m.query || "Replay", at: m.created_at,
+              });
+        });
+      } catch {
+        /* no persisted history — start fresh */
+      }
+    })();
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const el = threadRef.current;
@@ -272,17 +348,25 @@ export default function App() {
       case "progress":
         if (evt.request_id) {
           patchRun(tempId, { runId: evt.request_id });
-          setMessages((prev) => {
-            const msg = prev.find((m) => m.kind === "run" && m.run.tempId === tempId);
-            if (msg) {
-              saveMissions(upsertMission({
-                runId: evt.request_id, query: msg.run.query, mode: msg.run.mode,
-                status: "running", confidence: null, cost: null,
-                parentRunId: parentRef.current,
-              }));
-            }
-            return prev;
-          });
+          // The backend confirms the chat id it grouped this run under; adopt
+          // it so follow-ups keep reusing exactly the same session.
+          const confirmedSession = evt.session_id || sessionIdRef.current;
+          if (confirmedSession && confirmedSession !== sessionIdRef.current) {
+            setActiveSession(confirmedSession);
+          }
+          if (evt.request_id || confirmedSession) {
+            setMessages((prev) => {
+              const msg = prev.find((m) => m.kind === "run" && m.run.tempId === tempId);
+              if (msg) {
+                saveMissions(upsertMission({
+                  sessionId: confirmedSession, runId: evt.request_id, query: msg.run.query,
+                  mode: msg.run.mode, status: "running", confidence: null, cost: null,
+                  parentRunId: parentRef.current,
+                }));
+              }
+              return prev;
+            });
+          }
         }
         if (evt.message) pushTrace({ text: evt.message, kind: "active" });
         break;
@@ -415,7 +499,7 @@ export default function App() {
           };
           if (run.runId) {
             saveMissions(upsertMission({
-              runId: run.runId, query: run.query, mode: run.mode,
+              sessionId: sessionIdRef.current, runId: run.runId, query: run.query, mode: run.mode,
               status: "completed", confidence: run.confidence,
               cost: run.budget && typeof run.budget.spent_usd === "number" ? run.budget.spent_usd : null,
               degraded: run.degraded,
@@ -435,7 +519,7 @@ export default function App() {
           const run = { ...m.run, error: message, resuming: false, resumable };
           if (run.runId) {
             saveMissions(upsertMission({
-              runId: run.runId, query: run.query, mode: run.mode,
+              sessionId: sessionIdRef.current, runId: run.runId, query: run.query, mode: run.mode,
               status: resumable ? "resumable" : "failed", confidence: null, cost: null,
             }));
           }
@@ -467,6 +551,9 @@ export default function App() {
     } else {
       const run = blankRun(queryText, mode);
       tempId = run.tempId;
+      // One chat = one session id for its whole life. Mint one only when this
+      // chat has none yet (first message, or after "New Chat").
+      if (!sessionIdRef.current) setActiveSession(newSessionId());
       const at = new Date().toISOString();
       setMessages((prev) => [
         ...prev,
@@ -485,7 +572,7 @@ export default function App() {
       if (resumeRun) {
         await resumeResearch({ runId: resumeRun.runId, signal: controller.signal, onEvent: (e) => handleEvent(tempId, e) });
       } else {
-        await startResearch({ query: queryText, mode, signal: controller.signal, onEvent: (e) => handleEvent(tempId, e) });
+        await startResearch({ query: queryText, mode, sessionId: sessionIdRef.current, signal: controller.signal, onEvent: (e) => handleEvent(tempId, e) });
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
@@ -494,7 +581,7 @@ export default function App() {
           const run = { ...m.run, aborted: true, resuming: false };
           if (run.runId) {
             saveMissions(upsertMission({
-              runId: run.runId, query: run.query, mode: run.mode,
+              sessionId: sessionIdRef.current, runId: run.runId, query: run.query, mode: run.mode,
               status: "aborted", confidence: null, cost: null,
             }));
           }
@@ -510,7 +597,7 @@ export default function App() {
       parentRef.current = null;
       setRunning(false);
     }
-  }, [running, mode, patchRun, pushTrace, handleEvent, saveMissions]);
+  }, [running, mode, patchRun, pushTrace, handleEvent, saveMissions, setActiveSession]);
 
   const submitQuery = useCallback((text) => {
     const v = text.trim();
@@ -532,55 +619,79 @@ export default function App() {
       const run = active?.run;
       if (run?.runId && !run.done && !run.error) {
         saveMissions(upsertMission({
-          runId: run.runId, query: run.query, mode: run.mode,
+          sessionId: sessionIdRef.current, runId: run.runId, query: run.query, mode: run.mode,
           status: "aborted", confidence: null, cost: null,
         }));
       }
       return [];
     });
+    // "New Chat" is the ONLY action that mints a fresh session id.
+    setActiveSession(newSessionId());
     setTraceLog([]);
     setSelectedFinding(null);
     setComposer("");
     setRunning(false);
     setIntelCollapsed(true);
     go("workspace");
-  }, []);
+  }, [setActiveSession]);
 
   const resumeRun = useCallback((run) => {
     if (running || !run.runId) return;
     launch("", { resumeRun: run });
   }, [launch, running]);
 
-  const openReplay = useCallback(async (runId) => {
+  const openReplay = useCallback(async (targetSessionId) => {
     if (replaying || running) return;
     setReplaying(true);
     try {
-      const trace = await fetchTrace(runId);
-      const mission = loadMissions().find((m) => m.runId === runId);
-      // Selecting a session REPLACES the thread: only that session's record
-      // is shown, never a mix of every session in this browser tab.
-      setMessages([{
-        id: nid(), kind: "replay", runId, trace,
-        query: mission?.query || trace.query || "Replay", at: new Date().toISOString(),
-      }]);
-      const events = (trace.events || []).map((e) => ({
-        at: e.ended_at || e.started_at || new Date().toISOString(),
-        kind: e.event_type === "end" ? "done" : "active",
-        text: `${e.node} · ${e.event_type}`,
-      }));
-      setTraceLog(events.length > 0 ? events : [{ at: new Date().toISOString(), kind: "done", text: "Trace loaded — no node events recorded" }]);
+      const session = await fetchSession(targetSessionId);
+      // Opening a chat adopts its session id, so a follow-up asked from a
+      // replayed chat appends to THAT chat rather than starting a new one.
+      setActiveSession(targetSessionId);
+      // Rebuild the full ordered thread: every question + its run result.
+      const restored = (session.messages || []).map((m) => {
+        if (m.role === "user") {
+          return { id: m.id, kind: "user", text: m.text, at: m.created_at };
+        }
+        return {
+          id: m.id,
+          kind: "replay",
+          runId: m.run_id,
+          trace: {
+            query: m.query,
+            status: m.status,
+            confidence: m.confidence,
+            final_report: m.report ? { report_markdown: m.report, confidence: m.confidence } : null,
+          },
+          query: m.query || "Replay",
+          at: m.created_at,
+        };
+      });
+      if (restored.length === 0) {
+        restored.push({
+          id: nid(), kind: "notice",
+          text: "This chat has no messages yet.",
+          at: new Date().toISOString(),
+        });
+      }
+      setMessages(restored);
+      const latestRun = [...(session.runs || [])].reverse()[0] || null;
+      setTraceLog(latestRun
+        ? [{ at: latestRun.completed_at || latestRun.created_at, kind: "done",
+             text: `Restored chat · ${session.messages.length} messages` }]
+        : [{ at: new Date().toISOString(), kind: "done", text: "Trace loaded — no node events recorded" }]);
       setSelectedFinding(null);
       setIntelCollapsed(false);
       go("workspace");
     } catch (err) {
       setMessages([{
-        id: nid(), kind: "notice", text: `Could not load replay: ${err instanceof Error ? err.message : "unknown error"}`,
+        id: nid(), kind: "notice", text: `Could not load chat: ${err instanceof Error ? err.message : "unknown error"}`,
         at: new Date().toISOString(),
       }]);
     } finally {
       setReplaying(false);
     }
-  }, [replaying, running]);
+  }, [replaying, running, setActiveSession]);
 
   const activeRun = [...messages].reverse().find((m) => m.kind === "run")?.run || null;
 
@@ -594,17 +705,16 @@ export default function App() {
     : activeRun;
 
   /* Fixed page title: the current research question on the workspace view,
-   * plain view names elsewhere. The menu acts on the displayed mission. */
+   * plain view names elsewhere. The menu acts on the displayed chat. */
   const VIEW_TITLES = { missions: "Research", evidence: "Evidence", knowledge: "Knowledge", agents: "Agents", providers: "Providers" };
   const titleMessage = [...messages].reverse().find((m) =>
     (m.kind === "run" && m.run?.query) ||
     (m.kind === "replay" && m.query) ||
     (m.kind === "user" && m.text));
-  const displayedRunId = activeRun?.runId
-    || (lastMessage?.kind === "replay" ? lastMessage.runId : null)
-    || null;
-  const activeMission = displayedRunId
-    ? (missions.find((m) => m.runId === displayedRunId) || null)
+  // The displayed chat is the active session; only after a run has been
+  // persisted does a mission record exist for it.
+  const activeMission = sessionId
+    ? (missions.find((m) => m.sessionId === sessionId) || null)
     : null;
   const pageTitle = view === "workspace"
     ? (activeMission
@@ -628,17 +738,17 @@ export default function App() {
     }
   }, [pageTitle, view]);
 
-  const renameMission = useCallback((runId, title) => {
-    saveMissions(updateMission(runId, { title }));
+  const renameMission = useCallback((targetSessionId, title) => {
+    saveMissions(updateMission(targetSessionId, { title }));
   }, [saveMissions]);
-  const toggleMissionPin = useCallback((runId) => {
-    saveMissions(updateMission(runId, { pinned: !(missions.find((m) => m.runId === runId)?.pinned) }));
+  const toggleMissionPin = useCallback((targetSessionId) => {
+    saveMissions(updateMission(targetSessionId, { pinned: !(missions.find((m) => m.sessionId === targetSessionId)?.pinned) }));
   }, [missions, saveMissions]);
-  const deleteMission = useCallback((runId) => {
-    if (!window.confirm("Delete this research session? This cannot be undone.")) return;
-    saveMissions(removeMission(runId));
-    if (displayedRunId === runId) startNew();
-  }, [displayedRunId, saveMissions, startNew]);
+  const deleteMission = useCallback((targetSessionId) => {
+    if (!window.confirm("Delete this research chat? This cannot be undone.")) return;
+    saveMissions(removeMission(targetSessionId));
+    if (sessionIdRef.current === targetSessionId) startNew();
+  }, [saveMissions, startNew]);
 
   return (
     view === "landing" ? (
@@ -652,7 +762,7 @@ export default function App() {
         view={view}
         onNavigate={go}
         missions={missions}
-        activeRunId={panelRun?.runId}
+        activeSessionId={sessionId}
         onOpenMission={openReplay}
         onNew={startNew}
         open={sidebarOpen}

@@ -23,9 +23,9 @@ const DOT = {
   aborted: "idle",
 };
 
-export default function Sidebar({ view, onNavigate, missions, activeRunId, onOpenMission, onNew, open, onClose, onRename, onTogglePin, onDelete }) {
+export default function Sidebar({ view, onNavigate, missions, activeSessionId, onOpenMission, onNew, open, onClose, onRename, onTogglePin, onDelete }) {
   const ordered = [...missions].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned));
-  const [menuRunId, setMenuRunId] = useState(null);
+  const [menuSessionId, setMenuSessionId] = useState(null);
   const [editing, setEditing] = useState(null);
 
   const pinned = ordered.filter((m) => m.pinned);
@@ -33,12 +33,12 @@ export default function Sidebar({ view, onNavigate, missions, activeRunId, onOpe
 
   const renderRow = (m) => {
     const label = m.title || m.query;
-    const isEditing = editing === m.runId;
+    const isEditing = editing === m.sessionId;
     return (
-      <div key={m.runId} className={`mission-menu-wrap${menuRunId === m.runId ? " open" : ""}`}>
+      <div key={m.sessionId} className={`mission-menu-wrap${menuSessionId === m.sessionId ? " open" : ""}`}>
         <button
-          className={`mission-row${m.runId === activeRunId ? " active" : ""}${m.pinned ? " pinned" : ""}`}
-          onClick={() => { onOpenMission(m.runId); onClose?.(); }}
+          className={`mission-row${m.sessionId === activeSessionId ? " active" : ""}${m.pinned ? " pinned" : ""}`}
+          onClick={() => { onOpenMission(m.sessionId); onClose?.(); }}
           title={label}
         >
           <span className={`dot ${DOT[m.status] || "idle"}`} />
@@ -52,7 +52,7 @@ export default function Sidebar({ view, onNavigate, missions, activeRunId, onOpe
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     const clean = e.currentTarget.value.trim();
-                    if (clean) onRename?.(m.runId, clean);
+                    if (clean) onRename?.(m.sessionId, clean);
                     setEditing(null);
                   } else if (e.key === "Escape") {
                     setEditing(null);
@@ -60,7 +60,7 @@ export default function Sidebar({ view, onNavigate, missions, activeRunId, onOpe
                 }}
                 onBlur={(e) => {
                   const clean = e.currentTarget.value.trim();
-                  if (clean && clean !== label) onRename?.(m.runId, clean);
+                  if (clean && clean !== label) onRename?.(m.sessionId, clean);
                   setEditing(null);
                 }}
               />
@@ -74,21 +74,21 @@ export default function Sidebar({ view, onNavigate, missions, activeRunId, onOpe
           className="mission-menu-btn"
           aria-label={`Actions for ${label}`}
           aria-haspopup="menu"
-          aria-expanded={menuRunId === m.runId}
+          aria-expanded={menuSessionId === m.sessionId}
           onClick={(e) => {
             e.stopPropagation();
-            setMenuRunId((cur) => (cur === m.runId ? null : m.runId));
+            setMenuSessionId((cur) => (cur === m.sessionId ? null : m.sessionId));
           }}
         >
           <IconMore size={15} />
         </button>
-        {menuRunId === m.runId ? (
+        {menuSessionId === m.sessionId ? (
           <div className="mission-menu" role="menu">
             <button
               type="button"
               className="mission-menu-item"
               role="menuitem"
-              onClick={() => { onTogglePin?.(m.runId); setMenuRunId(null); }}
+              onClick={() => { onTogglePin?.(m.sessionId); setMenuSessionId(null); }}
             >
               <IconPin size={15} /> {m.pinned ? "Unpin" : "Pin"}
             </button>
@@ -96,7 +96,7 @@ export default function Sidebar({ view, onNavigate, missions, activeRunId, onOpe
               type="button"
               className="mission-menu-item"
               role="menuitem"
-              onClick={() => { setEditing(m.runId); setMenuRunId(null); }}
+              onClick={() => { setEditing(m.sessionId); setMenuSessionId(null); }}
             >
               <IconPencil size={15} /> Rename
             </button>
@@ -104,7 +104,7 @@ export default function Sidebar({ view, onNavigate, missions, activeRunId, onOpe
               type="button"
               className="mission-menu-item danger"
               role="menuitem"
-              onClick={() => { onDelete?.(m.runId); setMenuRunId(null); }}
+              onClick={() => { onDelete?.(m.sessionId); setMenuSessionId(null); }}
             >
               <IconTrash size={15} /> Delete
             </button>
@@ -115,12 +115,12 @@ export default function Sidebar({ view, onNavigate, missions, activeRunId, onOpe
   };
 
   useEffect(() => {
-    if (menuRunId == null) return;
+    if (menuSessionId == null) return;
     const onDown = (e) => {
-      if (!e.target.closest(".mission-menu-wrap")) setMenuRunId(null);
+      if (!e.target.closest(".mission-menu-wrap")) setMenuSessionId(null);
     };
     const onKey = (e) => {
-      if (e.key === "Escape") setMenuRunId(null);
+      if (e.key === "Escape") setMenuSessionId(null);
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -128,7 +128,7 @@ export default function Sidebar({ view, onNavigate, missions, activeRunId, onOpe
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [menuRunId]);
+  }, [menuSessionId]);
 
   return (
     <aside className={`sidebar${open ? " open" : ""}`}>

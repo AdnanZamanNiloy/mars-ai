@@ -15,8 +15,16 @@ CREATE TABLE IF NOT EXISTS research_reports (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS research_runs (
     id TEXT PRIMARY KEY,
+    session_id TEXT REFERENCES sessions(id),
     query TEXT NOT NULL,
     complexity TEXT,
     agent_count INTEGER,
@@ -238,8 +246,16 @@ async def init_db(database_path: str) -> None:
         if "improved_queries" not in review_names:
             await db.execute("ALTER TABLE critic_reviews ADD COLUMN improved_queries TEXT NOT NULL DEFAULT '[]'")
         run_cols = await db.execute("PRAGMA table_info(research_runs)")
-        if "max_iterations" not in {r[1] for r in await run_cols.fetchall()}:
+        run_names = {r[1] for r in await run_cols.fetchall()}
+        if "max_iterations" not in run_names:
             await db.execute("ALTER TABLE research_runs ADD COLUMN max_iterations INTEGER NOT NULL DEFAULT 3")
+        # Chat sessions (additive, idempotent): every run belongs to exactly
+        # one session so multiple questions reuse the same chat identity.
+        if "session_id" not in run_names:
+            await db.execute("ALTER TABLE research_runs ADD COLUMN session_id TEXT")
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_runs_session ON research_runs(session_id, created_at, id)"
+        )
         claim_cols = await db.execute("PRAGMA table_info(claims)")
         claim_names = {r[1] for r in await claim_cols.fetchall()}
         if "agent" not in claim_names:
@@ -275,14 +291,132 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def start_research_run(database_path: str, run_id: str, query: str, complexity: str, agent_count: int,
-                           max_iterations: int = 3) -> None:
+async def ensure_session(database_path: str, session_id: str, title: str = "") -> None:
+    """Idempotently ensure a session exists.
+
+    `INSERT OR IGNORE` means a client-supplied session_id persists exactly
+    once: re-using it across a chat's questions never creates duplicates,
+    while the title only fills in on first creation.
+    """
     async with _connect(database_path) as db:
         await db.execute(
-            "INSERT OR IGNORE INTO research_runs (id, query, complexity, agent_count, status, max_iterations, created_at) "
-            "VALUES (?, ?, ?, ?, 'running', ?, ?)",
-            (run_id, query, complexity, agent_count, int(max_iterations), _now()),
+            "INSERT OR IGNORE INTO sessions (id, title, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?)",
+            (session_id, str(title or "").strip()[:120], _now(), _now()),
         )
+        await db.commit()
+
+
+async def touch_session(database_path: str, session_id: str) -> None:
+    async with _connect(database_path) as db:
+        await db.execute(
+            "UPDATE sessions SET updated_at = ? WHERE id = ?",
+            (_now(), session_id),
+        )
+        await db.commit()
+
+
+async def list_sessions(database_path: str) -> list:
+    """Sidebar list: one row per chat session, newest activity first.
+
+    Derives status/preview from the latest run in the session so the UI can
+    render a single stable chat entry instead of one entry per run.
+    """
+    async with _connect(database_path) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT id, title, created_at, updated_at FROM sessions ORDER BY updated_at DESC"
+        )
+        sessions = [dict(r) for r in await cur.fetchall()]
+        for session in sessions:
+            run_cur = await db.execute(
+                "SELECT id, query, status, confidence, estimated_cost, created_at "
+                "FROM research_runs WHERE session_id = ? ORDER BY created_at, rowid",
+                (session["id"],),
+            )
+            runs = [dict(r) for r in await run_cur.fetchall()]
+            session["run_ids"] = [r["id"] for r in runs]
+            session["run_count"] = len(runs)
+            session["title"] = session.get("title") or (runs[0]["query"] if runs else "New Research")
+            session["query"] = runs[0]["query"] if runs else ""
+            latest = runs[-1] if runs else None
+            session["status"] = latest["status"] if latest else "empty"
+            session["confidence"] = latest["confidence"] if latest else None
+    return sessions
+
+
+async def get_session(database_path: str, session_id: str) -> dict | None:
+    """Full session record: ordered messages (user turn + run result) and the
+    runs that produced them, so the UI can restore the full chat on reload."""
+    async with _connect(database_path) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT id, title, created_at, updated_at FROM sessions WHERE id = ?",
+            (session_id,),
+        )
+        row = await cur.fetchone()
+        if row is None:
+            return None
+        session = dict(row)
+        run_cur = await db.execute(
+            "SELECT id, query, status, confidence, estimated_cost, created_at, completed_at "
+            "FROM research_runs WHERE session_id = ? ORDER BY created_at, rowid",
+            (session_id,),
+        )
+        runs = [dict(r) for r in await run_cur.fetchall()]
+        final_cur = await db.execute(
+            "SELECT run_id, report_markdown, confidence, generated_at FROM final_reports "
+            "WHERE run_id IN (SELECT id FROM research_runs WHERE session_id = ?)",
+            (session_id,),
+        )
+        reports = {r["run_id"]: dict(r) for r in await final_cur.fetchall()}
+
+    messages = []
+    for run in runs:
+        messages.append({
+            "id": f"{run['id']}-user",
+            "role": "user",
+            "text": run["query"] or "",
+            "created_at": run["created_at"],
+            "run_id": run["id"],
+        })
+        report = reports.get(run["id"])
+        messages.append({
+            "id": f"{run['id']}-run",
+            "role": "run",
+            "run_id": run["id"],
+            "status": run["status"],
+            "confidence": run["confidence"],
+            "created_at": run["completed_at"] or run["created_at"],
+            "report": report.get("report_markdown") if report else "",
+            "query": run["query"] or "",
+        })
+    session["messages"] = messages
+    session["runs"] = runs
+    session["run_ids"] = [r["id"] for r in runs]
+    session["run_count"] = len(runs)
+    session["title"] = session.get("title") or (runs[0]["query"] if runs else "New Research")
+    session["query"] = runs[0]["query"] if runs else ""
+    latest = runs[-1] if runs else None
+    session["status"] = latest["status"] if latest else "empty"
+    return session
+
+
+async def start_research_run(database_path: str, run_id: str, query: str, complexity: str, agent_count: int,
+                           max_iterations: int = 3, session_id: str | None = None) -> None:
+    async with _connect(database_path) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO research_runs (id, session_id, query, complexity, agent_count, status, max_iterations, created_at) "
+            "VALUES (?, ?, ?, ?, ?, 'running', ?, ?)",
+            (run_id, session_id, query, complexity, agent_count, int(max_iterations), _now()),
+        )
+        # First question names the chat; later messages leave the title alone.
+        if session_id:
+            await db.execute(
+                "UPDATE sessions SET title = CASE WHEN title = '' THEN ? ELSE title END, "
+                "updated_at = ? WHERE id = ?",
+                (str(query or "").strip()[:120], _now(), session_id),
+            )
         await db.commit()
 
 
@@ -684,6 +818,7 @@ async def load_state_for_resume(database_path: str, run_id: str) -> dict | None:
 
     state: dict = {
         "query": run_row["query"],
+        "session_id": run_row["session_id"] if "session_id" in run_row.keys() else None,
         "sub_questions": sub_questions,
         "search_results": search_results,
         "facts": facts,
@@ -820,6 +955,7 @@ async def get_run_trace(database_path: str, run_id: str) -> dict | None:
             "run_id": run_id,
             "query": run_row["query"],
             "status": run_row["status"],
+            "session_id": run_row["session_id"] if "session_id" in run_row.keys() else None,
             "complexity": run_row["complexity"],
             "agent_count": run_row["agent_count"],
             "confidence": run_row["confidence"],

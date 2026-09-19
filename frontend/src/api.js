@@ -61,10 +61,10 @@ export async function streamNDJSON(url, { method = "POST", body, signal, onEvent
   }
 }
 
-export function startResearch({ query, mode, signal, onEvent }) {
+export function startResearch({ query, mode, sessionId, signal, onEvent }) {
   return streamNDJSON("/api/research/stream", {
     method: "POST",
-    body: { query, mode },
+    body: { query, mode, session_id: sessionId || null },
     signal,
     onEvent,
   });
@@ -82,6 +82,30 @@ export async function fetchTrace(runId, signal) {
   const response = await fetch(`/api/research/${encodeURIComponent(runId)}/trace`, { signal });
   if (!response.ok) {
     let detail = `Trace request failed (${response.status})`;
+    try {
+      const data = await response.json();
+      if (data && data.detail) detail = String(data.detail);
+    } catch {
+      /* keep generic */
+    }
+    throw new Error(detail);
+  }
+  return response.json();
+}
+
+/* ---------- Chat sessions ---------- */
+
+export async function listSessions(signal) {
+  const response = await fetch("/api/sessions", { signal });
+  if (!response.ok) throw new Error(`Sessions request failed (${response.status})`);
+  const data = await response.json();
+  return Array.isArray(data?.sessions) ? data.sessions : [];
+}
+
+export async function fetchSession(sessionId, signal) {
+  const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { signal });
+  if (!response.ok) {
+    let detail = `Session request failed (${response.status})`;
     try {
       const data = await response.json();
       if (data && data.detail) detail = String(data.detail);
