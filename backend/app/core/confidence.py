@@ -31,6 +31,13 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Identity of the scoring engine that produced a breakdown. Persisted reviews
+# carry this so the UI can tell a current signal from one frozen at write time
+# by an older engine: replay must never present a stale signal as live (a
+# pre-versioned row could show critic_survival=0% forever). BUMP whenever a
+# signal's meaning or formula changes.
+ENGINE_VERSION = "confidence-v2"
+
 # Corroboration band: similar enough to be about the same thing, below the
 # dedupe merge threshold (0.86) so identical claims were already collapsed.
 CORROBORATION_SIMILARITY = 0.55
@@ -320,13 +327,18 @@ def _critic_survival(
     if named == 0:
         return 0.6  # a hedge, not a demonstrated evidence weakness
 
-    # Normalizer: the number of objective criteria the critic can name. A pool
-    # failing 1 of many criteria survives most of its scrutiny; failing all of
-    # them survives little. Floor of 3 keeps a single failure from reading as
-    # catastrophic, and matches the observable gate vocabulary.
-    denominator = max(3, named)
-    survival = 1.0 - (named / denominator)
-    return round(max(0.0, min(0.6, survival)), 3)
+    # Gate-weighted and floored. `gate_failures` are objective failures
+    # (uncovered axes, missing primary sources, confidence below target);
+    # `gaps` are advisory uncovered angles. The critic normally names 4-7 of
+    # them on a healthy run, so any arithmetic with a fixed denominator drove
+    # this signal to a flat 0.0 — self-contradictory next to an overall of
+    # ~0.8 and visible in the UI as "0% critic survival". Survival now starts
+    # from a nonzero floor and each objective failure removes a bounded amount;
+    # advisory gaps cost a quarter as much. More failures still lower it
+    # monotonically, but a working critic can never report total collapse, and
+    # a FAIL can never reach a PASS.
+    survival = 0.6 - 0.08 * len(gate_failures) - 0.02 * len(gaps)
+    return round(max(0.15, min(0.6, survival)), 3)
 
 
 # When the summarizer ran on its deterministic fallback, the fact pool is
@@ -493,6 +505,8 @@ def compute_confidence(
     answer_support: Dict[str, Any] | None = None,
     sub_questions: List[Dict[str, Any]] | None = None,
     provider_degraded: bool = False,
+    epistemics: Any = None,
+    query: str = "",
 ) -> Dict[str, Any]:
     """Return {"overall": float, "signals": {...}} with per-signal values.
 
@@ -570,7 +584,14 @@ def compute_confidence(
     if not measured:
         notes.append("freshness not yet measured (no publish dates captured) — weighted 0")
 
-    penalty = _contradiction_penalty(contradictions, fact_count=len(facts or []))
+    # When an adjudicated EpistemicReport is supplied, it owns conflict
+    # penalization (it separates genuine conflicts from time-series/scope
+    # artifacts). Applying the raw count penalty as well would double-count the
+    # same conflict, so the core penalty is skipped in that case. Without
+    # epistemics, behavior is unchanged.
+    penalty = 0.0
+    if epistemics is None:
+        penalty = _contradiction_penalty(contradictions, fact_count=len(facts or []))
     if penalty > 0:
         overall = round(max(0.0, overall - penalty), 3)
         unresolved = sum(
@@ -618,9 +639,50 @@ def compute_confidence(
             "(provider-transient) — evidence was produced under degradation"
         )
         overall = round(min(overall, DEGRADED_CAP), 3)
-    return {
+    result: Dict[str, Any] = {
         "overall": overall,
         "signals": signals,
         "weights": weights,
         "notes": notes,
+        # Stamped so a persisted breakdown can be recognized as current or
+        # stale on replay — a versionless row is pre-fix and must not be shown
+        # as a live signal (see frontend replayPanelRun).
+        "engine_version": ENGINE_VERSION,
     }
+    # Epistemic adjustments (conflict caps, claim standards, coverage
+    # asymmetry, staleness). Applied here so the LIVE workflow path gets them:
+    # the same layer the app.agents.confidence wrapper uses, imported
+    # deferred to avoid a circular import. Only fires when the caller supplies
+    # `epistemics`/`query` (or the other epistemic inputs); otherwise the
+    # result is returned unchanged, so existing callers/tests are unaffected.
+    if epistemics is not None:
+        from app.agents.confidence import (
+            ConfidenceReport,
+            _level as _confidence_level,
+            apply_epistemic_adjustments,
+        )
+
+        adjusted = apply_epistemic_adjustments(
+            ConfidenceReport(
+                overall=result["overall"],
+                level=_confidence_level(result["overall"]),
+                signals=dict(result["signals"]),
+                caps_applied=[],
+                notes=list(result["notes"]),
+                stats={"weights": dict(result["weights"]), "engine_overall": result["overall"]},
+            ),
+            facts=facts,
+            contradictions=contradictions,
+            citation_support=answer_support,
+            covered_axes=0,
+            target_domains=5,
+            epistemics=epistemics,
+            query=query,
+        )
+        result["overall"] = round(adjusted.overall, 3)
+        result["notes"] = list(adjusted.notes)
+        result["caps_applied"] = list(adjusted.caps_applied)
+        result["stats"] = dict(adjusted.stats)
+        result.setdefault("signals", {})
+        result["signals"].update(adjusted.signals)
+    return result

@@ -293,13 +293,35 @@ def heuristic_attacks(
 def heuristic_survival(findings: Sequence[RedTeamFinding]) -> float:
     """Survival score from attack severities.
 
-    Multiplicative rather than additive: three moderate weaknesses should not
-    average away into "mostly fine", because in practice they compound.
+    Severity-weighted, but NOT an unbounded product. The previous version
+    multiplied every finding into the score (`score *= 1 - 0.55*severity`), so
+    the value was a function of HOW MANY attacks ran, not how strong the
+    evidence is: the red-team prompt explicitly asks for multiple 0.8+ attacks,
+    so a normal run accumulated 3-5 findings at severity ~1.0 and the product
+    collapsed onto the 0.05 floor — every query reported "0-5%" survival, which
+    is why the UI showed 0%. An attacker finding several real issues is the
+    system working, not a 95% failure.
+
+    Survival is now driven by the WORST attack (the single strongest reason the
+    conclusion could be wrong) plus a bounded depth penalty for additional
+    severe attacks. The scale is absolute, not count-driven:
+
+      * no findings                     -> 1.0 (nothing to survive)
+      * one finding at severity s       -> 1 - 0.55*s   (0.45 at s=1.0)
+      * each further severe finding     -> -0.06, capped at 6 findings total,
+                                            so a broad attack cannot floor it.
+
+    A lone severity-1.0 invalidating condition still scores 0.45 (< the 0.6
+    `survives` line, correctly unresolved); five of them score ~0.24, not 0.
     """
-    score = 1.0
-    for finding in findings or ():
-        score *= max(0.0, 1.0 - 0.55 * float(finding.severity))
-    return round(max(0.05, min(1.0, score)), 4)
+    live = [f for f in (findings or ()) if f is not None]
+    if not live:
+        return 1.0
+    strongest = max(float(f.severity) for f in live)
+    score = 1.0 - 0.55 * strongest
+    extra_severe = sum(1 for f in live if float(f.severity) >= 0.75) - 1
+    score -= 0.06 * max(0, min(5, extra_severe))
+    return round(max(0.0, min(1.0, score)), 4)
 
 
 # ---------------------------------------------------------------------------

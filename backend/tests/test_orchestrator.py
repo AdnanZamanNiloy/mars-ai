@@ -90,3 +90,31 @@ def test_redteam_heuristics_run_llm_free():
     assert 0.0 <= d["survival_score"] <= 1.0
     assert isinstance(d["findings"], list) and isinstance(d["targeted_queries"], list)
     assert all(set(f) >= {"kind", "statement", "severity"} for f in d["findings"])
+
+
+def test_heuristic_survival_does_not_collapse_with_more_findings():
+    """Regression: the old multiplicative score fell to the floor as the
+    red team did its job (the prompt asks for several 0.8+ attacks), so every
+    run reported ~0% survival in the UI. The score must be driven by the
+    strongest attack, remain absolute, and never collapse to 0 from a normal
+    number of findings."""
+    from app.agents.redteam import (
+        KIND_INVALIDATING,
+        RedTeamFinding,
+        heuristic_survival,
+    )
+
+    def findings(n: int, severity: float = 1.0):
+        return [RedTeamFinding(KIND_INVALIDATING, "attack", severity) for _ in range(n)]
+
+    assert heuristic_survival([]) == 1.0
+    assert heuristic_survival(findings(1)) > 0.0
+    # More severe findings lower survival, but never to zero.
+    scores = [heuristic_survival(findings(n)) for n in range(1, 7)]
+    assert all(s > 0.0 for s in scores), scores
+    assert scores == sorted(scores, reverse=True), "must decrease monotonically"
+    # A lone severity-1.0 attack is unresolved (below the 0.6 survives line)
+    # but not a total loss.
+    assert 0.3 <= heuristic_survival(findings(1)) < 0.6
+    # A moderate attack barely moves the score.
+    assert heuristic_survival(findings(1, severity=0.3)) > 0.8

@@ -162,7 +162,7 @@ def test_reasoning_depth_contract_reaches_every_writer_prompt():
     never explained causes or weighed trade-offs. The instruction must reach
     the section writer AND the single-pass writer, never one or the other.
     """
-    from app.agents.synthesizer import SYNTHESIZER_SYSTEM_PROMPT
+    from app.agents.synthesizer import _REASONING_DEPTH_BLOCK
 
     outline = build_outline("What is the current trend of AI?", _facts(), _sub_questions())
 
@@ -192,8 +192,9 @@ def test_reasoning_depth_contract_reaches_every_writer_prompt():
     )
     assert prompts and all("REASONING DEPTH" in p for p in prompts)
 
-    # And the system prompt states the same contract.
-    assert "EXPLAIN, DON'T JUST REPORT" in SYNTHESIZER_SYSTEM_PROMPT
+    # And the contract is delivered to the writer prompt, not the top-level
+    # system prompt (which stays the shared formatting/citation contract).
+    assert "REASONING DEPTH" in _REASONING_DEPTH_BLOCK
 
 
 def test_trim_to_band_brings_overlong_draft_inside_the_band():
@@ -203,7 +204,7 @@ def test_trim_to_band_brings_overlong_draft_inside_the_band():
     Regression: the section-wise writers overshot the per-section budget (1715
     words against a 1500 deep cap) and the revision pass re-ran the same writer
     and overshot again, so the length contract was never enforced."""
-    from app.agents.synthesizer import _count_words, _trim_to_band
+    from app.agents.synthesizer import _count_words, _trim_to_budget
     from app.agents.answer_quality import length_band
 
     para = " ".join(["word"] * 200)
@@ -218,8 +219,8 @@ def test_trim_to_band_brings_overlong_draft_inside_the_band():
         para, para, para,
     ])
     assert _count_words(body) > 1500
-    trimmed = _trim_to_band(body, "deep")
     _, hi = length_band("deep")
+    trimmed = _trim_to_budget(body, hi)
     assert _count_words(trimmed) <= hi
     # Every section heading survives; the Executive Summary is never trimmed.
     for heading in ("## Executive Summary", "## What It Is",
@@ -229,10 +230,12 @@ def test_trim_to_band_brings_overlong_draft_inside_the_band():
 
 
 def test_trim_to_band_leaves_in_band_draft_untouched():
-    from app.agents.synthesizer import _trim_to_band
+    from app.agents.synthesizer import _trim_to_budget
+    from app.agents.answer_quality import length_band
 
     body = "## Answer\n\nA short, in-band answer [1]."
-    assert _trim_to_band(body, "deep") == body
+    _, hi = length_band("deep")
+    assert _trim_to_budget(body, hi) == body
 
 
 def test_compression_never_merges_claims_with_distinct_numbers():
@@ -264,7 +267,7 @@ def test_required_sections_added_before_length_trim_keeps_band():
     trim, and the required headings must survive the trim."""
     from app.agents.answer_quality import length_band
     from app.agents.synthesizer import (
-        _count_words, _trim_to_band, ensure_required_sections,
+        _count_words, _trim_to_budget, ensure_required_sections,
     )
 
     para = " ".join(["word"] * 200)
@@ -283,10 +286,12 @@ def test_required_sections_added_before_length_trim_keeps_band():
         contradictions=[],
     )
     assert _count_words(body) > hi
-    trimmed = _trim_to_band(body, "deep")
+    trimmed = _trim_to_budget(body, hi)
 
-    for heading in ("## Executive Summary", "## Key Findings", "## Evidence Strength",
-                    "## Limitations & Unknowns", "## Counterarguments & Disputed Points"):
+    # Required sections for the resolved profile (plus any substantive
+    # conditional ones) must all survive the trim.
+    for heading in ("## Executive Summary", "## Key Findings", "## Evidence & Confidence",
+                    "## Limitations & Unknowns"):
         assert heading in trimmed
     assert _count_words(trimmed) <= hi
 

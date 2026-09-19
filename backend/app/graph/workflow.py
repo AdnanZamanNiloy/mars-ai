@@ -1630,6 +1630,20 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             r.get("published_at", "") for r in state.get("search_results", []) or []
             if isinstance(r, dict) and r.get("published_at")
         ]
+        # Epistemics: adjudicated conflicts + claim standards measured once and
+        # reused by the synthesizer (it reads ctx["epistemics"]). Without this
+        # the confidence engine only sees a raw contradiction count, which
+        # overcounts time-series/scope artifacts and leaves the conflict,
+        # asymmetry and staleness caps dead on live runs.
+        epistemics = state.get("epistemics")
+        if epistemics is None:
+            from app.agents.epistemics import assess_epistemics
+
+            epistemics = assess_epistemics(
+                state["query"], state.get("facts", []), contradictions
+            )
+            state["epistemics"] = epistemics
+
         breakdown = compute_confidence(
             facts=state.get("facts", []),
             critique=critique,
@@ -1642,6 +1656,8 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             contradictions=contradictions,
             answer_support=state.get("answer_support"),
             sub_questions=state.get("sub_questions", []),
+            epistemics=epistemics,
+            query=state["query"],
             # A provider outage must not inflate confidence: the extractive
             # fallback self-verifies, so transport failures are capped like
             # degraded extraction (reliability #4).

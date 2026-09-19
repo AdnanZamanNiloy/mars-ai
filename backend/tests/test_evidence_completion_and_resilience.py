@@ -14,6 +14,7 @@ import asyncio
 from app.agents.synthesizer import (
     REQUIRED_SECTIONS,
     ensure_required_sections,
+    select_profile,
     synthesize,
 )
 from app.agents.outline import build_outline
@@ -25,7 +26,7 @@ from app.core.config import Settings
 REQUIRED_TITLES = [
     "Executive Summary",
     "Key Findings",
-    "Evidence Strength",
+    "Evidence & Confidence",
     "Limitations & Unknowns",
     "Counterarguments & Disputed Points",
     "Open Questions & Missing Angles",
@@ -75,24 +76,27 @@ class _MinimalWriter:
         return {"answer": "A short synthesized section body citing a claim [1]."}
 
 
-def test_every_synthesized_report_contains_five_required_sections():
+def test_every_synthesized_report_contains_required_sections():
+    ctx = {"intent": {}, "sub_questions": _sub_questions()}
+    profile = select_profile(ctx, fact_count=len(_facts()))
     result = asyncio.run(
         synthesize(_MinimalWriter(), "What is the current trend of AI?", _facts(),
-                   {"intent": {}, "sub_questions": _sub_questions()}, compress_context=False)
+                   ctx, compress_context=False)
     )
-    for title in REQUIRED_TITLES:
+    for title in profile.required:
         assert f"## {title}" in result.answer, f"missing required section: {title}"
 
 
-def test_section_wise_report_contains_five_required_sections():
+def test_section_wise_report_contains_required_sections():
+    ctx = {"intent": {}, "sub_questions": _sub_questions()}
+    profile = select_profile(ctx, fact_count=len(_facts()))
     outline = build_outline("What is the current trend of AI?", _facts(), _sub_questions())
     assert outline.broad
     result = asyncio.run(
         synthesize(_MinimalWriter(), "What is the current trend of AI?", _facts(),
-                   {"intent": {}, "sub_questions": _sub_questions()},
-                   outline=outline, section_wise=True, compress_context=False)
+                   ctx, outline=outline, section_wise=True, compress_context=False)
     )
-    for title in REQUIRED_TITLES:
+    for title in profile.required:
         assert f"## {title}" in result.answer, f"missing required section: {title}"
 
 
@@ -102,8 +106,14 @@ def test_writer_omitting_limitations_gets_it_added():
         answer, ctx={"evidence_distribution": {"A": 2, "B": 1, "C": 1, "D": 0}},
         usable_facts=_facts(), contradictions=[],
     )
+    # Required for the resolved profile, always present.
+    assert "## Key Findings" in filled
+    assert "## Evidence & Confidence" in filled
+    # Limitations is conditional: added here because the measured evidence IS thin.
     assert "## Limitations & Unknowns" in filled
-    assert "## Counterarguments & Disputed Points" in filled
+    # Counterarguments is conditional and correctly omitted when there is no
+    # substantive counter-evidence content to report (no invented section).
+    assert "## Counterarguments & Disputed Points" not in filled
     # Existing sections are never duplicated.
     assert filled.count("## Executive Summary") == 1
 
@@ -328,7 +338,9 @@ def test_key_findings_carry_confidence_grade_and_justification():
         "confidence": 0.9, "verified": True, "corroboration_count": 3,
         "evidence_grade": "A",
     }
-    line = _render_finding_line(corroborated)
+    # Confidence/grade annotation is audit-profile only (verbose); the normal
+    # reader-facing bullet keeps just the claim, its marker and any weak flag.
+    line = _render_finding_line(corroborated, verbose=True)
     assert "confidence" in line
     assert "grade A" in line
     assert "3 independent sources" in line

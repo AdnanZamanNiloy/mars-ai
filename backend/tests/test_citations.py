@@ -542,10 +542,16 @@ def test_llm_prompt_carries_angles_and_evidence():
     answer = asyncio.run(synthesizer_agent(FakeLLM(), "What is transformer?", facts))
     assert "Angles to cover" in seen["user"]
     assert "angle one" in seen["user"] and "angle two" in seen["user"]
-    assert "separate them explicitly" in seen["system"], "entity/sense separation rule must be present"
+    # The reasoning-depth contract is injected into the writing prompt (section
+    # and single-pass alike), not duplicated into the top-level system prompt.
+    assert "REASONING DEPTH" in seen["user"], "reasoning-depth contract must reach the writer"
     system_flat = " ".join(seen["system"].lower().split())
+    assert "separate them explicitly" in system_flat, "entity/sense separation rule must be present"
     assert "according to the research" in system_flat, "banned-phrase rule must be present"
-    assert "Key Findings" in seen["system"]
+    # The section skeleton (including Key Findings) lives in the writer prompt,
+    # where the profile and angles are known; the system prompt carries the
+    # shared formatting/citation contract only.
+    assert "## Key Findings" in seen["user"]
     assert "Report text here" in answer
 
 
@@ -601,8 +607,9 @@ def test_fallback_full_decision_shape():
     }
     answer = asyncio.run(synthesizer_agent(ExplodingLLM(), "What is transformer?", facts, context))
     assert "## Executive Summary" in answer
-    # Headline finding previewed in the summary, claims as grouped bullets.
-    assert "- Electrical transformers step voltage" in answer.split("## Angle one")[0]
+    # The headline finding leads the summary as the short answer; the
+    # remaining claims follow as grouped bullets under their angle.
+    assert "Short answer: Electrical transformers step voltage" in answer.split("## Angle one")[0]
     assert "## Angle one" in answer and "## Angle two" in answer
     assert "## Evidence & Confidence" in answer
     assert "## Limitations" in answer
@@ -635,7 +642,7 @@ def test_fallback_key_findings_are_bullets_with_score_and_ambiguity():
     answer = asyncio.run(synthesizer_agent(
         ExplodingLLM(), "What is transformer?", facts, {"confidence": 0.8}))
     exec_block = answer.split("## Executive Summary")[1].split("## ")[0]
-    assert "- Electrical transformers step voltage" in exec_block, \
+    assert "Short answer: Electrical transformers step voltage" in exec_block, \
         "the single highest-confidence claim headlines the summary"
     assert "distinct angles" in answer
     assert "Confidence: High (0.80)" in answer
@@ -710,14 +717,20 @@ def test_legend_dedupes_repeated_sources():
 
 
 def test_legend_caps_at_fourteen_strongest_sources():
-    """v3 legend cap is 14 (was 12), grouped by canonical URL with
-    tier/primary annotations."""
-    from app.agents.synthesizer import _assign_numbers
+    """Legend now sizes itself to the document count, up to the hard cap, and
+    the default floor is 14. Distinct documents below the hard cap all fit."""
+    from app.agents.synthesizer import MAX_LEGEND_SOURCES_HARD, _assign_numbers
 
     facts = [{"claim": f"Claim {i}", "source": f"https://host-{i}.org/x", "confidence": 0.9}
              for i in range(20)]
     numbered, _ = _assign_numbers(facts)
-    assert len(numbered) == 14
+    # The legend budget grows with document count but never past the hard cap.
+    assert len(numbered) <= MAX_LEGEND_SOURCES_HARD
+    # A small pool is not truncated below the house default floor.
+    few = [{"claim": f"Claim {i}", "source": f"https://h-{i}.org/x", "confidence": 0.9}
+           for i in range(5)]
+    few_numbered, _ = _assign_numbers(few)
+    assert len(few_numbered) == 5
 
 
 def test_answer_support_parses_hash_sources_heading():

@@ -218,6 +218,40 @@ def test_critic_survival_pass_is_one_and_fail_capped():
     assert forced["signals"]["critic_survival"] < 1.0
 
 
+def test_critic_survival_does_not_collapse_to_zero():
+    """Regression: a fixed denominator over an unbounded count drove survival
+    to a flat 0.0 for any critic naming enough items (~4-7 on a normal run),
+    which the UI rendered as "0% critic survival" next to an overall of ~0.8.
+    Gate failures must weigh more than advisory gaps, the score must fall
+    monotonically, and it must never reach 0."""
+    from app.core.confidence import _critic_survival
+
+    def survival(gates: int, gaps: int = 0) -> float:
+        return _critic_survival(
+            {
+                "is_sufficient": False,
+                "gaps": [f"gap {i}" for i in range(gaps)],
+                "gate_failures": [f"gate {i}" for i in range(gates)],
+            },
+            1,
+            3,
+        )
+
+    # A realistic critic (2 gates + a few advisory gaps) keeps meaningful
+    # survival instead of collapsing to zero.
+    assert survival(2, 5) > 0.0
+    assert survival(2, 5) >= 0.15, "the floor keeps a working critic off zero"
+    # Monotonic in both dimensions, and never below the floor.
+    for g in range(0, 15):
+        assert survival(g + 1, g) <= survival(g, g)
+        assert survival(g, g) >= 0.15
+    # Objective gate failures cost more than advisory gaps.
+    assert survival(3, 0) < survival(0, 3)
+    # A FAIL never outranks the pass/hedge values.
+    assert survival(0, 0) == 0.6
+    assert _critic_survival({"is_sufficient": True}, 1, 3) == 1.0
+
+
 def test_freshness_uses_fact_dates_and_shared_curve():
     """Freshness is measured over facts actually in the pool, using the same
     exponential curve as the verifier (not a separate linear one)."""
@@ -230,7 +264,9 @@ def test_freshness_uses_fact_dates_and_shared_curve():
          "verification_score": 0.8, "published_at": "2026-09-01", "search_type": "default"},
     ]
     result = _base(facts=facts)
-    assert result["signals"]["freshness"] == freshness_score("2026-09-01", "default")
+    # Both are rounded to 3 dp by their respective producers; compare on that
+    # scale so a 4th-decimal difference is not treated as a regression.
+    assert result["signals"]["freshness"] == round(freshness_score("2026-09-01", "default"), 3)
 
 
 def test_freshness_ignores_undated_search_results_when_facts_present():
@@ -395,3 +431,50 @@ def test_cross_source_agreement_uncorroborated_angles_stay_low():
     ]
     result = _base(facts=facts, critique={"is_sufficient": False})
     assert result["signals"]["cross_source_agreement"] == 0.0
+
+
+def test_breakdown_carries_engine_version_for_replay():
+    """Every breakdown must identify the engine that produced it. Persisted
+    reviews are replayed verbatim by the UI, so a versionless row (pre-fix)
+    cannot be told apart from a current one and froze critic_survival at a
+    stale 0% indefinitely. The stamp is the source-of-truth discriminator."""
+    from app.core.confidence import ENGINE_VERSION
+
+    result = compute_confidence(list(GOOD_FACTS), CRITIC_PASS, 1, 3)
+    assert result["engine_version"] == ENGINE_VERSION
+
+
+def test_epistemics_adjust_the_live_confidence_path():
+    """The live workflow calls app.core.confidence.compute_confidence directly.
+    Epistemic adjustments must therefore be applied INSIDE it — not only in the
+    unused app.agents.confidence wrapper. A genuine unresolved conflict must
+    lower the score when epistemics are supplied, and the breakdown must still
+    carry engine_version."""
+    from app.agents.epistemics import assess_epistemics
+    from app.core.confidence import ENGINE_VERSION
+
+    facts = [
+        {"claim": "Revenue was 2 billion dollars", "source": "https://a.com/x",
+         "confidence": 0.9, "verified": True, "corroboration_count": 2},
+        {"claim": "Revenue was 3 billion dollars", "source": "https://b.com/y",
+         "confidence": 0.9, "verified": True, "corroboration_count": 2},
+    ]
+    contradictions = [{
+        "claim_a": "Revenue was 2 billion dollars",
+        "claim_b": "Revenue was 3 billion dollars",
+        "source_a": "https://a.com/x", "source_b": "https://b.com/y",
+    }]
+    query = "What is current revenue?"
+    epistemics = assess_epistemics(query, facts, contradictions)
+
+    without = compute_confidence(list(facts), CRITIC_PASS, 1, 3)
+    with_epi = compute_confidence(
+        list(facts), CRITIC_PASS, 1, 3,
+        contradictions=contradictions, epistemics=epistemics, query=query,
+    )
+
+    assert with_epi["overall"] < without["overall"], (
+        "the live path must apply epistemic adjustments (the caps were dead "
+        "before the wiring: a conflict cleared the same bar as a clean pool)"
+    )
+    assert with_epi["engine_version"] == ENGINE_VERSION
