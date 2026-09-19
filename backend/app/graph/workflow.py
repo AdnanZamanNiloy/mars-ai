@@ -911,6 +911,18 @@ def build_direct_answer_report(state: ResearchState) -> str:
     return "\n".join(lines)
 
 
+def build_conversation_report(state: ResearchState) -> str:
+    """Reply report for a social/meta turn (R5).
+
+    A greeting is not a research question, so this carries no evidence,
+    confidence scoring or limitations — only the fixed reply. Keeping it
+    distinct from build_direct_answer_report avoids labelling a "hello" with
+    "no external sources were searched", which would be absurd.
+    """
+    reply = str(state.get("direct_answer", "") or "").strip()
+    return f"{reply}\n" if reply else ""
+
+
 def build_markdown_report(
     state: ResearchState,
     decision_options: List[Dict[str, Any]] | None = None,
@@ -2114,6 +2126,12 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         # own minimal, honest report instead.
         direct = str(state.get("direct_answer", "") or "").strip()
         if direct:
+            meta = state.get("direct_answer_meta") or {}
+            if meta.get("conversation_kind"):
+                return {
+                    "final_report": build_conversation_report(state),
+                    "decision_options": [],
+                }
             return {
                 "final_report": build_direct_answer_report(state),
                 "decision_options": [],
@@ -2169,18 +2187,41 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         return "synthesizer"
 
     def route_after_intent(state: ResearchState) -> str:
-        """R3 branch: honour the router's direct decision, else research.
+        """R3/R5 branch: honour the router's decision, else research.
 
-        Only an explicit, model-cleared `direct` verdict takes the direct
-        path (route_query never grants direct without it). Anything else —
-        including a missing/garbage route — researches, the fail-safe
-        direction (AGENTS.md 4.7).
+        `conversation` (R5) handles greetings/meta deterministically;
+        `direct` (R3) takes the answer node; anything else — including a
+        missing/garbage route — researches, the fail-safe direction
+        (AGENTS.md 4.7).
         """
         route = state.get("route") or {}
-        if str(route.get("path", "") or "").lower() == "direct":
+        path = str(route.get("path", "") or "").lower()
+        if path == "conversation":
+            logger.info("route_conversation_branch")
+            return "conversation"
+        if path == "direct":
             logger.info("route_direct_branch", confidence=route.get("confidence"))
             return "direct_answer"
         return "planner"
+
+    async def conversation_node(state: ResearchState) -> Dict[str, Any]:
+        """Reply to a social/meta turn with no LLM and no research (R5).
+
+        The reply was fixed deterministically by the router
+        (`answer_sketch`); this node just surfaces it on the direct-answer
+        channel so the finalize/report/stream paths are shared.
+        """
+        route = state.get("route") or {}
+        reply = str(route.get("answer_sketch", "") or "").strip()
+        return {
+            "direct_answer": reply,
+            "direct_answer_meta": {
+                "conversation_kind": (route.get("signals") or {}).get("conversation_kind", ""),
+                "reason": route.get("reason", ""),
+                "confidence": 1.0,
+            },
+            "confidence": 1.0,
+        }
 
     def route_after_direct(state: ResearchState) -> str:
         """R3 escape hatch: a delivered direct answer finalizes; a refusal or
@@ -2191,6 +2232,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         return "planner"
 
     graph.add_node("intent", intent_node)
+    graph.add_node("conversation", conversation_node)
     graph.add_node("direct_answer", direct_answer_node)
     graph.add_node("planner", planner_node)
     graph.add_node("search", search_node)
@@ -2208,13 +2250,19 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         graph.add_conditional_edges(
             "intent",
             route_after_intent,
-            {"direct_answer": "direct_answer", "planner": "planner"},
+            {
+                "conversation": "conversation",
+                "direct_answer": "direct_answer",
+                "planner": "planner",
+            },
         )
         graph.add_conditional_edges(
             "direct_answer",
             route_after_direct,
             {"finalize": "finalize", "planner": "planner"},
         )
+        # R5: a conversation reply is already complete — straight to finalize.
+        graph.add_edge("conversation", "finalize")
     graph.add_edge("planner", "search")
     graph.add_edge("search", "summarizer")
     graph.add_edge("summarizer", "verifier")

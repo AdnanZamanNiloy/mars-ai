@@ -223,7 +223,7 @@ export default function AnswerCard({ run }) {
 
   return (
     <div className="answer anim-rise">
-      {run.directAnswer ? (
+      {run.directAnswer && run.directAnswer.kind ? null : run.directAnswer ? (
         <div className="degraded-banner" role="note">
           <IconAlert size={16} />
           <div>

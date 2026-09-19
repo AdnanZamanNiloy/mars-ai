@@ -65,7 +65,9 @@ def _finding_item(fact: Dict[str, Any]) -> Dict[str, Any]:
 
 
 class ResearchRequest(BaseModel):
-    query: str = Field(..., min_length=5, max_length=500)
+    # min_length=1: the router (R5) handles short social turns ("hey", "hi")
+    # as conversation; an empty query is still rejected.
+    query: str = Field(..., min_length=1, max_length=500)
     deep_research: bool = False
     # Research Modes (3.7 + vision §28): quick | standard | deep | executive | audit | redteam
     mode: str = Field(default="standard", pattern="^(quick|standard|deep|executive|audit|redteam)$")
@@ -434,6 +436,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                                 confidence=snapshot.get("confidence"),
                                 self_confidence=direct_meta.get("confidence"),
                                 reason=direct_meta.get("reason", ""),
+                                kind=direct_meta.get("conversation_kind", ""),
                             )
                             await _persist(record_event(
                                 settings.database_url, request_id, "direct_answer", "end",

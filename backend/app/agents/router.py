@@ -58,6 +58,77 @@ logger = get_logger(__name__)
 
 DIRECT = "direct"
 RESEARCH = "research"
+CONVERSATION = "conversation"
+
+# Social / meta turns that are not research questions at all. A greeting
+# must NOT be answered by the knowledge agent (it would hallucinate a
+# "research answer" to "hey") and must NOT trigger the full pipeline. These
+# are matched deterministically — no LLM call, sub-second handling.
+_GREETING_RE = re.compile(
+    r"^\s*(hi|hii+|hey+|hello+|yo|sup|howdy|good\s+(morning|afternoon|evening)|"
+    r"greetings|hiya)\b[\s!.?,]*(there|again|all|everyone|friend|mars)?[\s!.?,]*$",
+    re.IGNORECASE,
+)
+_THANKS_RE = re.compile(
+    r"^\s*(thanks|thank\s+you|thx|ty|cheers|appreciate\s+it|much\s+appreciated)"
+    r"\b[\s!.?,]*(so\s+much|a\s+lot|again|mate|friend)?[\s!.?,]*$",
+    re.IGNORECASE,
+)
+_META_RE = re.compile(
+    r"^\s*(who\s+are\s+you|what\s+are\s+you|what\s+can\s+you\s+do|"
+    r"what\s+do\s+you\s+do|help\s+me\s+get\s+started|how\s+do\s+you\s+work|"
+    r"what\s+is\s+this|what'?s\s+this|are\s+you\s+(an?\s+)?(ai|bot|assistant)|"
+    r"what\s+is\s+mars|what\s+can\s+this\s+do)"
+    r"\b[\s!?.,]*$",
+    re.IGNORECASE,
+)
+_FAREWELL_RE = re.compile(
+    r"^\s*(bye|goodbye|good\s+bye|see\s+you|cya|later|farewell|take\s+care)"
+    r"\b[\s!.?,]*$",
+    re.IGNORECASE,
+)
+
+# Fixed, honest replies — no LLM, no research. Keyed by conversational kind.
+CONVERSATION_REPLIES: Dict[str, str] = {
+    "greeting": (
+        "Hi! I'm MARS, a research assistant. Ask me a question and I'll "
+        "investigate it across the web and give you a sourced answer — for "
+        "example, \"What is retrieval augmented generation?\" or \"Compare "
+        "solar and nuclear energy costs\"."
+    ),
+    "thanks": (
+        "You're welcome! Ask another research question whenever you're ready."
+    ),
+    "meta": (
+        "I'm MARS, a multi-agent research assistant. I break a question into "
+        "research angles, gather sources, verify claims, and write a sourced "
+        "answer with confidence and limitations. Ask me a research question "
+        "to get started."
+    ),
+    "farewell": "Goodbye! Come back with another question anytime.",
+}
+
+
+def conversation_kind(query: str) -> str:
+    """Classify a non-research social/meta turn, or "" if it is not one.
+
+    Deterministic and total. Only whole-utterance matches count, so a real
+    question that happens to contain "hi" ("What is a histogram?") is never
+    mistaken for a greeting.
+    """
+    q = str(query or "").strip()
+    if not q or len(q) > 120:
+        return ""
+    if _GREETING_RE.match(q):
+        return "greeting"
+    if _THANKS_RE.match(q):
+        return "thanks"
+    if _FAREWELL_RE.match(q):
+        return "farewell"
+    if _META_RE.match(q):
+        return "meta"
+    return ""
+
 
 # Self-confidence at/above which a model's own clearance is trusted for a
 # direct answer. Below it, research — the model must be sure, not merely
@@ -158,6 +229,10 @@ class RouteDecision:
     def is_direct(self) -> bool:
         return self.path == DIRECT
 
+    @property
+    def is_conversation(self) -> bool:
+        return self.path == CONVERSATION
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "path": self.path,
@@ -235,6 +310,21 @@ def deterministic_route(
     """
     complexity = complexity if complexity is not None else score_complexity(query)
     signals = _collect_signals(query, complexity, intent)
+
+    # Conversation (R5): a greeting/thanks/meta/farewell is not a research
+    # question. Handled FIRST and deterministically — no LLM, no research.
+    kind = conversation_kind(query)
+    if kind:
+        signals["conversation_kind"] = kind
+        return RouteDecision(
+            path=CONVERSATION,
+            reason=f"Conversational turn ({kind}); no research required.",
+            confidence=1.0,
+            signals=signals,
+            origin="heuristic",
+            answer_sketch=CONVERSATION_REPLIES.get(kind, ""),
+        )
+
     blockers = signals["hard_blockers"]
     if blockers:
         return RouteDecision(
@@ -351,8 +441,13 @@ async def route_query(
             min_direct_confidence = DEFAULT_MIN_DIRECT_CONFIDENCE
 
     # A query with a hard blocker is research regardless of the model; there
-    # is no reason to spend a call asking. This is both correct and cheap.
-    if not router_enabled or base.signals.get("hard_blockers"):
+    # is no reason to spend a call asking. A conversational turn (R5) is
+    # answered deterministically — never worth an LLM routing call.
+    if (
+        not router_enabled
+        or base.path == CONVERSATION
+        or base.signals.get("hard_blockers")
+    ):
         logger.info(
             "[Router] deterministic path=%s blockers=%s",
             base.path, base.signals.get("hard_blockers"),

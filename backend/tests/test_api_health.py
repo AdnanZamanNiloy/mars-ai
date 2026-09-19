@@ -20,9 +20,10 @@ async def test_root_endpoint():
         assert response.json()["status"] == "ok"
 
 
-async def test_research_stream_validates_query_length():
+async def test_research_stream_rejects_empty_query():
+    """R5 lowered min_length to 1 so short social turns ("hey") reach the
+    router; an empty query is still rejected before any pipeline work."""
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        # 4 chars < min_length=5 → 422 before any pipeline work
-        response = await client.post("/api/research/stream", json={"query": "abc"})
+        response = await client.post("/api/research/stream", json={"query": ""})
         assert response.status_code == 422

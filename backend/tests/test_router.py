@@ -185,3 +185,91 @@ def test_to_dict_shape():
         "path", "reason", "confidence", "signals", "origin", "answer_sketch"
     }
     assert d.is_direct is True
+
+
+# ---------------------------------------------------------------------------
+# R5: conversation path — greetings/meta are not research questions
+# ---------------------------------------------------------------------------
+
+from app.agents.router import CONVERSATION, conversation_kind  # noqa: E402
+
+
+def test_greetings_route_to_conversation():
+    for q in ("hey", "hi", "hello", "hello there", "hi again", "good morning", "yo"):
+        d = deterministic_route(q)
+        assert d.path == CONVERSATION, q
+        assert d.signals.get("conversation_kind") == "greeting"
+        assert d.answer_sketch, q
+
+
+def test_thanks_meta_farewell_route_to_conversation():
+    assert deterministic_route("thanks!").signals["conversation_kind"] == "thanks"
+    assert deterministic_route("thank you so much").signals["conversation_kind"] == "thanks"
+    assert deterministic_route("who are you?").signals["conversation_kind"] == "meta"
+    assert deterministic_route("what can you do?").signals["conversation_kind"] == "meta"
+    assert deterministic_route("bye").signals["conversation_kind"] == "farewell"
+
+
+def test_real_questions_are_not_conversation():
+    """A question that merely CONTAINS a greeting word must not be classified
+    as conversation — whole-utterance matching only."""
+    for q in ("What is a histogram?",
+              "How does the internet handle high traffic?",
+              "What is the history of hello in programming?"):
+        assert conversation_kind(q) == "", q
+
+
+def test_conversation_kind_is_bounded_and_total():
+    assert conversation_kind("") == ""
+    assert conversation_kind("   ") == ""
+    assert conversation_kind("hi " * 100) == ""  # over the length cap
+
+
+async def test_route_query_handles_conversation_without_llm_call():
+    llm = FakeLLM(payload={"path": "direct", "confidence": 0.99,
+                           "reason": "", "needs_research": False})
+    d = await route_query(llm, "hey")
+    assert d.path == CONVERSATION
+    assert llm.calls == [], "conversation must never spend an LLM routing call"
+
+
+async def test_graph_routes_greeting_to_conversation_not_planner(monkeypatch):
+    """R5 end-to-end: a greeting must finalize through the conversation node
+    without ever invoking the planner, search, or an LLM research call."""
+    import app.graph.workflow as wf
+    from app.core.config import Settings
+    from app.core.llm import LLMClient
+
+    settings = Settings(groq_api_key="k", _env_file=None)
+    llm = LLMClient(settings)
+    captured = {"planner_called": False}
+
+    from app.agents.intent import heuristic_intent
+
+    async def fake_classify(llm_arg, q, context_snippets=None):
+        return heuristic_intent(q)
+
+    async def fake_planner(**kwargs):
+        captured["planner_called"] = True
+        return []
+
+    class _FakeSearch:
+        def __init__(self):
+            self.settings = settings
+
+        async def run_search(self, queries):
+            raise AssertionError("greeting must not search")
+
+    monkeypatch.setattr(wf, "classify_intent", fake_classify)
+    monkeypatch.setattr(wf, "planner_agent", fake_planner)
+
+    graph = wf.create_workflow(llm, _FakeSearch())
+    state = wf.build_initial_state("hey", 3, mode="quick")
+    final = None
+    async for snap in graph.astream(state, stream_mode="values"):
+        final = snap
+
+    assert captured["planner_called"] is False
+    assert final["route"]["path"] == "conversation"
+    assert final["direct_answer"], "the greeting reply must be delivered"
+    assert "research assistant" in final["final_report"].lower()

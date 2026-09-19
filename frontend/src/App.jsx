@@ -321,9 +321,15 @@ export default function App() {
             confidence: typeof evt.confidence === "number" ? evt.confidence : null,
             selfConfidence: typeof evt.self_confidence === "number" ? evt.self_confidence : null,
             reason: evt.reason || "",
+            kind: evt.kind || "",
           },
         });
-        pushTrace({ text: "Answered directly (no sources consulted)", kind: "done" });
+        pushTrace({
+          text: evt.kind
+            ? "Conversational reply"
+            : "Answered directly (no sources consulted)",
+          kind: "done",
+        });
         break;
       case "plan":
         patchRun(tempId, {
