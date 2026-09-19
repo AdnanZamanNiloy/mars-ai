@@ -286,6 +286,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
             )
             last_iteration = -1
             emitted_intent = False
+            emitted_route = False
             emitted_plan = False
             emitted_findings = 0
             emitted_annotated = 0
@@ -398,6 +399,24 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                                     "ambiguity": intent_data.get("ambiguity"),
                                     "domain": intent_data.get("domain"),
                                     "origin": intent_data.get("origin"),
+                                }),
+                            ))
+
+                        if snapshot.get("route") and not emitted_route:
+                            # Query router (R2): the direct-vs-research
+                            # decision. Surfaced for the trace/UI; the path is
+                            # not branched on yet (R3).
+                            emitted_route = True
+                            route_data = snapshot.get("route") or {}
+                            yield event_line("route", **{
+                                k: route_data.get(k)
+                                for k in ("path", "reason", "confidence", "origin", "signals")
+                            })
+                            await _persist(record_event(
+                                settings.database_url, request_id, "route", "end",
+                                payload=json.dumps({
+                                    "path": route_data.get("path"),
+                                    "origin": route_data.get("origin"),
                                 }),
                             ))
 

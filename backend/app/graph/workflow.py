@@ -14,6 +14,7 @@ from app.agents.intent import classify_intent, heuristic_intent
 from app.agents.orchestrator import MODE_CONFIDENCE_TARGET, orchestrate
 from app.agents.planner import normalize_text, planner_agent
 from app.agents.redteam import redteam_agent
+from app.agents.router import route_query
 from app.agents.search import SearchClient
 from app.agents.summarizer import summarizer_agent
 from app.agents.synthesizer import synthesizer_agent
@@ -62,6 +63,10 @@ class ResearchState(TypedDict, total=False):
     # grounding search snippets, shared by intent and the planner.
     intent: Dict[str, Any]
     context_snippets: List[str]
+    # Query router (R2): the direct-vs-research decision made after intent,
+    # before planning. R2 only SURFACES it (route event + trace); the path
+    # itself is not branched on until R3.
+    route: Dict[str, Any]
     # Answer quality gate: five-axis 0-100 score of the delivered report.
     quality: Dict[str, Any]
     # Answer-first outline (GPT Researcher adaptation): the section shape the
@@ -111,6 +116,7 @@ class PlannerUpdate(TypedDict):
 class IntentUpdate(TypedDict):
     intent: Dict[str, Any]
     context_snippets: List[str]
+    route: Dict[str, Any]
 
 
 class SearchUpdate(TypedDict, total=False):
@@ -1027,7 +1033,20 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             return heuristic_intent(state["query"]).to_dict()
 
         context_snippets, intent_dict = await asyncio.gather(_context_search(), _classify())
-        return {"intent": intent_dict, "context_snippets": context_snippets}
+
+        # Query router (R2): once intent is known (the router reads the
+        # ambiguity signal), decide direct-vs-research. R2 only records the
+        # decision on state so the route event and trace can surface it —
+        # the graph still always researches. Any failure is swallowed by
+        # route_query itself, which fails safe to "research".
+        route_decision = await route_query(
+            llm, state["query"], intent=intent_dict
+        )
+        return {
+            "intent": intent_dict,
+            "context_snippets": context_snippets,
+            "route": route_decision.to_dict(),
+        }
 
     async def planner_node(state: ResearchState) -> PlannerUpdate:
         existing = state.get("sub_questions", []) or []

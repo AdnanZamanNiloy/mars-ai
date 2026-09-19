@@ -304,6 +304,11 @@ async def test_graph_runs_intent_before_planner(monkeypatch):
     assert captured["intent"]["domain"] == "machine_learning"
     # intent lands in state for the synthesizer
     assert final["intent"]["ambiguity"] is True
+    # R2: the router ran after intent and recorded a decision on state.
+    # "What is transformer?" is ambiguous -> the deterministic gate forces
+    # research, and the LLM is not even consulted.
+    assert final["route"]["path"] == "research"
+    assert "ambiguity" in final["route"]["signals"]["hard_blockers"]
 
 
 def test_sense_tagged_fallback_groups_by_sense():

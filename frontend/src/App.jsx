@@ -158,6 +158,8 @@ function blankRun(query, mode) {
     redteam: null,
     // v2.1: resolved intent (senses, domain, explanation level).
     intent: null,
+    // Query router: direct-vs-research decision (path, reason, confidence).
+    route: null,
     quality: null,
     evidenceDistribution: null,
     // Answer-first outline: the section shape the writer targeted.
@@ -291,6 +293,21 @@ export default function App() {
         });
         pushTrace({
           text: `Understood: ${evt.domain || "?"}${evt.ambiguity ? " — ambiguous, will disambiguate" : ""}`,
+          kind: "done",
+        });
+        break;
+      case "route":
+        patchRun(tempId, {
+          route: {
+            path: evt.path, reason: evt.reason || "",
+            confidence: typeof evt.confidence === "number" ? evt.confidence : null,
+            origin: evt.origin || "", signals: evt.signals && typeof evt.signals === "object" ? evt.signals : {},
+          },
+        });
+        pushTrace({
+          text: evt.path === "direct"
+            ? "Router: answerable directly — verifying before answering"
+            : "Router: external evidence required",
           kind: "done",
         });
         break;

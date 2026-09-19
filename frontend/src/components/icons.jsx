@@ -33,6 +33,7 @@ export const IconCheck = (p) => base({ ...p, children: <path d="M20 6 9 17l-5-5"
 export const IconCheckCircle = (p) => base({ ...p, children: <><circle cx="12" cy="12" r="10" /><path d="m9 12 2 2 4-4" /></> });
 export const IconAlert = (p) => base({ ...p, children: <><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><path d="M12 9v4M12 17h.01" /></> });
 export const IconTarget = (p) => base({ ...p, children: <><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></> });
+export const IconRoute = (p) => base({ ...p, children: <><circle cx="6" cy="19" r="3" /><circle cx="18" cy="5" r="3" /><path d="M9 19h6a3 3 0 0 0 3-3V8" /><path d="M6 16V8a3 3 0 0 1 3-3h6" /></> });
 export const IconChevronDown = (p) => base({ ...p, children: <path d="m6 9 6 6 6-6" /> });
 export const IconChevronUp = (p) => base({ ...p, children: <path d="m18 15-6-6-6 6" /> });
 export const IconChevronLeft = (p) => base({ ...p, children: <path d="m15 18-6-6 6-6" /> });

@@ -1,6 +1,6 @@
 import {
   IconAlert, IconChart, IconCheckCircle, IconChevronUp,
-  IconDoc, IconRefresh, IconSearch, IconShield, IconShieldCheck, IconTarget,
+  IconDoc, IconRefresh, IconRoute, IconSearch, IconShield, IconShieldCheck, IconTarget,
 } from "./icons";
 
 /* Mission Intelligence — every number comes from streamed run state.
@@ -381,6 +381,15 @@ function deriveHealth(run) {
       value: `${run.intent.domain}${run.intent.ambiguity ? " · ambiguous" : ""}`,
       tone: run.intent.ambiguity ? "warn" : "good",
       hot: run.intent.ambiguity,
+    });
+  }
+  if (run.route && run.route.path) {
+    rows.push({
+      icon: IconRoute,
+      label: "Router",
+      value: run.route.path === "direct" ? "direct answer" : "research",
+      tone: run.route.path === "direct" ? "warn" : "muted",
+      hot: run.route.path === "direct",
     });
   }
   if (typeof run.answerSupport === "number") {

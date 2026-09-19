@@ -224,6 +224,42 @@ async def test_preflight_fails_fast_when_no_provider_reachable(tmp_path, monkeyp
     assert "groq" in error_event["message"]
 
 
+class StubRouteWorkflow:
+    """Yields an intent then a route decision — the R2 surface."""
+
+    async def astream(self, state, stream_mode=None, config=None):
+        yield {"intent": {"query_type": "factual", "domain": "software",
+                          "ambiguity": False, "origin": "llm"}}
+        yield {"intent": {"query_type": "factual", "domain": "software",
+                          "ambiguity": False, "origin": "llm"},
+               "route": {"path": "research", "reason": "needs evidence",
+                         "confidence": 0.9, "origin": "llm",
+                         "signals": {"hard_blockers": ["freshness"]}}}
+        yield {"final_report": "# Final Answer\nok", "confidence": 0.7}
+
+
+async def test_route_event_emitted_once(tmp_path):
+    """R2: the router decision is surfaced on the wire exactly once, with
+    the path/reason/signals the UI needs."""
+    from app.db.sqlite import init_db
+
+    db_path = str(tmp_path / "route.db")
+    await init_db(db_path)
+    settings = Settings(groq_api_key="test-key", database_url=db_path, _env_file=None)
+    app = _build_app(StubRouteWorkflow(), settings)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/research/stream", json={"query": "valid research query here"})
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    routes = [e for e in events if e.get("type") == "route"]
+    assert len(routes) == 1, events
+    assert routes[0]["path"] == "research"
+    assert routes[0]["reason"] == "needs evidence"
+    assert routes[0]["confidence"] == 0.9
+    assert routes[0]["signals"] == {"hard_blockers": ["freshness"]}
+
+
 async def test_preflight_passes_when_a_provider_responds(tmp_path):
     """One reachable provider is enough: the run proceeds normally."""
     import respx
