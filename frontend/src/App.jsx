@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchSession, listSessions, resumeResearch, startResearch } from "./api";
+import { fetchSession, fetchTrace, listSessions, resumeResearch, startResearch } from "./api";
 import { MODE_META, loadActiveSessionId, loadKnowledge, loadMissions, newSessionId, parseReport, removeKnowledgeItem, removeMission, saveActiveSessionId, saveKnowledgeItem, updateMission, upsertMission } from "./lib";
 import Sidebar from "./components/Sidebar";
 import Composer from "./components/Composer";
@@ -176,6 +176,47 @@ function blankRun(query, mode) {
   };
 }
 
+/* Rebuild the ordered replay thread for a persisted session.
+
+ * The session row already carries one run entry per question, but the replay
+ * card reads the REAL per-run trace (claims, sources, decisions). Fetching it
+ * here — rather than synthesizing a stub from the stored report — is what
+ * makes a restored answer render its evidence instead of a blank card.
+ * The session's redundant `user` rows are dropped: the replay card renders
+ * its own question, so keeping both showed every question twice. */
+async function buildReplayMessages(session, signal) {
+  const runRows = (session.messages || []).filter((m) => m.role !== "user");
+  return Promise.all(runRows.map(async (meta) => {
+    let trace;
+    try {
+      trace = await fetchTrace(meta.run_id, signal);
+    } catch {
+      // Trace unavailable (e.g. purged): degrade to the session row's report
+      // so the chat still restores instead of erroring out.
+      trace = {
+        run_id: meta.run_id,
+        query: meta.query,
+        status: meta.status,
+        confidence: meta.confidence,
+        claims: [],
+        sources: [],
+        decisions: [],
+        final_report: meta.report
+          ? { report_markdown: meta.report, confidence: meta.confidence }
+          : null,
+      };
+    }
+    return {
+      id: meta.id,
+      kind: "replay",
+      runId: meta.run_id,
+      trace,
+      query: trace.query || meta.query || "Replay",
+      at: meta.created_at,
+    };
+  }));
+}
+
 export default function App() {
   const [view, setViewState] = useState(viewFromHash);
   const viewRef = useRef(viewFromHash());
@@ -291,20 +332,11 @@ export default function App() {
     (async () => {
       try {
         const session = await fetchSession(id, controller.signal);
-        const restored = (session.messages || []);
+        const restored = await buildReplayMessages(session, controller.signal);
         if (restored.length === 0) return;
         setMessages((prev) => {
           if (prev.length > 0) return prev; // user already started typing
-          return restored.map((m) => m.role === "user"
-            ? { id: m.id, kind: "user", text: m.text, at: m.created_at }
-            : {
-                id: m.id, kind: "replay", runId: m.run_id,
-                trace: {
-                  query: m.query, status: m.status, confidence: m.confidence,
-                  final_report: m.report ? { report_markdown: m.report, confidence: m.confidence } : null,
-                },
-                query: m.query || "Replay", at: m.created_at,
-              });
+          return restored;
         });
       } catch {
         /* no persisted history — start fresh */
@@ -648,25 +680,7 @@ export default function App() {
       // Opening a chat adopts its session id, so a follow-up asked from a
       // replayed chat appends to THAT chat rather than starting a new one.
       setActiveSession(targetSessionId);
-      // Rebuild the full ordered thread: every question + its run result.
-      const restored = (session.messages || []).map((m) => {
-        if (m.role === "user") {
-          return { id: m.id, kind: "user", text: m.text, at: m.created_at };
-        }
-        return {
-          id: m.id,
-          kind: "replay",
-          runId: m.run_id,
-          trace: {
-            query: m.query,
-            status: m.status,
-            confidence: m.confidence,
-            final_report: m.report ? { report_markdown: m.report, confidence: m.confidence } : null,
-          },
-          query: m.query || "Replay",
-          at: m.created_at,
-        };
-      });
+      const restored = await buildReplayMessages(session);
       if (restored.length === 0) {
         restored.push({
           id: nid(), kind: "notice",
@@ -678,7 +692,7 @@ export default function App() {
       const latestRun = [...(session.runs || [])].reverse()[0] || null;
       setTraceLog(latestRun
         ? [{ at: latestRun.completed_at || latestRun.created_at, kind: "done",
-             text: `Restored chat · ${session.messages.length} messages` }]
+             text: `Restored chat · ${restored.length} message${restored.length === 1 ? "" : "s"}` }]
         : [{ at: new Date().toISOString(), kind: "done", text: "Trace loaded — no node events recorded" }]);
       setSelectedFinding(null);
       setIntelCollapsed(false);
