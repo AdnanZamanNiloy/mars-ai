@@ -272,8 +272,10 @@ export default function AnswerCard({ run }) {
 
 export function ReplayAnswerCard({ trace }) {
   /* Read-only replay built from the persisted trace — same card, zero new fetches. */
+  const report = trace.final_report?.report_markdown || "";
+  const hasSectionedReport = report.includes("# Final Answer");
   const run = {
-    report: trace.final_report?.report_markdown || "",
+    report,
     confidence: typeof trace.final_report?.confidence === "number" ? trace.final_report.confidence : null,
     findings: (trace.claims || []).map((c) => ({
       claim: c.claim,
@@ -286,5 +288,11 @@ export function ReplayAnswerCard({ trace }) {
     decisions: trace.decisions || [],
     snippets: (trace.sources || []).length,
   };
+  // Direct-answer runs persist a headingless plain-text report. Without this,
+  // parseReport finds no "# Final Answer" section and the card falls through to
+  // "did not include an executive summary", hiding the answer that IS stored.
+  if (report && !hasSectionedReport) {
+    run.directAnswer = { answer: report };
+  }
   return <AnswerCard run={run} />;
 }
