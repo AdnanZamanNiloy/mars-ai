@@ -73,7 +73,7 @@
 /* Report body reads at ~16.5px with generous leading — the research
  * response is the product, not a chat line. Headings stay clearly larger;
  * metadata (source lines) stays small. */
-.answer-lead { margin: 2px 0 0; font-size: 16.5px; line-height: 1.75; color: var(--t2); white-space: pre-wrap; overflow-wrap: break-word; }
+.answer-lead { margin: 2px 0 0; font-size: 16.5px; line-height: 1.75; color: var(--t1); white-space: pre-wrap; overflow-wrap: break-word; }
 .answer-h { margin: 24px 0 8px; font-size: 19.5px; font-weight: 650; letter-spacing: -0.2px; color: var(--t1); }
 .answer-h:first-child { margin-top: 0; }
 .answer-subh { margin: 16px 0 6px; font-size: 16px; font-weight: 650; color: var(--t1); }

@@ -863,52 +863,15 @@ def _measured_coverage_gaps(state: ResearchState) -> List[str]:
 
 
 def build_direct_answer_report(state: ResearchState) -> str:
-    """Minimal report for a direct (no-research) answer.
+    """Report for a direct (no-research) answer: the answer text only.
 
-    Deliberately does NOT reuse build_markdown_report: that shape carries
-    Supporting Evidence, Contradictions and Decision sections which would be
-    empty or fabricated here. Honesty about the answer's provenance is the
-    whole point of the direct path — the Limitations section states plainly
-    that no external sources were consulted and how confidence is bounded.
+    The provenance (no sources, model self-assessment, capped confidence) is
+    already surfaced on the stream via the direct_answer event and in the
+    confidence score. Emitting it again as Limitations/Confidence sections
+    inside the report duplicated that disclosure and buried the answer, so
+    the report body is exactly the answer.
     """
-    answer = str(state.get("direct_answer", "") or "").strip()
-    meta = state.get("direct_answer_meta") or {}
-    confidence = float(state.get("confidence", 0.0) or 0.0)
-    self_confidence = meta.get("confidence")
-    reason = str(meta.get("reason", "") or "").strip()
-
-    limitations = [
-        "This answer was given directly from the model's general knowledge; "
-        "no external sources were searched or consulted.",
-        "It is suitable for stable, well-known facts only. Anything dependent "
-        "on current events, prices, statistics or recent developments should "
-        "be researched instead.",
-        "Confidence reflects the model's own self-assessment, capped below "
-        "the research sufficiency threshold — it is not evidence-based.",
-    ]
-    if reason:
-        limitations.append(f"Routing note: {reason}")
-
-    lines = [
-        "# Final Answer",
-        answer,
-    ]
-    if isinstance(self_confidence, (int, float)):
-        lines.extend([
-            "",
-            f"_Direct answer · self-assessed confidence "
-            f"{float(self_confidence):.2f} · delivered confidence "
-            f"{confidence:.2f}_",
-        ])
-    lines.extend([
-        "",
-        "# Limitations",
-        *[f"- {item}" for item in limitations],
-        "",
-        "# Confidence Score",
-        f"{confidence:.2f}",
-    ])
-    return "\n".join(lines)
+    return str(state.get("direct_answer", "") or "").strip()
 
 
 def build_conversation_report(state: ResearchState) -> str:

@@ -192,10 +192,12 @@ async def test_direct_route_delivers_ungrounded_answer_with_capped_confidence(mo
     assert final.get("sub_questions") in ([], None)
     # Confidence capped (self 0.95 -> cap 0.55) and below the sufficiency bar.
     assert final["confidence"] <= 0.55
-    # The report is the honest direct-answer shape, no Supporting Evidence.
+    # The report is exactly the answer text: no research scaffolding, no
+    # duplicated provenance sections.
     report = final["final_report"]
-    assert "no external sources were searched" in report
+    assert report.strip() == "A for-loop iterates over a sequence."
     assert "# Supporting Evidence" not in report
+    assert "# Limitations" not in report
 
 
 async def test_direct_refusal_falls_through_to_research(monkeypatch):

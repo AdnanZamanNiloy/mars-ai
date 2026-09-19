@@ -309,8 +309,10 @@ export default function App() {
         });
         pushTrace({
           text: evt.path === "direct"
-            ? "Router: answerable directly — verifying before answering"
-            : "Router: external evidence required",
+            ? "Router: answerable directly — answering from general knowledge"
+            : evt.path === "conversation"
+              ? "Router: conversational turn"
+              : "Router: external evidence required",
           kind: "done",
         });
         break;

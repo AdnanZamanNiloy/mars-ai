@@ -207,35 +207,8 @@ export default function AnswerCard({ run }) {
   const support = typeof run.answerSupport === "number" ? Math.round(run.answerSupport * 100) : null;
   const outlineSections = run.outline && Array.isArray(run.outline.sections) ? run.outline.sections : [];
 
-  const stats = [
-    { icon: IconDoc, value: String(total), label: "Total claims", sub: `From ${run.snippets || "—"} sources`, tone: "muted" },
-    { icon: IconCheckCircle, value: String(verified), label: "Verified claims", sub: total ? `${Math.round((verified / total) * 100)}% verification rate` : "No claims yet", tone: "good" },
-    { icon: IconAlert, value: String(conflicts), label: "Conflicts", sub: conflicts ? "Requires attention" : "None detected", tone: conflicts ? "warn" : "muted" },
-    { icon: IconChart, value: typeof run.confidence === "number" ? `${Math.round(run.confidence * 100)}%` : "—", label: "Overall confidence", sub: `${confidenceLabel(run.confidence)} confidence`, tone: "warn" },
-  ];
-  if (support !== null) {
-    stats.push({
-      icon: IconCheckCircle, value: `${support}%`, label: "Citation support",
-      sub: "Cited sentences backed by verified evidence",
-      tone: support >= 70 ? "good" : "warn",
-    });
-  }
-
   return (
     <div className="answer anim-rise">
-      {run.directAnswer && run.directAnswer.kind ? null : run.directAnswer ? (
-        <div className="degraded-banner" role="note">
-          <IconAlert size={16} />
-          <div>
-            <strong>Direct answer — no sources consulted.</strong>{" "}
-            This question was answered from the model's general knowledge without
-            searching the web.{" "}
-            {typeof run.directAnswer.confidence === "number"
-              ? `Confidence is capped at ${Math.round(run.directAnswer.confidence * 100)}%.`
-              : ""}
-          </div>
-        </div>
-      ) : null}
       {(degraded.length || run.providerDegraded === true) ? (
         <div className="degraded-banner" role="alert">
           <IconAlert size={16} />
@@ -247,7 +220,9 @@ export default function AnswerCard({ run }) {
         </div>
       ) : null}
 
-      {sections.finalAnswer ? (
+      {run.directAnswer ? (
+        <div className="answer-lead">{renderRichText(run.directAnswer.answer || "")}</div>
+      ) : sections.finalAnswer ? (
         <div className="answer-lead">{renderRichText(sections.finalAnswer)}</div>
       ) : (
         <p className="answer-lead">The final report did not include an executive summary.</p>
@@ -291,29 +266,6 @@ export default function AnswerCard({ run }) {
           ))}
         </div>
       ) : null}
-
-      <div className="evidence-block">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h3 style={{ fontSize: 15.5, fontWeight: 650, margin: 0 }}>Evidence summary</h3>
-        </div>
-        <p className="sub">
-          {run.snippets > 0
-            ? `Based on analysis from ${run.snippets} source${run.snippets === 1 ? "" : "s"} across the research axes.`
-            : "Source statistics were not reported for this run."}
-        </p>
-        <div className="stat-grid">
-          {stats.map((s) => (
-            <div className="stat" key={s.label}>
-              <span className="stat-ic"><s.icon size={17} className={`tone-${s.tone}`} /></span>
-              <div>
-                <b>{s.value}</b>
-                <div className="lbl">{s.label}</div>
-                <div className="sub2">{s.sub}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
