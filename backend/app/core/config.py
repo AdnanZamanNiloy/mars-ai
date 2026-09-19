@@ -169,6 +169,16 @@ class Settings(BaseSettings):
     # grounds the plan in the user's likely meaning. Disable to skip the call.
     intent_enabled: bool = True
 
+    # Query router (direct answer vs. research): one small LLM call that
+    # decides whether a query can be answered from stable general knowledge
+    # or needs the full research pipeline. The deterministic freshness/
+    # verification gate always applies; disabling this only skips the
+    # optional LLM clearance, which always fails safe to research.
+    router_enabled: bool = True
+    # Self-confidence at/above which the model's direct-answer clearance is
+    # trusted. Below it, research.
+    router_min_direct_confidence: float = 0.75
+
     # Answer quality gate (final editor): every synthesized answer is scored
     # 0-100 on accuracy/relevance/evidence/clarity/reasoning from measured
     # pipeline state (no LLM). SYNTHESIS_REVISION_ENABLED adds the LLM half:
