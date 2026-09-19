@@ -178,6 +178,10 @@ class Settings(BaseSettings):
     # Self-confidence at/above which the model's direct-answer clearance is
     # trusted. Below it, research.
     router_min_direct_confidence: float = 0.75
+    # Direct answers carry no sources, so their delivered confidence is
+    # capped strictly below SUFFICIENCY_THRESHOLD (0.75): an ungrounded
+    # answer must never be mistakable for a researched one.
+    direct_answer_confidence_cap: float = 0.55
 
     # Answer quality gate (final editor): every synthesized answer is scored
     # 0-100 on accuracy/relevance/evidence/clarity/reasoning from measured

@@ -10,6 +10,7 @@ from langgraph.graph import END, START, StateGraph
 from app.agents.evidence_utils import dedupe_semantic_facts, filter_facts_by_domain, verify_answer_support
 from app.agents.answer_quality import evaluate_answer
 from app.agents.critic import critic_agent
+from app.agents.direct_answer import direct_answer_agent
 from app.agents.intent import classify_intent, heuristic_intent
 from app.agents.orchestrator import MODE_CONFIDENCE_TARGET, orchestrate
 from app.agents.planner import normalize_text, planner_agent
@@ -64,9 +65,15 @@ class ResearchState(TypedDict, total=False):
     intent: Dict[str, Any]
     context_snippets: List[str]
     # Query router (R2): the direct-vs-research decision made after intent,
-    # before planning. R2 only SURFACES it (route event + trace); the path
-    # itself is not branched on until R3.
+    # before planning. R2 only SURFACES it (route event + trace); R3 branches
+    # the graph on it (route_after_intent) and the direct path records its
+    # answer below.
     route: Dict[str, Any]
+    # Direct-answer path (R3): the delivered answer and the agent's refusal
+    # verdict. `direct_answer` is empty when the graph took the research
+    # branch, or when the agent refused and fell through to research.
+    direct_answer: str
+    direct_answer_meta: Dict[str, Any]
     # Answer quality gate: five-axis 0-100 score of the delivered report.
     quality: Dict[str, Any]
     # Answer-first outline (GPT Researcher adaptation): the section shape the
@@ -855,6 +862,55 @@ def _measured_coverage_gaps(state: ResearchState) -> List[str]:
     return gaps[:8]
 
 
+def build_direct_answer_report(state: ResearchState) -> str:
+    """Minimal report for a direct (no-research) answer.
+
+    Deliberately does NOT reuse build_markdown_report: that shape carries
+    Supporting Evidence, Contradictions and Decision sections which would be
+    empty or fabricated here. Honesty about the answer's provenance is the
+    whole point of the direct path — the Limitations section states plainly
+    that no external sources were consulted and how confidence is bounded.
+    """
+    answer = str(state.get("direct_answer", "") or "").strip()
+    meta = state.get("direct_answer_meta") or {}
+    confidence = float(state.get("confidence", 0.0) or 0.0)
+    self_confidence = meta.get("confidence")
+    reason = str(meta.get("reason", "") or "").strip()
+
+    limitations = [
+        "This answer was given directly from the model's general knowledge; "
+        "no external sources were searched or consulted.",
+        "It is suitable for stable, well-known facts only. Anything dependent "
+        "on current events, prices, statistics or recent developments should "
+        "be researched instead.",
+        "Confidence reflects the model's own self-assessment, capped below "
+        "the research sufficiency threshold — it is not evidence-based.",
+    ]
+    if reason:
+        limitations.append(f"Routing note: {reason}")
+
+    lines = [
+        "# Final Answer",
+        answer,
+    ]
+    if isinstance(self_confidence, (int, float)):
+        lines.extend([
+            "",
+            f"_Direct answer · self-assessed confidence "
+            f"{float(self_confidence):.2f} · delivered confidence "
+            f"{confidence:.2f}_",
+        ])
+    lines.extend([
+        "",
+        "# Limitations",
+        *[f"- {item}" for item in limitations],
+        "",
+        "# Confidence Score",
+        f"{confidence:.2f}",
+    ])
+    return "\n".join(lines)
+
+
 def build_markdown_report(
     state: ResearchState,
     decision_options: List[Dict[str, Any]] | None = None,
@@ -1046,6 +1102,59 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             "intent": intent_dict,
             "context_snippets": context_snippets,
             "route": route_decision.to_dict(),
+        }
+
+    async def direct_answer_node(state: ResearchState) -> Dict[str, Any]:
+        """Answer a stable-knowledge query without any research (R3).
+
+        Reached only when route_after_intent chose the direct path. The
+        agent may refuse (needs_research) — in that case this node records
+        the refusal and route_after_direct sends the query on to the normal
+        planner, so a wrong routing decision costs one call, not an answer.
+
+        Confidence is the model's OWN self-assessment, capped strictly below
+        the research sufficiency threshold: an ungrounded answer must never
+        read as a sourced one. No facts, no verification, no citations —
+        the report states plainly that this was a direct answer.
+        """
+        route = state.get("route") or {}
+        result = await direct_answer_agent(
+            llm, state["query"], intent=state.get("intent") or {}
+        )
+        meta = result.to_dict()
+
+        if not result.usable:
+            # Escape hatch: the agent refused, was unsure, or failed. Record
+            # the refusal and let routing fall through to the research path.
+            logger.info(
+                "direct_answer_refused",
+                needs_research=result.needs_research,
+                confidence=result.confidence,
+            )
+            return {"direct_answer": "", "direct_answer_meta": meta}
+
+        # Cap: strictly below the research sufficiency threshold (0.75) even
+        # at full self-confidence. An ungrounded answer must never read as a
+        # sourced one, and the cap is configurable so the gap is explicit.
+        cap = float(
+            getattr(
+                getattr(llm, "settings", None),
+                "direct_answer_confidence_cap",
+                0.55,
+            )
+            or 0.55
+        )
+        capped = min(float(result.confidence), cap)
+        logger.info(
+            "direct_answer_delivered",
+            chars=len(result.answer),
+            self_confidence=result.confidence,
+            capped_confidence=round(capped, 3),
+        )
+        return {
+            "direct_answer": result.answer,
+            "direct_answer_meta": meta,
+            "confidence": capped,
         }
 
     async def planner_node(state: ResearchState) -> PlannerUpdate:
@@ -1998,6 +2107,17 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         }
 
     async def finalize_node(state: ResearchState) -> FinalizeUpdate:
+        # Direct-answer path (R3): the answer was produced with no facts,
+        # sources or verification. A research-shaped report (supporting
+        # evidence, contradictions, decision layer) would be fabricated
+        # structure around an ungrounded answer, so the direct path gets its
+        # own minimal, honest report instead.
+        direct = str(state.get("direct_answer", "") or "").strip()
+        if direct:
+            return {
+                "final_report": build_direct_answer_report(state),
+                "decision_options": [],
+            }
         # Decision options computed once and shared with the report builder.
         options = build_decision_layer(state)
         report = build_markdown_report(state, decision_options=options)
@@ -2048,7 +2168,30 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             return "planner"
         return "synthesizer"
 
+    def route_after_intent(state: ResearchState) -> str:
+        """R3 branch: honour the router's direct decision, else research.
+
+        Only an explicit, model-cleared `direct` verdict takes the direct
+        path (route_query never grants direct without it). Anything else —
+        including a missing/garbage route — researches, the fail-safe
+        direction (AGENTS.md 4.7).
+        """
+        route = state.get("route") or {}
+        if str(route.get("path", "") or "").lower() == "direct":
+            logger.info("route_direct_branch", confidence=route.get("confidence"))
+            return "direct_answer"
+        return "planner"
+
+    def route_after_direct(state: ResearchState) -> str:
+        """R3 escape hatch: a delivered direct answer finalizes; a refusal or
+        any missing answer falls through to the research planner."""
+        if str(state.get("direct_answer", "") or "").strip():
+            return "finalize"
+        logger.info("direct_answer_fallthrough")
+        return "planner"
+
     graph.add_node("intent", intent_node)
+    graph.add_node("direct_answer", direct_answer_node)
     graph.add_node("planner", planner_node)
     graph.add_node("search", search_node)
     graph.add_node("summarizer", summarizer_node)
@@ -2060,7 +2203,18 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
     graph.add_edge(START, entry_node if entry_node else "intent")
     if entry_node is None:
         # Understand-before-searching: intent runs before any plan is shaped.
-        graph.add_edge("intent", "planner")
+        # R3: the router decides direct vs research; the direct branch goes
+        # to the answer node (which may refuse and fall through to planner).
+        graph.add_conditional_edges(
+            "intent",
+            route_after_intent,
+            {"direct_answer": "direct_answer", "planner": "planner"},
+        )
+        graph.add_conditional_edges(
+            "direct_answer",
+            route_after_direct,
+            {"finalize": "finalize", "planner": "planner"},
+        )
     graph.add_edge("planner", "search")
     graph.add_edge("search", "summarizer")
     graph.add_edge("summarizer", "verifier")

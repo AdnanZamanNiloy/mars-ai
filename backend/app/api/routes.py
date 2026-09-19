@@ -287,6 +287,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
             last_iteration = -1
             emitted_intent = False
             emitted_route = False
+            emitted_direct = False
             emitted_plan = False
             emitted_findings = 0
             emitted_annotated = 0
@@ -417,6 +418,28 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                                 payload=json.dumps({
                                     "path": route_data.get("path"),
                                     "origin": route_data.get("origin"),
+                                }),
+                            ))
+
+                        if snapshot.get("direct_answer") and not emitted_direct:
+                            # Direct-answer path (R3): the query was answered
+                            # without research. Surfaced separately from the
+                            # final report so the UI can render an ungrounded
+                            # answer with its own affordances.
+                            emitted_direct = True
+                            direct_meta = snapshot.get("direct_answer_meta") or {}
+                            yield event_line(
+                                "direct_answer",
+                                answer=str(snapshot.get("direct_answer", "")),
+                                confidence=snapshot.get("confidence"),
+                                self_confidence=direct_meta.get("confidence"),
+                                reason=direct_meta.get("reason", ""),
+                            )
+                            await _persist(record_event(
+                                settings.database_url, request_id, "direct_answer", "end",
+                                payload=json.dumps({
+                                    "chars": len(str(snapshot.get("direct_answer", ""))),
+                                    "self_confidence": direct_meta.get("confidence"),
                                 }),
                             ))
 

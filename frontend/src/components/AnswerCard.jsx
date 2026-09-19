@@ -223,6 +223,19 @@ export default function AnswerCard({ run }) {
 
   return (
     <div className="answer anim-rise">
+      {run.directAnswer ? (
+        <div className="degraded-banner" role="note">
+          <IconAlert size={16} />
+          <div>
+            <strong>Direct answer — no sources consulted.</strong>{" "}
+            This question was answered from the model's general knowledge without
+            searching the web.{" "}
+            {typeof run.directAnswer.confidence === "number"
+              ? `Confidence is capped at ${Math.round(run.directAnswer.confidence * 100)}%.`
+              : ""}
+          </div>
+        </div>
+      ) : null}
       {(degraded.length || run.providerDegraded === true) ? (
         <div className="degraded-banner" role="alert">
           <IconAlert size={16} />

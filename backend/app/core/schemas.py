@@ -200,3 +200,22 @@ class IntentOutputModel(BaseModel):
     ambiguity: bool = False
     senses: List[IntentSenseModel] = Field(default_factory=list)
     reasoning: str = ""
+
+
+class DirectAnswerModel(BaseModel):
+    """Direct Answer Agent output — the schema DIRECT_ANSWER_SYSTEM_PROMPT
+    documents and the parser reads (AGENTS.md 4.2). `needs_research` is the
+    safety escape hatch: the model may refuse its own direct answer, which
+    routes the query back into the full research pipeline."""
+    answer: str = ""
+    needs_research: bool = True
+    confidence: float = 0.0
+    reason: str = ""
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _clamp_confidence(cls, v):
+        try:
+            return max(0.0, min(1.0, float(v)))
+        except (TypeError, ValueError):
+            return 0.0

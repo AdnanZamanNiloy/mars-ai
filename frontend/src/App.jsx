@@ -160,6 +160,9 @@ function blankRun(query, mode) {
     intent: null,
     // Query router: direct-vs-research decision (path, reason, confidence).
     route: null,
+    // Direct-answer path: the delivered answer, when the router answered
+    // without research.
+    directAnswer: null,
     quality: null,
     evidenceDistribution: null,
     // Answer-first outline: the section shape the writer targeted.
@@ -310,6 +313,17 @@ export default function App() {
             : "Router: external evidence required",
           kind: "done",
         });
+        break;
+      case "direct_answer":
+        patchRun(tempId, {
+          directAnswer: {
+            answer: evt.answer || "",
+            confidence: typeof evt.confidence === "number" ? evt.confidence : null,
+            selfConfidence: typeof evt.self_confidence === "number" ? evt.self_confidence : null,
+            reason: evt.reason || "",
+          },
+        });
+        pushTrace({ text: "Answered directly (no sources consulted)", kind: "done" });
         break;
       case "plan":
         patchRun(tempId, {
