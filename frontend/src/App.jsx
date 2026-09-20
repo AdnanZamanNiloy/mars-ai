@@ -373,28 +373,18 @@ export default function App() {
     }
   }, []);
 
-  /* After sending, bring the NEW user turn into view with clearance for the
-   * composer below. Scrolling to raw scrollHeight left the new message and
-   * the first processing steps hidden under the fixed composer; anchoring on
-   * the user bubble (minus an offset) keeps both visible. */
-  const scrollToLatestTurn = useCallback((messageId, behavior = "smooth") => {
+  /* After sending, go to the TRUE bottom so the new user turn AND the live
+   * "Agents reviewing…" indicator are fully visible above the composer.
+   * Anchoring on the user bubble could leave the processing row clipped. */
+  const scrollToLatestTurn = useCallback((behavior = "smooth") => {
     const el = threadRef.current;
     if (!el) return;
-    const node = messageId
-      ? el.querySelector(`[data-message-id="${messageId}"]`)
-      : null;
-    const COMPOSER_CLEARANCE = 130;
-    if (!node) {
-      scrollThreadToBottom(behavior);
-      return;
-    }
-    const target = node.offsetTop - COMPOSER_CLEARANCE;
     try {
-      el.scrollTo({ top: Math.max(0, target), behavior });
+      el.scrollTo({ top: el.scrollHeight, behavior });
     } catch {
-      el.scrollTop = Math.max(0, target);
+      el.scrollTop = el.scrollHeight;
     }
-  }, [scrollThreadToBottom]);
+  }, []);
 
   useEffect(() => {
     const el = threadRef.current;
@@ -667,7 +657,7 @@ export default function App() {
       // Sending re-engages following and brings the new turn + the start of
       // its processing into view, clear of the composer.
       autoScrollRef.current = true;
-      requestAnimationFrame(() => scrollToLatestTurn(userId, "smooth"));
+      requestAnimationFrame(() => scrollToLatestTurn("smooth"));
       go("workspace");
     }
 
