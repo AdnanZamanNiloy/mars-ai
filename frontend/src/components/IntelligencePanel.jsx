@@ -230,8 +230,8 @@ function BudgetMeter({ budget }) {
             <span className="k">Budget utilization</span>
             <span className="v" style={util >= 80 ? { color: "var(--mars-soft)" } : undefined}>{util}%</span>
           </div>
-          <div className="bar" style={{ marginBottom: 8 }}>
-            <div style={{ width: `${util}%`, background: util >= 80 ? "var(--mars-soft)" : undefined }} />
+          <div className="bar budget-util-bar" style={{ marginBottom: 8 }}>
+            <div style={{ width: `${util}%` }} />
           </div>
         </>
       ) : null}

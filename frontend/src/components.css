@@ -346,6 +346,8 @@
 /* Confidence breakdown bars use the MARS orange accent; other .bar users
    (e.g. the budget meter) keep the neutral --bar fill. */
 .confidence-breakdown .bar > div { background: var(--mars); }
+/* Budget utilization bar also uses the MARS orange accent for consistency. */
+.budget-util-bar > div { background: var(--mars); }
 
 .health-row { display: flex; align-items: center; gap: 10px; padding: 5.5px 2px; }
 .health-row svg { flex: none; }
