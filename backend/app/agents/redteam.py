@@ -1,4 +1,4 @@
-"""Red Team (vision Feature 08) — try to break the conclusion, not rate it.
+"""Adversarial Review (vision Feature 08) — try to break the conclusion, not rate it.
 
 The existing critic asks "is this evidence sufficient?" and returns a verdict.
 Its prompt contains three red-team questions, but the answers are folded into a
@@ -7,7 +7,7 @@ assumption was weak, what the alternative explanation was, or what evidence was
 missing. The report cannot show it, the next pass cannot target it, and
 confidence cannot discount it.
 
-This module separates the two jobs. The critic remains the *gate*. The red team
+This module separates the two jobs. The critic remains the *gate*. The adversarial review
 is an *attacker* that produces structured findings which are:
 
   * reported to the user (a research product that cannot say how it might be
@@ -106,13 +106,13 @@ class RedTeamReport:
         return out
 
     def render(self) -> str:
-        """Markdown block the report embeds under `## Red Team Review`."""
+        """Markdown block the report embeds under `## Adversarial Review`."""
         if not self.findings:
             return (
-                "## Red Team Review\n\n"
+                "## Adversarial Review\n\n"
                 "No material weakness was found in the evidence base."
             )
-        lines = ["## Red Team Review", ""]
+        lines = ["## Adversarial Review", ""]
         if self.summary:
             lines += [self.summary, ""]
         label = {
@@ -329,7 +329,7 @@ def heuristic_survival(findings: Sequence[RedTeamFinding]) -> float:
 # ---------------------------------------------------------------------------
 
 RED_TEAM_SYSTEM_PROMPT = """
-You are the Red Team Agent in a multi-agent research pipeline. You are NOT a
+You are the Adversarial Review Agent in a multi-agent research pipeline. You are NOT a
 reviewer and NOT a summarizer. Your job is to make the strongest available case
 that the current conclusion is WRONG.
 
@@ -368,7 +368,7 @@ invalidating_condition
 5. targeted_queries must be search-ready strings that would resolve your
    strongest attacks, not restatements of them.
 6. If the evidence genuinely withstands attack, say so and set survives=true
-   with a high survival_score — a red team that always finds fatal flaws is as
+   with a high survival_score — an adversarial review that always finds fatal flaws is as
    useless as one that never does.
 
 ━━━ OUTPUT ━━━
@@ -514,7 +514,7 @@ def _is_generic(statement: str) -> bool:
     """Reject attacks that would apply to literally any research.
 
     Without this filter the model reliably fills the findings list with
-    "more sources would strengthen this", which consumes the red team's entire
+        "more sources would strengthen this", which consumes the adversarial review's entire
     output budget while telling the user nothing.
     """
     lowered = statement.lower()

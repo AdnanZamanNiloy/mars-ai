@@ -8,10 +8,12 @@
     <meta name="theme-color" content="#fbfaf8" media="(prefers-color-scheme: light)" />
     <meta name="color-scheme" content="dark light" />
     <meta name="description" content="MARS — Multi-Agent Research System. Decomposes a hard question across a coordinated team of specialist agents, verifies every claim against its source, and writes a cited report live to your console." />
-    <!-- Single source of truth: the favicon is the same asset as the in-app
-         .planet logo (public/mars.svg). No stale PNG variants. -->
-    <link rel="icon" type="image/svg+xml" href="/mars.svg" />
-    <link rel="mask-icon" href="/mars.svg" color="#E8794F" />
+    <!-- Single source of truth: the favicon is the same original asset as the
+         in-app logo (public/mars.svg). The ?v= query busts the browser's
+         long-lived favicon cache whenever the asset changes; without it the
+         tab keeps the old bitmap even after a hard reload. -->
+    <link rel="icon" type="image/svg+xml" sizes="any" href="/mars.svg?v=2" />
+    <link rel="mask-icon" href="/mars.svg?v=2" color="#E8794F" />
     <title>MARS — Multi-Agent Research System</title>
     <!-- Resolve the theme BEFORE first paint so there is no flash of the
          wrong palette. Mirrors src/theme.js: stored preference wins, else OS. -->

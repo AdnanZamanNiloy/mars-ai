@@ -413,7 +413,7 @@ def evaluate_answer(
     objections = 1.0
     if redteam_findings:
         objections = 1.0 if any(
-            t in lowered for t in ("objection", "red team", "weakness", "would invalidate")
+            t in lowered for t in ("objection", "adversarial review", "weakness", "would invalidate")
         ) else 0.4
 
     # Explicit conclusion: a claim of what the evidence collectively supports,

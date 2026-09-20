@@ -153,7 +153,7 @@ function blankRun(query, mode) {
     budget: null,
     citationHealth: null,
     contradictions: 0,
-    // Red team (adversarial review): survival score + findings from the
+    // Adversarial review: survival score + findings from the
     // critic pass. Streamed on every `critic` event; previously dropped.
     redteam: null,
     // v2.1: resolved intent (senses, domain, explanation level).
@@ -1276,11 +1276,7 @@ const EXAMPLES = [
 function WelcomeHero({ composer, onSubmit }) {
   return (
     <div className="welcome anim-rise">
-      <span className="welcome-kicker">
-        <span className="dot live" aria-hidden="true" />
-        7 coordinated agents
-      </span>
-      <h1>What should MARS investigate?</h1>
+      <h1>What should <span className="welcome-accent">MARS</span> investigate?</h1>
       <p className="lede">
         Ask a question and watch the pipeline work: plan, search, extract, verify, critique,
         synthesize. Every claim in the final report stays tied to the source that produced it.

@@ -477,7 +477,29 @@
 .send-btn.is-abort:hover { color: var(--red); border-color: color-mix(in srgb, var(--red) 50%, transparent); background: var(--red-wash); }
 
 .mode-wrap { position: relative; flex: none; }
-.mode-menu { position: absolute; bottom: calc(100% + 8px); left: 0; min-width: 262px; }
+/* Research Mode popup: opens DOWNWARD from the selector by default, with a
+   small gap. When the Composer measures insufficient space below (selector
+   near the viewport bottom), it adds .mode-menu-up to flip the menu directly
+   above the selector. Direction is chosen in JS from the real geometry, so
+   the menu never covers the header or off-screen content. It declares its own
+   opaque surface so option cards never show through. */
+.mode-menu {
+  position: absolute; left: 0;
+  top: calc(100% + 6px); bottom: auto;
+  min-width: 262px;
+  max-width: min(320px, calc(100vw - 24px));
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  background: var(--menu);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+  padding: 5px;
+  z-index: 120;
+}
+.mode-menu-up {
+  top: auto; bottom: calc(100% + 6px);
+}
 .mode-menu button {
   display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 14px;
   padding: 9px 10px; border: 0; border-radius: var(--r-xs);
@@ -791,19 +813,9 @@
   max-width: 720px;
   margin: 0 auto;
   padding: 4vh 0 0;
-  text-align: left;
+  text-align: center;
 }
-.welcome-kicker {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
-  color: var(--mars);
-  margin-bottom: 10px;
-}
+.welcome-accent { color: #E8794F; }
 .welcome h1 {
   font-size: clamp(21px, 3vw, 26px);
   font-weight: 700;
@@ -816,7 +828,7 @@
   font-size: 13.5px;
   line-height: 1.65;
   color: var(--t2);
-  margin: 9px 0 0;
+  margin: 9px auto 0;
   max-width: 62ch;
 }
 .welcome-composer { margin-top: 20px; }
@@ -854,6 +866,7 @@
 .welcome-facts {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 6px 0;
   margin-top: 20px;
   padding-top: 14px;

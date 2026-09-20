@@ -1,15 +1,55 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MODE_META } from "../lib";
 import { IconCheck, IconChevronDown, IconSend, IconStop } from "./icons";
 
 const MODES = ["quick", "standard", "deep", "executive", "audit", "redteam"];
 
+/* Gap between the selector and the dropdown, in px. */
+const MENU_GAP = 6;
+
 export default function Composer({
   value, onChange, onSubmit, running, onAbort, mode, onModeChange, placeholder,
 }) {
   const [open, setOpen] = useState(false);
+  // "down" opens below the selector (preferred); "up" flips above it when the
+  // viewport below is too short. Chosen from measured space, never hardcoded.
+  const [placement, setPlacement] = useState("down");
   const menuRef = useRef(null);
+  const panelRef = useRef(null);
   const areaRef = useRef(null);
+
+  // Decide the open direction from the selector's rect and the menu's real
+  // height. Prefers below; flips above only when below cannot fit the menu
+  // but above can. Recalculated on resize/scroll while open.
+  const place = useCallback(() => {
+    const wrap = menuRef.current;
+    const panel = panelRef.current;
+    if (!wrap || !panel) return;
+    const rect = wrap.getBoundingClientRect();
+    const menuHeight = panel.offsetHeight || 0;
+    const spaceBelow = window.innerHeight - rect.bottom - MENU_GAP;
+    const spaceAbove = rect.top - MENU_GAP;
+    if (spaceBelow < menuHeight && spaceAbove > spaceBelow) {
+      setPlacement("up");
+    } else {
+      setPlacement("down");
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    if (open) place();
+  }, [open, place]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onReflow = () => place();
+    window.addEventListener("resize", onReflow);
+    window.addEventListener("scroll", onReflow, true);
+    return () => {
+      window.removeEventListener("resize", onReflow);
+      window.removeEventListener("scroll", onReflow, true);
+    };
+  }, [open, place]);
 
   useEffect(() => {
     if (!open) return;
@@ -73,7 +113,12 @@ export default function Composer({
             <IconChevronDown size={13} />
           </button>
           {open && !running ? (
-            <div className="mode-menu" role="menu" aria-label="Research mode">
+            <div
+              ref={panelRef}
+              className={`mode-menu mode-menu-${placement}`}
+              role="menu"
+              aria-label="Research mode"
+            >
               {MODES.map((m) => (
                 <button
                   key={m}

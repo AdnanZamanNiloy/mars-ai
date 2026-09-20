@@ -72,7 +72,7 @@ QUANTITATIVE_MARKERS = (
     "emissions", "budget", "salary", "population",
 )
 
-# Contested topics need explicit counter-evidence and red teaming.
+    # Contested topics need explicit counter-evidence and adversarial review.
 CONTROVERSY_MARKERS = (
     "controversial", "debate", "criticism", "criticized", "myth",
     "safe", "danger", "harmful", "banned", "ethical", "bias",

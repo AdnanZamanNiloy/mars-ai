@@ -298,7 +298,7 @@ function RedTeamPanel({ redteam }) {
   const weak = score !== null && score < 60;
   return (
     <section className="intel-section">
-      <h3>Red team</h3>
+        <h3>Adversarial review</h3>
       <div className="health-row">
         <IconShield size={15} className={weak ? "tone-warn" : "tone-good"} />
         <span className="k">Evidence survival</span>

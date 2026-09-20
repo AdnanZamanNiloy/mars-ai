@@ -261,5 +261,5 @@ export const MODE_META = {
   deep: { label: "Deep research", hint: "5 agents · up to 5 passes" },
   executive: { label: "Executive brief", hint: "5 agents · up to 4 passes · decision-focused" },
   audit: { label: "Evidence audit", hint: "3 agents · up to 4 passes · verification-heavy" },
-  redteam: { label: "Red team", hint: "3 agents · up to 2 passes · challenges conclusions" },
+  redteam: { label: "Adversarial review", hint: "3 agents · up to 2 passes · challenges conclusions" },
 };

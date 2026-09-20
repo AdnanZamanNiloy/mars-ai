@@ -223,7 +223,7 @@ async def critic_agent(
         "2) Is there enough material to write a clear, well-supported answer?\n"
         "3) Are sources reliable AND independent of each other?\n"
         "4) Is information redundant or fragmented?\n\n"
-        "Also run the Red Team checks from your instructions: name the weakest\n"
+            "Also run the Adversarial Review checks from your instructions: name the weakest\n"
         "assumption, a potentially invalidating alternative, and any missing\n"
         "counter-evidence in your reason when the evidence is insufficient.\n\n"
         "Return JSON: "
