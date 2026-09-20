@@ -41,7 +41,7 @@
 .msg { display: flex; gap: 14px; margin-bottom: 26px; }
 .msg-body { flex: 1; min-width: 0; }
 
-.msg-user { display: flex; justify-content: flex-end; align-items: flex-start; gap: 6px; margin-bottom: 22px; }
+.msg-user { display: flex; flex-direction: column; align-items: flex-end; margin-bottom: 22px; }
 .bubble {
   max-width: 75%;
   overflow-wrap: anywhere;
@@ -54,11 +54,28 @@
   color: var(--t1);
 }
 
-/* Edit-and-resend: the pencil appears on the user bubble; the edit state
- * swaps the bubble for a textarea plus Cancel/Resend actions. */
-.msg-edit-btn { opacity: 0; width: 28px; height: 28px; color: var(--t4); }
-.msg-user:hover .msg-edit-btn { opacity: 1; }
-.msg-edit-btn:hover { color: var(--t1); }
+/* Edit-and-resend: the edit state swaps the bubble for a textarea plus
+ * Cancel/Resend actions. */
+.user-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  margin-top: 4px;
+  padding-right: 2px;
+  opacity: 0.55;
+  transition: opacity 0.12s ease;
+}
+.msg-user:hover .user-actions { opacity: 1; }
+.user-time {
+  font-size: 10.5px;
+  color: var(--t4);
+  margin-right: 4px;
+  letter-spacing: 0.02em;
+}
+.user-action-btn { width: 24px; height: 24px; color: var(--t4); }
+.user-action-btn:hover { color: var(--t1); background: transparent; }
+.user-action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .bubble-edit { display: flex; flex-direction: column; gap: 8px; width: 75%; max-width: 75%; }
 .msg-edit-input {
   width: 100%;

@@ -971,8 +971,11 @@ function ThreadMessage({ message, running, onResume, onRegenerate, steps, editin
     return (
       <UserMessage
         text={message.text}
+        time={message.at}
         editing={isEditing}
         disabled={running}
+        canRegenerate={!running}
+        onRegenerate={onRegenerate ? () => onRegenerate(message.text) : undefined}
         onEdit={onEditMessage ? () => onEditMessage(message.id) : undefined}
         onCancelEdit={() => onEditMessage?.(null)}
         onSubmitEdit={(txt) => onEditMessage?.(message.id, txt)}

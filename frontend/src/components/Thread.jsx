@@ -5,8 +5,27 @@ import { IconCheck, IconChevronDown, IconClock, IconCopy, IconPencil, IconRefres
 /* Chat-style thread: right-aligned user bubbles, plain MARS responses
  * with a working action row (copy, read aloud, feedback, regenerate). */
 
-export function UserMessage({ text, time, onEdit, editing, onCancelEdit, onSubmitEdit, disabled }) {
+export function UserMessage({
+  text, time, onEdit, editing, onCancelEdit, onSubmitEdit, disabled,
+  onRegenerate, canRegenerate,
+}) {
   const [draft, setDraft] = useState(text || "");
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text || "");
+    } catch {
+      const area = document.createElement("textarea");
+      area.value = text || "";
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1400);
+  };
 
   if (editing) {
     return (
@@ -45,16 +64,39 @@ export function UserMessage({ text, time, onEdit, editing, onCancelEdit, onSubmi
   return (
     <div className="msg-user anim-rise">
       <div className="bubble" title={time}>{text}</div>
-      {onEdit ? (
+      <div className="user-actions" role="toolbar" aria-label="Message actions">
+        <span className="user-time">{formatTime(time)}</span>
+        {onRegenerate ? (
+          <button
+            className="icon-btn user-action-btn"
+            onClick={() => onRegenerate()}
+            disabled={disabled || !canRegenerate}
+            title="Regenerate"
+            aria-label="Regenerate"
+          >
+            <IconRefresh size={13} />
+          </button>
+        ) : null}
+        {onEdit ? (
+          <button
+            className="icon-btn user-action-btn"
+            onClick={() => onEdit()}
+            disabled={disabled}
+            title="Edit and resend"
+            aria-label="Edit message"
+          >
+            <IconPencil size={13} />
+          </button>
+        ) : null}
         <button
-          className="icon-btn msg-edit-btn"
-          onClick={() => onEdit()}
-          title="Edit and resend"
-          aria-label="Edit message"
+          className="icon-btn user-action-btn"
+          onClick={copy}
+          title={copied ? "Copied" : "Copy"}
+          aria-label="Copy"
         >
-          <IconPencil size={13} />
+          {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
         </button>
-      ) : null}
+      </div>
     </div>
   );
 }
