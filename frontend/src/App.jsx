@@ -201,6 +201,7 @@ async function buildReplayMessages(session, signal) {
         claims: [],
         sources: [],
         decisions: [],
+        events: [],
         final_report: meta.report
           ? { report_markdown: meta.report, confidence: meta.confidence }
           : null,
@@ -213,6 +214,14 @@ async function buildReplayMessages(session, signal) {
       trace,
       query: trace.query || meta.query || "Replay",
       at: meta.created_at,
+      // Map the persisted node trail to ThinkingSteps' shape so a restored
+      // chat shows the same pipeline steps it showed while running, instead
+      // of a single synthetic "Restored chat" line.
+      steps: (trace.events || []).map((e) => ({
+        at: e.ended_at || e.started_at || meta.created_at,
+        kind: e.event_type === "end" ? "done" : "active",
+        text: `${e.node} · ${e.event_type}`,
+      })),
     };
   }));
 }
@@ -338,6 +347,8 @@ export default function App() {
           if (prev.length > 0) return prev; // user already started typing
           return restored;
         });
+        const latestSteps = restored[restored.length - 1]?.steps || [];
+        if (latestSteps.length > 0) setTraceLog(latestSteps);
       } catch {
         /* no persisted history — start fresh */
       }
@@ -689,10 +700,11 @@ export default function App() {
         });
       }
       setMessages(restored);
-      const latestRun = [...(session.runs || [])].reverse()[0] || null;
-      setTraceLog(latestRun
-        ? [{ at: latestRun.completed_at || latestRun.created_at, kind: "done",
-             text: `Restored chat · ${restored.length} message${restored.length === 1 ? "" : "s"}` }]
+      // Show the latest run's real pipeline steps in the panel; fall back to
+      // a single notice only when the trace genuinely recorded no events.
+      const latestSteps = restored[restored.length - 1]?.steps || [];
+      setTraceLog(latestSteps.length > 0
+        ? latestSteps
         : [{ at: new Date().toISOString(), kind: "done", text: "Trace loaded — no node events recorded" }]);
       setSelectedFinding(null);
       setIntelCollapsed(false);
@@ -906,6 +918,10 @@ export default function App() {
 }
 
 function ThreadMessage({ message, running, onResume, onRegenerate, steps }) {
+  // A restored replay carries its OWN pipeline steps (from its trace), so a
+  // multi-question chat shows each run's real steps instead of the global
+  // log's most-recent run duplicated across every card.
+  const stepList = message.kind === "replay" ? (message.steps || []) : steps;
   if (message.kind === "user") {
     return <UserMessage text={message.text} />;
   }
@@ -918,7 +934,7 @@ function ThreadMessage({ message, running, onResume, onRegenerate, steps }) {
         canRegenerate={run.done && !running && !run.error && run.query.length > 0}
         onRegenerate={() => onRegenerate(run.query)}
       >
-        <ThinkingSteps steps={steps} />
+        <ThinkingSteps steps={stepList} />
         {run.aborted && !run.done ? (
           <div className="error-box" style={{ borderColor: "var(--line)", background: "var(--card)" }}>
             Mission aborted by user before completion.
@@ -951,7 +967,7 @@ function ThreadMessage({ message, running, onResume, onRegenerate, steps }) {
         canRegenerate={!running && message.query.length > 0}
         onRegenerate={() => onRegenerate(message.query)}
       >
-        <ThinkingSteps steps={steps} />
+        <ThinkingSteps steps={stepList} />
         {trace.final_report ? (
           <ReplayAnswerCard trace={trace} />
         ) : (
