@@ -93,6 +93,38 @@ export async function fetchTrace(runId, signal) {
   return response.json();
 }
 
+/* Download a completed report as md/docx/pdf. The backend renders from the
+ * canonical stored report, so this only triggers a file download. A run with
+ * no completed report returns 409 and the error is surfaced to the caller. */
+export async function downloadReport(runId, format) {
+  const response = await fetch(
+    `/api/research/${encodeURIComponent(runId)}/export/${encodeURIComponent(format)}`,
+  );
+  if (!response.ok) {
+    let detail = `Export failed (${response.status})`;
+    try {
+      const data = await response.json();
+      if (data && data.detail) detail = String(data.detail);
+    } catch {
+      /* keep generic */
+    }
+    throw new Error(detail);
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const match = /filename="?([^";]+)"?/.exec(disposition);
+  const filename = match ? match[1] : `mars-report.${format}`;
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  return filename;
+}
+
 /* ---------- Chat sessions ---------- */
 
 export async function listSessions(signal) {

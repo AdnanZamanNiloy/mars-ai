@@ -14,6 +14,9 @@ diskcache==5.6.3
 structlog==26.1.0
 slowapi==0.1.10
 pymupdf>=1.24  # optional at runtime: PDF extraction only; missing lib skips PDFs
+python-docx>=1.1  # optional at runtime: DOCX report export
+weasyprint>=60  # optional at runtime: PDF report export (HTML/CSS -> PDF)
+Markdown>=3.5  # report markdown parsing helpers
 pytest==9.1.1
 pytest-asyncio==1.4.0
 respx==0.23.1

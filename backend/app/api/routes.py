@@ -388,6 +388,41 @@ async def research_trace(run_id: str, request: Request) -> Dict[str, Any]:
     return trace
 
 
+@router.get("/research/{run_id}/export/{fmt}")
+async def export_research_report(run_id: str, fmt: str, request: Request) -> StreamingResponse:
+    """Download a completed report as Markdown, DOCX or PDF.
+
+    Renders from the SAME canonical data the trace endpoint returns (persisted
+    final_reports.report_markdown + stored citations/sources), never from
+    rendered UI text. A run without a completed report returns 409 so the UI
+    can explain the missing report rather than serving an empty file.
+    """
+    from app.core import export as report_export
+
+    settings = getattr(request.app.state, "settings", None)
+    if settings is None:
+        raise HTTPException(status_code=500, detail="Workflow is not initialized")
+    fmt = (fmt or "").lower()
+    if not report_export.is_supported_format(fmt):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported export format '{fmt}'. Use one of: md, docx, pdf.",
+        )
+    trace = await get_run_trace(settings.database_url, run_id)
+    if trace is None:
+        raise HTTPException(status_code=404, detail=f"Unknown run_id: {run_id}")
+    try:
+        payload, media_type, filename = report_export.render_report(trace, fmt)
+    except report_export.ExportError as exc:
+        # Missing/incomplete report is a client-explainable state, not a 500.
+        raise HTTPException(status_code=409, detail=str(exc))
+    return StreamingResponse(
+        iter([payload]),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/sessions")
 async def sessions_list(request: Request) -> Dict[str, Any]:
     """Sidebar data: one row per chat session (newest activity first).

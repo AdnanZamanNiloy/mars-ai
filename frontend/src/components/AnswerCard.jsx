@@ -2,6 +2,7 @@ import { confidenceLabel, parseReport } from "../lib";
 import {
   IconAlert, IconChart, IconCheckCircle, IconDoc,
 } from "./icons";
+import ExportMenu from "./ExportMenu";
 /* Final report card — renders ONLY backend-produced content:
  * report markdown sections, findings events, decisions events. */
 
@@ -228,6 +229,10 @@ export default function AnswerCard({ run }) {
         <p className="answer-lead">The final report did not include an executive summary.</p>
       )}
 
+      <div className="answer-actions">
+        <ExportMenu runId={run.runId} />
+      </div>
+
       {outlineSections.length ? (
         <div className="outline-block">
           <h3 style={{ fontSize: 15.5, fontWeight: 650, margin: "0 0 8px" }}>
@@ -275,6 +280,7 @@ export function ReplayAnswerCard({ trace }) {
   const report = trace.final_report?.report_markdown || "";
   const hasSectionedReport = report.includes("# Final Answer");
   const run = {
+    runId: trace.run_id || null,
     report,
     confidence: typeof trace.final_report?.confidence === "number" ? trace.final_report.confidence : null,
     findings: (trace.claims || []).map((c) => ({
