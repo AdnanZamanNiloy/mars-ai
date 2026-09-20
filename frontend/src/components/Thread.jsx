@@ -7,7 +7,7 @@ import { IconCheck, IconChevronDown, IconClock, IconCopy, IconInfo, IconPencil, 
 
 export function UserMessage({
   text, time, onEdit, editing, onCancelEdit, onSubmitEdit, disabled,
-  onRegenerate, canRegenerate,
+  onRegenerate, canRegenerate, messageId,
 }) {
   const [draft, setDraft] = useState(text || "");
   const [copied, setCopied] = useState(false);
@@ -34,7 +34,7 @@ export function UserMessage({
       el.style.height = `${Math.max(48, Math.min(el.scrollHeight, 180))}px`;
     };
     return (
-      <div className="msg-user anim-rise">
+      <div className="msg-user anim-rise" data-message-id={messageId}>
         <div className="bubble bubble-edit">
           <textarea
             className="msg-edit-input"
@@ -72,7 +72,7 @@ export function UserMessage({
   }
 
   return (
-    <div className="msg-user anim-rise">
+    <div className="msg-user anim-rise" data-message-id={messageId}>
       <div className="bubble" title={time}>{text}</div>
       <div className="user-actions" role="toolbar" aria-label="Message actions">
         <span className="user-time">{formatTime(time)}</span>

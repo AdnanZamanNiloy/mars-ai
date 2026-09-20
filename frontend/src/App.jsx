@@ -373,6 +373,29 @@ export default function App() {
     }
   }, []);
 
+  /* After sending, bring the NEW user turn into view with clearance for the
+   * composer below. Scrolling to raw scrollHeight left the new message and
+   * the first processing steps hidden under the fixed composer; anchoring on
+   * the user bubble (minus an offset) keeps both visible. */
+  const scrollToLatestTurn = useCallback((messageId, behavior = "smooth") => {
+    const el = threadRef.current;
+    if (!el) return;
+    const node = messageId
+      ? el.querySelector(`[data-message-id="${messageId}"]`)
+      : null;
+    const COMPOSER_CLEARANCE = 130;
+    if (!node) {
+      scrollThreadToBottom(behavior);
+      return;
+    }
+    const target = node.offsetTop - COMPOSER_CLEARANCE;
+    try {
+      el.scrollTo({ top: Math.max(0, target), behavior });
+    } catch {
+      el.scrollTop = Math.max(0, target);
+    }
+  }, [scrollThreadToBottom]);
+
   useEffect(() => {
     const el = threadRef.current;
     if (!el) return;
@@ -633,16 +656,18 @@ export default function App() {
       // chat has none yet (first message, or after "New Chat").
       if (!sessionIdRef.current) setActiveSession(newSessionId());
       const at = new Date().toISOString();
+      const userId = nid();
       setMessages((prev) => [
         ...prev,
-        { id: nid(), kind: "user", text: queryText, at },
+        { id: userId, kind: "user", text: queryText, at },
         { id: nid(), kind: "run", run, at },
       ]);
       setTraceLog([]);
       setSelectedFinding(null);
-      // Sending re-engages following and brings the new turn into view.
+      // Sending re-engages following and brings the new turn + the start of
+      // its processing into view, clear of the composer.
       autoScrollRef.current = true;
-      requestAnimationFrame(() => scrollThreadToBottom("smooth"));
+      requestAnimationFrame(() => scrollToLatestTurn(userId, "smooth"));
       go("workspace");
     }
 
@@ -680,7 +705,7 @@ export default function App() {
       parentRef.current = null;
       setRunning(false);
     }
-  }, [running, mode, patchRun, pushTrace, handleEvent, saveMissions, setActiveSession, scrollThreadToBottom]);
+  }, [running, mode, patchRun, pushTrace, handleEvent, saveMissions, setActiveSession, scrollToLatestTurn]);
 
   const submitQuery = useCallback((text) => {
     const v = text.trim();
@@ -1004,6 +1029,7 @@ function ThreadMessage({ message, running, onResume, onRegenerate, steps, editin
       <UserMessage
         text={message.text}
         time={message.at}
+        messageId={message.id}
         editing={isEditing}
         disabled={running}
         canRegenerate={!running}
