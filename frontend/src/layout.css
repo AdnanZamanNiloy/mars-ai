@@ -1,105 +1,161 @@
-/* MARS shell layout: sidebar | workspace | intelligence panel. */
+/* MARS shell layout: sidebar | workspace | intelligence rail.
+ *
+ * Three depth planes, each a different surface colour, so the layout reads
+ * as three physical planes instead of one flat grey wall:
+ *   .sidebar / .intel → --side  (rail plane)
+ *   .workspace        → --bg    (void/workspace plane)
+ *   cards/controls    → --card / --card-2 (raised on the plane)
+ */
 
 .shell {
   display: flex;
   height: 100vh;
+  height: 100dvh;
   min-width: 0;
   background: var(--bg);
   overflow: hidden;
 }
 
-/* ---------- sidebar ---------- */
+/* ============================================================
+   SIDEBAR — rail plane
+   ============================================================ */
 
 .sidebar {
-  width: 340px;
+  width: 300px;
   flex: none;
   display: flex;
   flex-direction: column;
   background: var(--side);
   border-right: 1px solid var(--line-soft);
-  padding: 20px 14px 16px;
+  padding: 16px 12px 14px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
-.brand { display: flex; align-items: center; gap: 12px; padding: 2px 6px 0; }
-.brand-home { cursor: pointer; border-radius: 10px; }
-.brand-home:hover { background: var(--row-hover); }
-.brand-home:focus-visible { outline: 2px solid var(--mars); outline-offset: 2px; }
-.brand-name { font-size: 17px; font-weight: 800; letter-spacing: 5px; color: #E8794F; }
-.brand-sub { font-size: 10.5px; line-height: 1.5; color: var(--t3); margin-top: 3px; }
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.14s;
+}
+.brand:hover { background: var(--row-hover); }
+.brand-copy { min-width: 0; }
+.brand-name {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 5px;
+  color: var(--mars);
+  line-height: 1.25;
+}
+.brand-sub {
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--t3);
+  margin-top: 2px;
+}
 
 .new-btn {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 11px;
+  gap: 10px;
   width: 100%;
-  margin-top: 0;
+  margin-top: 12px;
   padding: 9px 12px;
-  border: 0;
-  border-radius: 9px;
-  background: transparent;
-  color: var(--t2);
-  font-size: 13.5px;
-  font-weight: 500;
+  border: 1px solid color-mix(in srgb, var(--mars) 42%, transparent);
+  border-radius: var(--r-sm);
+  /* Was transparent → token-driven now, with a warm wash so the primary
+     action is legible as primary inside a quiet rail. */
+  background: var(--mars-wash);
+  color: var(--t1);
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
   text-align: left;
-  transition: background 0.13s, color 0.13s;
+  transition: background 0.14s, border-color 0.14s;
 }
-.new-btn:hover { background: #16161d; color: var(--t1); }
-.new-btn svg { color: var(--t3); flex: none; }
-.new-btn:hover svg { color: var(--mars-soft); }
+.new-btn:hover { background: color-mix(in srgb, var(--mars) 18%, transparent); border-color: var(--mars); }
+.new-btn svg { color: var(--mars); flex: none; }
 
-.side-nav { display: flex; flex-direction: column; gap: 2px; margin-top: 14px; }
+.side-nav { display: flex; flex-direction: column; gap: 1px; margin-top: 10px; }
 .side-nav button {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 9px 12px;
+  gap: 10px;
+  padding: 8px 12px;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--t2);
-  font-size: 13.5px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
   text-align: left;
   transition: background 0.13s, color 0.13s;
 }
 .side-nav button:hover { background: var(--row-hover); color: var(--t1); }
 .side-nav button.active { background: var(--row-active); color: var(--t1); }
-.side-nav button.active svg { color: var(--mars-soft); }
+.side-nav button.active svg { color: var(--mars); }
 .side-nav svg { color: var(--t3); flex: none; }
 .side-nav .count {
   margin-left: auto;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 650;
   color: var(--t3);
   background: var(--inset);
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 1px 8px;
+  font-variant-numeric: tabular-nums;
 }
 
-.side-section { margin-top: 24px; padding: 0 4px; }
+.side-section { margin-top: 20px; padding: 0 2px; }
 .side-section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 0 8px;
-  margin-bottom: 6px;
+  margin-bottom: 5px;
 }
-.side-section-head b { font-size: 12.5px; font-weight: 650; color: var(--t2); }
-.side-section-head.has-above { margin-top: 20px; }
+.side-section-head b {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--t4);
+}
+.side-section-head.has-above { margin-top: 18px; }
+.side-section-head button {
+  border: 0;
+  background: transparent;
+  color: var(--t4);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--r-xs);
+}
+.side-section-head button:hover { color: var(--mars); background: var(--row-hover); }
 
+/* A chat row is a real <button> with two lines of text — valid, and Space
+   works for free (previously a span-with-block inside a button). */
 .mission-row {
   display: flex;
-  gap: 10px;
+  gap: 9px;
   align-items: flex-start;
   width: 100%;
-  padding: 9px 8px;
+  padding: 8px 8px;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--r-sm);
   background: transparent;
   cursor: pointer;
   text-align: left;
@@ -107,27 +163,35 @@
 }
 .mission-row:hover { background: var(--row-hover); }
 .mission-row.active { background: var(--row-active); }
-.mission-row .dot { margin-top: 5px; }
-.mission-row .body { flex: 1; min-width: 0; }
+.mission-row.active .name { color: var(--t1); }
+.mission-row .dot { margin-top: 6px; }
+.mission-row .body { flex: 1; min-width: 0; display: block; }
 .mission-row .name {
   display: block;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 550;
-  color: var(--t1);
+  color: var(--t2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.mission-row .sub { display: flex; justify-content: space-between; gap: 8px; margin-top: 3px; font-size: 11px; color: var(--t3); }
+.mission-row .sub {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 3px;
+  font-size: 10.5px;
+  color: var(--t4);
+}
+.mission-row .sub span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Three-dot mission actions: the wrap hugs each row so the absolutely
- * positioned menu anchors beside the selected item. */
+/* Actions menu for a chat row. */
 .mission-menu-wrap { position: relative; }
-.mission-menu-wrap + .mission-menu-wrap { margin-top: 6px; }
-.mission-menu-wrap .mission-row { padding-right: 30px; }
+.mission-menu-wrap + .mission-menu-wrap { margin-top: 2px; }
+.mission-menu-wrap .mission-row { padding-right: 28px; }
 .mission-menu-btn {
   position: absolute;
-  top: 7px;
+  top: 6px;
   right: 4px;
   width: 24px;
   height: 24px;
@@ -136,7 +200,7 @@
   justify-content: center;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   background: transparent;
   color: var(--t3);
   cursor: pointer;
@@ -146,20 +210,80 @@
 .mission-menu-wrap:hover .mission-menu-btn,
 .mission-menu-wrap.open .mission-menu-btn,
 .mission-menu-btn:focus-visible { opacity: 1; }
-.mission-menu-btn:hover { background: var(--row-hover); color: var(--t1); }
-.mission-menu {
+.mission-menu-btn:hover { background: var(--menu-hover); color: var(--t1); }
+
+/* Popup menus share one surface treatment. Every popup is absolutely
+   positioned against its .title-menu-wrap anchor (never a flow block), so
+   opening one can never stretch the header or move its border. */
+.mission-menu,
+.title-menu,
+.mode-menu {
   position: absolute;
-  top: calc(100% - 2px);
-  right: 4px;
-  min-width: 150px;
-  padding: 6px;
-  background: var(--card);
+  top: calc(100% + 4px);
+  left: 0;
+  padding: 5px;
+  background: var(--menu);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
-  box-shadow: var(--shadow-card);
-  z-index: 40;
+  box-shadow: var(--shadow-pop);
+  z-index: 120;
+  min-width: 176px;
+  max-width: min(320px, calc(100vw - 24px));
 }
-.mission-menu-item {
+.mission-menu {
+  top: calc(100% - 2px);
+  left: auto;
+  right: 4px;
+  min-width: 152px;
+}
+/* The session menu anchors to the RIGHT edge of the title/arrow button so it
+   opens directly below the arrow, not under the left of the title. The wrap
+   tightly contains the button, so right:0 lines the menu's right edge up with
+   the arrow. (Left-anchored would sit under the label's start.) */
+.title-menu:not(.library-menu) { left: auto; right: 0; }
+
+/* Anchor for the title/Library dropdowns. position: relative gives the
+   absolutely-positioned menu a containing block; the wrap itself stays a
+   non-growing flex item so the bar's height and border never change. */
+.title-menu-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.library-menu-wrap { flex: none; }
+
+.library-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--t2);
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.library-btn:hover,
+.library-btn.active {
+  background: var(--menu-hover);
+  color: var(--t1);
+  border-color: var(--line);
+}
+.library-btn .nav-chev { transition: transform 0.15s ease; }
+.library-btn .nav-chev.open { transform: rotate(180deg); }
+/* The Library dropdown is anchored to the right edge of its wrap: the
+   button sits at the far right of the title bar, so a left-anchored menu
+   would overflow the viewport. */
+.library-menu { left: auto; right: 0; }
+.mission-menu-item,
+.title-menu-item {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -167,142 +291,264 @@
   padding: 8px 10px;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--r-xs);
   color: var(--t1);
   font-size: 13px;
   text-align: left;
   cursor: pointer;
 }
-.mission-menu-item:hover { background: var(--row-hover); }
-.mission-menu-item svg { color: var(--t3); flex: none; }
-.mission-menu-item.danger { color: var(--danger); }
-.mission-menu-item.danger svg { color: var(--danger); }
+.mission-menu-item:hover,
+.title-menu-item:hover { background: var(--menu-hover); }
+.mission-menu-item svg,
+.title-menu-item svg { color: var(--t3); flex: none; }
+.mission-menu-item.danger,
+.title-menu-item.danger { color: var(--red); }
+.mission-menu-item.danger svg,
+.title-menu-item.danger svg { color: var(--red); }
+.mission-menu-item.danger:hover,
+.title-menu-item.danger:hover { background: var(--red-wash); }
+.title-menu-item.active { background: var(--menu-hover); color: var(--t1); }
+.title-menu-item.active svg { color: var(--mars); }
+
 .mission-rename-input {
   display: block;
   width: 100%;
-  padding: 1px 5px;
-  margin: -1px 0;
+  padding: 2px 6px;
+  margin: -2px 0;
   background: var(--bg-soft);
   border: 1px solid var(--mars);
-  border-radius: 6px;
+  border-radius: var(--r-xs);
   color: var(--t1);
-  font-family: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 550;
   outline: none;
 }
 
-.side-foot { margin-top: auto; padding: 20px 8px 0; }
-.side-foot .ver { font-size: 11px; color: var(--t4); margin-top: 8px; }
+.side-foot {
+  margin-top: auto;
+  padding-top: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+.side-foot .ver {
+  font-size: 10.5px;
+  color: var(--t4);
+  letter-spacing: 0.02em;
+}
 
-/* ---------- workspace ---------- */
+/* ============================================================
+   WORKSPACE — the void plane
+   ============================================================ */
 
 .workspace {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
+  background: var(--bg);
 }
 
-
-.thread { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 80px 26px 12px; }
-.thread-inner { max-width: 800px; margin: 0 auto; min-width: 0; }
+.thread {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 72px 26px 12px;
+}
+/* Widened from 800 → 860 and the composer now shares the exact same column,
+   so the input's edges line up with the report's edges. */
+.thread-inner { max-width: 860px; margin: 0 auto; min-width: 0; }
 
 .page-title-bar {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 4px;
-  /* Shrink permission inside the workspace column: the long session title
-   * must never widen this bar — truncation happens in .page-title-text.
-   * NO `overflow: hidden` here: it clipped the Library / mission dropdowns,
-   * which are absolutely positioned below the bar. The title itself still
-   * truncates via .page-title-text's own overflow rule. `position: relative`
-   * + z-index keeps the bar (and its menus) above the scrolling thread. */
+  gap: 6px;
   position: relative;
   min-width: 0;
-  padding: 14px 26px 12px;
+  padding: 12px 22px 11px;
   background: var(--bg);
   border-bottom: 1px solid var(--line-soft);
-  z-index: 20;
+  z-index: 30;
 }
 .page-title-text {
   flex: 0 1 auto;
   max-width: 100%;
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 600;
-  letter-spacing: 0.01em;
+  letter-spacing: -0.005em;
   color: var(--t1);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
 }
+/* The session title is a button: clicking it opens the session menu. Styled
+   to read as the same title text, with a hover surface so the hit target is
+   discoverable and a comfortable height for touch. */
+.page-title-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 4px 8px;
+  margin: -4px -8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+.page-title-btn:hover,
+.page-title-btn[aria-expanded="true"] {
+  background: var(--surface-2, rgba(127, 127, 127, 0.1));
+}
+.page-title-btn:focus-visible {
+  outline: 2px solid var(--accent, #6ea8fe);
+  outline-offset: 2px;
+}
+.page-title-btn .nav-chev {
+  flex: none;
+  color: var(--t3);
+  transition: transform 0.15s ease;
+}
+.page-title-btn .nav-chev.open {
+  transform: rotate(180deg);
+}
+/* The title bar's own status cluster (dot + state word). */
+.page-title-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--t3);
+}
+
 .thread-center { display: flex; align-items: center; justify-content: center; }
-.thread-center .thread-inner { width: 100%; padding-bottom: 12vh; }
-.thread-center .hero-card { padding: 20px 20px 12px; }
+.thread-center .thread-inner { width: 100%; padding-bottom: 6vh; }
 
 .composer-zone {
   flex: none;
-  padding: 10px 26px 16px;
-  background: linear-gradient(180deg, transparent, var(--bg) 30%);
+  padding: 8px 26px 14px;
+  background: var(--bg);
+  border-top: 1px solid var(--line-soft);
 }
-.composer-inner { max-width: 720px; margin: 0 auto; }
+.composer-inner { max-width: 860px; margin: 0 auto; }
 
-/* ---------- intelligence panel ---------- */
+/* ============================================================
+   INTELLIGENCE RAIL — rail plane
+   ============================================================ */
 
 .intel {
-  width: 340px;
+  width: 330px;
   flex: none;
   min-width: 0;
   background: var(--side);
   border-left: 1px solid var(--line-soft);
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 18px 18px 26px;
-  transition: width 0.25s ease, opacity 0.2s;
+  padding: 16px 16px 30px;
+  transition: width 0.22s ease, opacity 0.18s ease;
 }
 .intel.collapsed { width: 0; padding: 0; opacity: 0; overflow: hidden; border-left-color: transparent; }
 
-.intel-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 2px 4px 0; }
-.intel-head h2 { font-size: 16px; font-weight: 650; margin: 0; letter-spacing: -0.1px; }
-.intel-head p { font-size: 12px; color: var(--t3); margin: 5px 0 0; }
-.intel-head p strong { color: var(--t2); font-weight: 600; }
+.intel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 2px 2px 0; }
+.intel-head h2 { font-size: 13px; font-weight: 700; margin: 0; letter-spacing: 0.09em; text-transform: uppercase; color: var(--t2); }
+.intel-head p { font-size: 11.5px; color: var(--t3); margin: 6px 0 0; line-height: 1.5; }
+.intel-head p strong { color: var(--mars); font-weight: 650; }
+
 .icon-btn {
-  width: 27px;
-  height: 27px;
+  width: 26px;
+  height: 26px;
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 7px;
+  border-radius: var(--r-xs);
   border: 0;
   background: transparent;
   color: var(--t3);
   cursor: pointer;
+  transition: background 0.13s, color 0.13s;
 }
-.icon-btn:hover { background: var(--row-active); color: var(--t1); }
+.icon-btn:hover { background: var(--menu-hover); color: var(--t1); }
 
+/* Expand affordance for the collapsed rail: anchored INSIDE the title bar
+   (not absolutely over the page title) and reserving its own box. */
 .intel-expand {
   position: absolute;
-  right: 10px;
-  top: 14px;
-  z-index: 6;
+  right: 12px;
+  top: 8px;
+  z-index: 32;
+  width: 28px;
+  height: 28px;
+  background: var(--card);
+  border: 1px solid var(--line);
 }
 
-.intel-section { margin-top: 16px; border-top: 1px solid var(--line-soft); padding-top: 14px; }
-.intel-section > h3 { font-size: 13.5px; font-weight: 650; margin: 0 2px 12px; }
+.intel-section { margin-top: 14px; border-top: 1px solid var(--line-soft); padding-top: 13px; }
+.intel-section:first-of-type { border-top: 0; }
+.intel-section > h3 {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--t4);
+  margin: 0 2px 11px;
+}
 .intel-section-head { display: flex; align-items: center; justify-content: space-between; margin: 0 2px 10px; }
-.intel-section-head h3 { font-size: 13.5px; font-weight: 650; margin: 0; }
+.intel-section-head h3 { font-size: 10.5px; font-weight: 700; letter-spacing: 0.11em; text-transform: uppercase; color: var(--t4); margin: 0; }
 
-/* ---------- responsive ---------- */
+/* Idle rail: orientation instead of a column of empty placeholders. */
+.intel-idle { margin-top: 18px; }
+.intel-lede { font-size: 12.5px; color: var(--t2); line-height: 1.6; margin: 0 0 14px; }
+.intel-idle-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 11px; }
+.intel-idle-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t3);
+}
+.intel-idle-list li svg { flex: none; margin-top: 2px; color: var(--mars); }
+
+.scroll-top-btn {
+  position: absolute;
+  right: 18px;
+  bottom: 96px;
+  z-index: 28;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-card);
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+
+@media (max-width: 1240px) {
+  .sidebar { width: 272px; }
+  .intel { width: 302px; }
+}
 
 @media (max-width: 1180px) {
-  .intel { width: 300px; }
-  .sidebar { width: 300px; }
+  .sidebar { width: 256px; }
+  .intel { width: 286px; }
 }
 
-@media (max-width: 980px) {
+@media (max-width: 1020px) {
   .workspace-wrap { position: relative; flex: 1; display: flex; min-width: 0; }
   .intel {
     position: absolute;
@@ -310,35 +556,50 @@
     top: 0;
     bottom: 0;
     z-index: 20;
-    box-shadow: -18px 0 44px rgba(0, 0, 0, 0.5);
+    width: min(340px, 90vw);
+    box-shadow: -18px 0 44px rgba(0, 0, 0, 0.45);
   }
-  .sidebar { position: absolute; z-index: 30; height: 100%; box-shadow: 18px 0 44px rgba(0, 0, 0, 0.5); transform: translateX(-105%); transition: transform 0.25s ease; }
+  /* Collapsed rail must not keep a 0-width absolute box in the tab order. */
+  .intel.collapsed { width: 0; box-shadow: none; }
+  .sidebar {
+    position: absolute;
+    z-index: 40;
+    height: 100%;
+    width: 292px;
+    box-shadow: 18px 0 44px rgba(0, 0, 0, 0.45);
+    transform: translateX(-102%);
+    transition: transform 0.22s ease;
+  }
   .sidebar.open { transform: none; }
   .scrim {
-    position: absolute; inset: 0; z-index: 15;
-    background: rgba(0, 0, 0, 0.55); border: 0; padding: 0; cursor: pointer;
+    position: absolute; inset: 0; z-index: 35;
+    background: var(--scrim); border: 0; padding: 0; cursor: pointer;
   }
-  .thread { padding-left: 16px; padding-right: 16px; }
+  .thread { padding-left: 18px; padding-right: 18px; }
   .page-title-bar { padding-left: 58px; }
-  .composer-zone { padding-left: 16px; padding-right: 16px; }
+  .composer-zone { padding-left: 18px; padding-right: 18px; }
   .menu-btn {
     display: inline-flex !important;
     position: absolute;
     left: 12px;
-    top: 12px;
-    z-index: 25;
+    top: 7px;
+    z-index: 32;
     background: var(--card);
     border: 1px solid var(--line);
-    border-radius: 9px;
-    width: 34px;
-    height: 34px;
+    width: 32px;
+    height: 32px;
   }
 }
 
+@media (max-width: 640px) {
+  .thread { padding: 64px 14px 12px; }
+  .composer-zone { padding: 8px 12px 12px; }
+  .page-title-bar { padding-left: 54px; padding-right: 14px; }
+  .scroll-top-btn { right: 12px; bottom: 88px; }
+}
+
 .menu-btn { display: none; }
-/* Hard viewport guarantee: the wrap can never grow past the shell, so a
- * wide title (or any content) can never push the intelligence panel
- * off-screen — worst case it clips inside the workspace. */
+
 .workspace-wrap {
   display: flex;
   flex: 1;
@@ -348,8 +609,9 @@
   position: relative;
 }
 
-/* Standalone docs embedded at #/docs: full-viewport frame. The docs page
- * brings its own chrome (sidebar/topbar), so the console shell stays out. */
+/* ============================================================
+   DOCS FRAME — the standalone docs site at #/docs
+   ============================================================ */
 .docs-view {
   height: 100dvh;
   width: 100%;

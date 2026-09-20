@@ -1,109 +1,289 @@
-/* MARS theme — design tokens, base, shared controls.
- * Dark premium research console. System font stack: no webfont dependency. */
+/* MARS design system — tokens, base, shared controls.
+ *
+ * DIRECTION: "mission control, not marketing".
+ * A dense, quiet, instrument-panel console for repeated daily use. Three
+ * distinct depth planes (sidebar / workspace / intelligence rail) instead of
+ * one flat grey. A multi-hue semantic palette (warm amber for action, cool
+ * azure for information, green for verified, red for failure) so run status
+ * is scannable at a glance in BOTH themes. Every token defined; no
+ * undefined var() fallbacks, no hardcoded dark-only colours.
+ *
+ * Memorable detail: the mission spine — the numbered, connector-linked
+ * pipeline used in the sidebar/intel rail/agents view, which mirrors the
+ * real 7-agent MARS pipeline instead of decorating it.
+ *
+ * No webfont dependency: system stack only.
+ */
 
+/* ============================================================
+   TOKENS — dark (default)
+   ============================================================ */
 :root {
-  --bg: #121212;
-  --bg-soft: #191919;
-  --side: #191919;
-  --panel: #222222;
-  --card: #222222;
-  --card-2: #222222;
-  --line: #303030;
-  --line-soft: #303030;
-  --track: #2a2a2a;
+  color-scheme: dark;
 
-  --t1: #E8E8E8;
-  --t2: #9A9A9A;
-  --t3: #7d7d7d;
-  --t4: #666666;
+  /* --- surface ramp: three visibly distinct planes ---
+   * bg      → the void behind everything (workspace plane)
+   * bg-soft → recessed wells INSIDE a plane (composer, inputs, code)
+   * side    → rail plane (sidebar + intelligence panel)
+   * panel   → raised surface on a rail (alerts, active rows)
+   * card    → cards in the workspace plane
+   * card-2  → raised variant of card, genuinely lighter          */
+  --bg: #0e1013;
+  --bg-soft: #14171b;
+  --side: #15181d;
+  --panel: #1e2228;
+  --card: #191d22;
+  --card-2: #21262d;
+  --line: #2b3138;
+  --line-soft: #232930;
+  --track: #262c33;
 
-  /* Warm accent on neutral surfaces. Status meaning stays in fill vs
-   * outline, never hue — except failure states, which keep one muted
-   * brick red so errors stay recognizable. */
-  --mars: #E8794F;
-  --mars-soft: #E8794F;
+  /* --- text ramp ---
+   * Contrast is computed against the WORST surface each token actually
+   * lands on (--menu-hover #252b33 is the lightest in dark mode), not
+   * against --bg, because small meta text sits on chips/raised rows far
+   * more often than on the page background.
+   *   t1 13.4:1 · t2 7.3:1 · t3 4.9:1 · t4 4.9:1   (worst case)     */
+  --t1: #eef1f5;
+  --t2: #a9b2bd;
+  --t3: #98a2b0;
+  --t4: #8f99a6;
+
+  /* --- action: warm amber (the one "do this" hue) --- */
+  --mars: #f0824d;
+  --mars-soft: #f09c72;
   --mars-deep: #b85c38;
-  --mars-glow: rgba(232, 121, 79, 0.22);
-  --mint: #d4d4d8;
-  --amber: #a1a1aa;
-  --red: #cd6f63;
-  --blue: #e4e4e7;
-
-  --r-sm: 8px;
-  --r-md: 12px;
-  --r-lg: 16px;
-
-  --shadow-card: 0 14px 38px rgba(0, 0, 0, 0.32);
-
-  /* Elevated-inset surfaces + text that were previously hardcoded per
-   * component. Tokens so light mode flips them consistently. */
-  --inset: #1f1f27;
-  --inset-line: #26262e;
-  --inset-2: #1d1d24;
-  --chip: #1b1b21;
-  --menu: #16161c;
-  --menu-hover: #20202a;
-  --row-hover: #16161d;
-  --row-active: #1b1b23;
-  --line-hover: #33333e;
-  --dash: #44444e;
+  --mars-glow: rgba(240, 130, 77, 0.28);
+  --mars-wash: rgba(240, 130, 77, 0.09);
   --ink-on-accent: #1c1009;
-  --bar: #d4d4d8;
-  --bar-green: #a1a1aa;
-  --dot-idle: #5f5f69;
-  --probe-ok: #7fb685;
-  --danger: #e0655a;
+
+  /* --- semantic status: REAL hues in dark mode (previously greys) --- */
+  --mint: #5fd0a0;
+  --amber: #e0b34e;
+  --red: #e87a6c;
+  --blue: #7aa7e8;
+
+  --green-wash: rgba(95, 208, 160, 0.12);
+  --amber-wash: rgba(224, 179, 78, 0.12);
+  --red-wash: rgba(232, 122, 108, 0.11);
+  --blue-wash: rgba(122, 167, 232, 0.12);
+
+  /* --- legacy aliases kept so no component breaks --- */
+  --danger: var(--red);
+  --danger-tint: var(--red-wash);
+  --accent: var(--amber);
+  --dot-idle: #59626e;
+  --probe-ok: var(--mint);
+
+  /* --- radii: tighter than before; 16px felt consumer-app --- */
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 10px;
+  --r-lg: 14px;
+
+  /* Shadows are plane separation, not glow. */
+  --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.38);
+  --shadow-pop: 0 18px 46px rgba(0, 0, 0, 0.55);
+
+  /* --- elevated/inset surfaces previously hardcoded per component --- */
+  --inset: #1a1e24;
+  --inset-line: #262c33;
+  --inset-2: #1d2229;
+  --chip: #1c2128;
+  --menu: #1b1f25;
+  --menu-hover: #252b33;
+  --row-hover: #1d222a;
+  --row-active: #232a33;
+  --line-hover: #3a424c;
+  --dash: #4a535e;
+
+  /* --- bars: distinct per meaning, never grey-on-grey --- */
+  --bar: #4a5563;
+  --bar-green: var(--mint);
+  --bar-blue: var(--blue);
+
+  --sel: rgba(240, 130, 77, 0.26);
+  --scrim: rgba(6, 8, 10, 0.62);
+  --focus: var(--mars);
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--mars-glow);
+  --scrollbar: #333b45;
 
   --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
-  --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo,
+    Consolas, monospace;
+
+  /* --- type scale: a real modular ramp, not twelve ad-hoc px values ---
+   * Ratio ≈1.14 from a 13px base. Every size in the app maps to one of
+   * these; nothing invents an in-between value. 2xs/xs are the meta tier
+   * (labels, timestamps, eyebrow), sm/base/md the reading tier, lg/xl/2xl
+   * the display tier (titles, hero numbers). */
+  --fs-2xs: 10px;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-2xl: 26px;
+  --fs-3xl: 34px;
+
+  /* line-heights paired to the tiers */
+  --lh-tight: 1.25;
+  --lh-snug: 1.4;
+  --lh-base: 1.55;
+  --lh-loose: 1.7;
+
+  /* --- spacing scale: 4px base grid ---
+   * Every padding/gap in the app resolves to a step. This is what makes a
+   * dense console read as ONE system instead of hand-tuned per rule. */
+  --sp-1: 2px;
+  --sp-2: 4px;
+  --sp-3: 6px;
+  --sp-4: 8px;
+  --sp-5: 10px;
+  --sp-6: 12px;
+  --sp-7: 14px;
+  --sp-8: 16px;
+  --sp-10: 20px;
+  --sp-12: 24px;
+  --sp-16: 32px;
+  --sp-20: 40px;
+  --sp-24: 48px;
+
+  /* --- elevation: 0=flush, 1=recessed, 2=raised, 3=overlay ---
+   * Shadow is plane separation, never decoration. Tints let a surface lift
+   * without a shadow (better inside dense rails). */
+  --elev-0: none;
+  --elev-1: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  --elev-2: 0 1px 2px rgba(0, 0, 0, 0.28), 0 2px 8px rgba(0, 0, 0, 0.22);
+  --elev-3: 0 18px 46px rgba(0, 0, 0, 0.55);
+  --tint-lift: rgba(255, 255, 255, 0.035);
+  --tint-sink: rgba(0, 0, 0, 0.22);
+
+  /* --- z-index scale: one ladder, no magic numbers per component --- */
+  --z-base: 1;
+  --z-sticky: 20;
+  --z-rail: 30;
+  --z-scrim: 35;
+  --z-drawer: 40;
+  --z-menu: 60;
+  --z-toast: 80;
+
+  /* --- motion: durations + easing as tokens --- */
+  --dur-fast: 0.12s;
+  --dur-base: 0.18s;
+  --dur-slow: 0.28s;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* --- dense control heights (console-grade, not consumer) --- */
+  --h-control: 30px;
+  --h-control-lg: 34px;
 }
 
+/* ============================================================
+   TOKENS — light
+   ============================================================ */
 :root[data-theme="light"] {
-  --bg: #f7f6f4;
+  color-scheme: light;
+
+  --bg: #f4f2ef;
   --bg-soft: #ffffff;
-  --side: #ffffff;
+  --side: #fbfaf8;
   --panel: #ffffff;
   --card: #ffffff;
-  --card-2: #fbfaf9;
-  --line: #e4e1dd;
-  --line-soft: #ece9e5;
-  --track: #e7e4e0;
+  --card-2: #f7f5f2;
+  --line: #ddd8d1;
+  --line-soft: #e7e2db;
+  --track: #e6e1d9;
 
-  --t1: #1b1a19;
-  --t2: #55524e;
-  --t3: #767069;
-  --t4: #9a948c;
+  /* Worst light surfaces are --track #e6e1d9 / --row-active #eae5de.
+   *   t1 16.6:1 · t2 9.6:1 · t3 5.1:1 · t4 4.8:1   (worst case)     */
+  --t1: #16181c;
+  --t2: #4d535c;
+  --t3: #575d66;
+  --t4: #5b616a;
 
-  --mars: #c85a2e;
-  --mars-soft: #b8501f;
-  --mars-deep: #9c3f14;
-  --mars-glow: rgba(200, 90, 46, 0.18);
-  --mint: #2f7d5c;
-  --amber: #9a6b12;
-  --red: #b0443a;
-  --blue: #35619e;
+  /* Accent is darkened vs the previous #c2521f so it clears AA both as
+     brand text on --side/#fbfaf8 (5.53:1) and as a button fill behind
+     white --ink-on-accent (5.77:1). */
+  --mars: #ad4517;
+  --mars-soft: #96400f;
+  --mars-deep: #7d3410;
+  --mars-glow: rgba(173, 69, 23, 0.22);
+  --mars-wash: rgba(173, 69, 23, 0.08);
+  --ink-on-accent: #ffffff;
 
-  --shadow-card: 0 16px 40px rgba(30, 24, 18, 0.08);
+  --mint: #1f7a53;
+  --amber: #8a5e08;
+  --red: #b03a2c;
+  --blue: #2c5b9e;
 
-  --inset: #f2f0ee;
-  --inset-line: #e4e1dd;
-  --inset-2: #f2f0ee;
-  --chip: #f2f0ee;
+  --green-wash: rgba(31, 122, 83, 0.1);
+  --amber-wash: rgba(138, 94, 8, 0.1);
+  --red-wash: rgba(176, 58, 44, 0.09);
+  --blue-wash: rgba(44, 91, 158, 0.1);
+
+  --dot-idle: #a09a93;
+  --shadow-card: 0 8px 24px rgba(40, 30, 20, 0.07);
+  --shadow-pop: 0 18px 46px rgba(40, 30, 20, 0.16);
+
+  --inset: #f4f2ef;
+  --inset-line: #e2ddd6;
+  --inset-2: #f4f2ef;
+  --chip: #f2efeb;
   --menu: #ffffff;
-  --menu-hover: #f2f0ee;
-  --row-hover: #f2f0ee;
-  --row-active: #ebe7e2;
-  --line-hover: #d3cfc9;
-  --dash: #cfc9c2;
-  --ink-on-accent: #fffaf7;
-  --bar: #b8b2ab;
-  --bar-green: #9a948c;
-  --dot-idle: #a5a09a;
-  --probe-ok: #2f7d5c;
-  --danger: #b0443a;
+  --menu-hover: #f2efeb;
+  --row-hover: #f2efeb;
+  --row-active: #eae5de;
+  --line-hover: #c6bfb6;
+  --dash: #bdb6ac;
+
+  --bar: #b3aca3;
+  --sel: rgba(173, 69, 23, 0.18);
+  --scrim: rgba(30, 24, 18, 0.38);
+  --scrollbar: #cdc6bd;
+
+  /* Elevation on light paper: shadows are warmer and softer so raised cards
+     separate without ringing. */
+  --elev-1: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  --elev-2: 0 1px 2px rgba(40, 30, 20, 0.06), 0 2px 8px rgba(40, 30, 20, 0.05);
+  --elev-3: 0 18px 46px rgba(40, 30, 20, 0.16);
+  --tint-lift: rgba(255, 255, 255, 0.6);
+  --tint-sink: rgba(40, 30, 20, 0.03);
 }
 
+/* ============================================================
+   HIGH CONTRAST — opt-in via OS, strengthens every boundary.
+   Not a separate theme: it reuses the palette and hardens the
+   distinctions (lines, focus, disabled) that dense UIs soften.
+   ============================================================ */
+@media (prefers-contrast: more) {
+  :root {
+    --line: #4a545f;
+    --line-soft: #3b444d;
+    --line-hover: #6b7683;
+    --t2: #c3ccd6;
+    --t3: #b3bcc7;
+    --t4: #a7b0bc;
+    --elev-2: 0 0 0 1px var(--line), 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+  :root[data-theme="light"] {
+    --line: #9a938a;
+    --line-soft: #b3aca3;
+    --line-hover: #6f685f;
+    --t2: #33383f;
+    --t3: #3d434a;
+    --t4: #40464d;
+  }
+  .btn, .chip, .tag, input, textarea, select { border-width: 1.5px; }
+  :focus-visible { outline-width: 3px; }
+}
+
+/* ============================================================
+   BASE
+   ============================================================ */
 * { box-sizing: border-box; }
 
 html, body, #root { height: 100%; }
@@ -114,90 +294,139 @@ body {
   color: var(--t1);
   font-family: var(--font);
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-:root { color-scheme: dark; }
-:root[data-theme="light"] { color-scheme: light; }
-
-::selection { background: rgba(255, 255, 255, 0.22); }
+::selection { background: var(--sel); }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb {
-  background: #2a2a33;
+  background: var(--scrollbar);
   border-radius: 8px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
+::-webkit-scrollbar-thumb:hover { background: var(--line-hover); background-clip: content-box; }
 ::-webkit-scrollbar-track { background: transparent; }
 
 a { color: var(--mars-soft); }
-button { font-family: inherit; }
+button, input, textarea, select { font-family: inherit; }
 
-/* ---------- shared controls ---------- */
+/* One focus ring for the whole app. Previously only 12 scoped :focus rules
+   existed and most controls (buttons, chips, rows) had NO indicator. */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+/* Inputs get a ring that hugs the field instead of doubling the border. */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 0;
+}
+
+/* ============================================================
+   SHARED CONTROLS
+   ============================================================ */
 
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
-  min-height: 34px;
-  padding: 0 14px;
-  border-radius: 10px;
-  background: var(--card-2);
+  min-height: 32px;
+  padding: 0 13px;
+  border-radius: var(--r-sm);
+  background: var(--card);
   border: 1px solid var(--line);
   color: var(--t2);
   font-size: 12.5px;
   font-weight: 550;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.1s;
+  transition: background 0.14s, color 0.14s, border-color 0.14s, transform 0.08s;
 }
-.btn:hover:not(:disabled) { background: #24242e; color: var(--t1); border-color: #34343f; }
+/* Was hardcoded #24242e — painted dark grey panels on a white sidebar. */
+.btn:hover:not(:disabled) {
+  background: var(--menu-hover);
+  color: var(--t1);
+  border-color: var(--line-hover);
+}
 .btn:active:not(:disabled) { transform: translateY(1px); }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn:disabled { opacity: 0.42; cursor: not-allowed; }
+.btn svg { flex: none; }
 
 .btn-primary {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  min-height: 36px;
-  padding: 0 18px;
-  border-radius: 10px;
-  border: 1px solid rgba(0, 0, 0, 0.25);
-  background: #E8794F;
+  min-height: 34px;
+  padding: 0 16px;
+  border-radius: var(--r-sm);
+  border: 1px solid color-mix(in srgb, var(--mars) 70%, #000 30%);
+  background: var(--mars);
   color: var(--ink-on-accent);
   font-size: 13px;
   font-weight: 650;
-  cursor: pointer;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-  transition: filter 0.15s, transform 0.1s;
   white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--mars) 24%, transparent);
+  transition: filter 0.14s, transform 0.08s, box-shadow 0.14s;
 }
-.btn-primary:hover:not(:disabled) { filter: brightness(0.92); }
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.07);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--mars) 34%, transparent);
+}
 .btn-primary:active:not(:disabled) { transform: translateY(1px); }
-.btn-primary:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+.btn-primary:disabled { opacity: 0.42; cursor: not-allowed; box-shadow: none; }
+
+.btn-danger {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 34%, var(--line));
+}
+.btn-danger:hover:not(:disabled) {
+  background: var(--red-wash);
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 55%, transparent);
+}
+
+.btn-sm { min-height: 27px; padding: 0 10px; font-size: 12px; border-radius: var(--r-xs); }
 
 .chip {
-  padding: 7px 14px;
+  padding: 6px 13px;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: transparent;
   color: var(--t3);
   font-size: 12px;
+  font-weight: 550;
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  transition: border-color 0.14s, color 0.14s, background 0.14s;
   white-space: nowrap;
 }
-.chip:hover:not(:disabled) { border-color: var(--line-hover); color: var(--t1); background: var(--row-hover); }
+.chip:hover:not(:disabled) {
+  border-color: var(--line-hover);
+  color: var(--t1);
+  background: var(--row-hover);
+}
+.chip.on {
+  border-color: color-mix(in srgb, var(--mars) 50%, transparent);
+  background: var(--mars-wash);
+  color: var(--t1);
+}
 .chip:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* Toneful tags: hue carries meaning in BOTH themes now. */
 .tag {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 10px;
+  padding: 2.5px 9px;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: var(--card-2);
@@ -206,13 +435,18 @@ button { font-family: inherit; }
   font-weight: 600;
   white-space: nowrap;
 }
-.tag.tone-good { background: #e4e4e7; border-color: #e4e4e7; color: #09090b; }
-.tag.tone-bad { border-color: var(--line-hover); background: transparent; color: var(--t3); }
-.tag.tone-muted { border-color: var(--line); background: rgba(255, 255, 255, 0.03); color: var(--t3); }
-.tag.tone-blue { border-color: var(--line-hover); background: var(--row-active); color: var(--t1); }
+.tag.tone-good { background: var(--green-wash); border-color: color-mix(in srgb, var(--mint) 32%, transparent); color: var(--mint); }
+.tag.tone-bad { background: var(--red-wash); border-color: color-mix(in srgb, var(--red) 32%, transparent); color: var(--red); }
+.tag.tone-warn { background: var(--amber-wash); border-color: color-mix(in srgb, var(--amber) 32%, transparent); color: var(--amber); }
+.tag.tone-blue { background: var(--blue-wash); border-color: color-mix(in srgb, var(--blue) 32%, transparent); color: var(--blue); }
+.tag.tone-muted { background: transparent; color: var(--t3); }
 
-.dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-.dot.live { background: var(--mars); box-shadow: 0 0 10px var(--mars-glow); animation: pulse 1.6s ease-in-out infinite; }
+.dot { width: 7px; height: 7px; border-radius: 50%; flex: none; display: inline-block; }
+.dot.live {
+  background: var(--mars);
+  box-shadow: 0 0 0 3px var(--mars-wash);
+  animation: pulse 1.6s ease-in-out infinite;
+}
 .dot.done { background: var(--mint); }
 .dot.idle { background: var(--dot-idle); }
 .dot.warn { background: var(--amber); }
@@ -220,36 +454,74 @@ button { font-family: inherit; }
 
 .empty {
   margin: 0;
-  padding: 18px 16px;
+  padding: 16px 15px;
   border: 1px dashed var(--line);
   border-radius: var(--r-md);
   color: var(--t4);
   font-size: 12.5px;
+  line-height: 1.6;
   text-align: center;
 }
 
 .error-box {
-  border: 1px solid rgba(205, 111, 99, 0.4);
+  border: 1px solid color-mix(in srgb, var(--red) 38%, transparent);
   border-left: 3px solid var(--red);
-  background: rgba(205, 111, 99, 0.07);
+  background: var(--red-wash);
   border-radius: var(--r-md);
-  padding: 13px 15px;
+  padding: 12px 14px;
   font-size: 13px;
-  color: #e8b3ac;
+  line-height: 1.6;
+  color: var(--t1);
+}
+.error-box strong { color: var(--red); }
+
+/* Banners: one shape, hue-swapped by meaning. */
+.banner {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--t3);
+  background: var(--card-2);
+  border-radius: var(--r-md);
+  padding: 12px 15px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--t2);
+}
+.banner svg { flex: none; margin-top: 2px; }
+.banner strong { color: var(--t1); }
+.banner.tone-warn { border-left-color: var(--amber); background: var(--amber-wash); }
+.banner.tone-warn svg, .banner.tone-warn strong { color: var(--amber); }
+.banner.tone-bad { border-left-color: var(--red); background: var(--red-wash); }
+.banner.tone-bad svg, .banner.tone-bad strong { color: var(--red); }
+.banner.tone-blue { border-left-color: var(--blue); background: var(--blue-wash); }
+.banner.tone-blue svg, .banner.tone-blue strong { color: var(--blue); }
+.banner.tone-good { border-left-color: var(--mint); background: var(--green-wash); }
+.banner.tone-good svg, .banner.tone-good strong { color: var(--mint); }
+
+/* Section eyebrow — the small label above a group of fields. */
+.eyebrow {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--t4);
 }
 
-/* ---------- motion ---------- */
-
+/* ============================================================
+   MOTION — deliberate, small, and fully reduced-motion aware
+   ============================================================ */
 @keyframes rise {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
 @keyframes pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
+  50% { opacity: 0.42; }
 }
 @keyframes typing-bounce {
-  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
   30% { transform: translateY(-4px); opacity: 1; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -257,12 +529,194 @@ button { font-family: inherit; }
   from { background-position: 200% 0; }
   to { background-position: -200% 0; }
 }
+@keyframes draw-in {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
 
-.anim-rise { animation: rise 0.35s ease both; }
+.anim-rise { animation: rise 0.3s ease both; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
+}
+
+/* ============================================================
+   PRIMITIVES — small composable pieces the views build from.
+   These exist so a surface never re-invents a status pill, a meta
+   row, or a section header inline.
+   ============================================================ */
+
+/* Visually hidden but available to assistive tech (live regions, labels). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Skip link: hidden until focused, then a real, high-contrast control. */
+.skip-link {
+  position: fixed;
+  top: var(--sp-3);
+  left: var(--sp-3);
+  z-index: var(--z-toast);
+  padding: var(--sp-4) var(--sp-6);
+  background: var(--mars);
+  color: var(--ink-on-accent);
+  font-size: var(--fs-base);
+  font-weight: 650;
+  border-radius: var(--r-sm);
+  box-shadow: var(--elev-3);
+  transform: translateY(calc(-100% - var(--sp-4)));
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.skip-link:focus-visible { transform: none; outline-offset: 3px; }
+
+/* Section header used inside cards and rails. */
+.sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-5);
+}
+.sec-head > h3 {
+  margin: 0;
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--t4);
+}
+
+/* A labelled metric — the console's unit of quantitative status. */
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.metric .m-val {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  line-height: var(--lh-tight);
+  color: var(--t1);
+  font-variant-numeric: tabular-nums;
+}
+.metric .m-lab {
+  font-size: var(--fs-xs);
+  color: var(--t3);
+  letter-spacing: 0.01em;
+}
+
+/* Skeleton: the loading state for anything whose shape is known ahead of
+   time. A shimmer sweep, reduced-motion safe (falls back to a static block). */
+.skel {
+  border-radius: var(--r-xs);
+  background: linear-gradient(
+    90deg,
+    var(--inset) 25%,
+    var(--menu-hover) 50%,
+    var(--inset) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skel { animation: none; background: var(--inset); }
+}
+.skel-line { height: 11px; margin-bottom: var(--sp-4); }
+.skel-line.w-90 { width: 90%; }
+.skel-line.w-70 { width: 70%; }
+.skel-line.w-50 { width: 50%; }
+.skel-line.w-40 { width: 40%; }
+.skel-block { height: 64px; margin-bottom: var(--sp-5); }
+
+/* Segmented control: mutually exclusive compact toggle. */
+.seg {
+  display: inline-flex;
+  padding: var(--sp-1);
+  gap: var(--sp-1);
+  background: var(--inset);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+}
+.seg > button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-5);
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--t3);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.seg > button:hover { color: var(--t1); }
+.seg > button[aria-pressed="true"],
+.seg > button.on {
+  background: var(--card);
+  color: var(--t1);
+  box-shadow: var(--elev-1);
+}
+
+/* Key/value meta row — dense, aligned, used in rails and detail headers. */
+.kv {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-6);
+  padding: var(--sp-3) 0;
+  font-size: var(--fs-sm);
+}
+.kv + .kv { border-top: 1px solid var(--line-soft); }
+.kv dt { color: var(--t3); }
+.kv dd {
+  margin: 0;
+  color: var(--t1);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+   PRINT — the report is the deliverable; make it printable.
+   ============================================================ */
+@media print {
+  :root { color-scheme: light; }
+  .sidebar,
+  .intel,
+  .composer-zone,
+  .page-title-bar,
+  .msg-actions,
+  .user-actions,
+  .skip-link,
+  .scroll-top-btn,
+  .landing-nav,
+  .landing-foot { display: none !important; }
+
+  html, body, #root, .shell, .workspace, .thread {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+  .thread { padding: 0 !important; }
+  .thread-inner { max-width: none !important; }
+  .answer, .card, .msg-mars { box-shadow: none !important; border-color: #bbb !important; }
+  a { color: #000 !important; text-decoration: underline; }
+  /* Print the destination of every citation so the report stays auditable on paper. */
+  .answer a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 10px; word-break: break-all; }
 }

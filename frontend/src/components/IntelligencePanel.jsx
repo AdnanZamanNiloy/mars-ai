@@ -1,28 +1,49 @@
 import {
-  IconAlert, IconChart, IconCheckCircle, IconChevronUp,
+  IconAlert, IconChart, IconCheckCircle, IconChevronRight,
   IconDoc, IconRefresh, IconRoute, IconSearch, IconShield, IconShieldCheck, IconTarget,
 } from "./icons";
 
-/* Mission Intelligence — every number comes from streamed run state.
- * Props: run (live run object or null), onCollapse/onExpand, collapsed,
- * onResume. */
+/* Mission Intelligence — the run's instrument rail.
+ *
+ * PRINCIPLE: every number here is a value the stream actually delivered.
+ * There are no invented progress percentages and no per-agent "estimated"
+ * bars. An agent is done, working, or queued — decided by which artifacts
+ * exist — and that is all we claim to know. When a section has no data we
+ * hide it; we never pad the rail with placeholders that fill the column but
+ * carry no signal.
+ *
+ * Props: run (live run object, replay-shaped run, or null),
+ *        collapsed, onCollapse, onResume.
+ */
 
-function AgentRow({ icon: Ic, name, desc, status, meta, progress }) {
-  const label = status === "done" ? "Complete" : status === "active" ? "Analyzing" : "Waiting";
-  const color = status === "done" ? "var(--mint)" : status === "active" ? "var(--mars-soft)" : "var(--t3)";
+const STATE_LABEL = { done: "Complete", active: "Working", waiting: "Queued" };
+
+/* Canonical pipeline — same seven agents, same order, as AgentsView and the
+ * live RunProgress strip, so "agent 3" means the same thing everywhere. */
+const PIPELINE = [
+  { key: "orchestrator", icon: IconTarget, name: "Orchestrator" },
+  { key: "planner", icon: IconTarget, name: "Planner" },
+  { key: "search", icon: IconSearch, name: "Search" },
+  { key: "summarizer", icon: IconDoc, name: "Summarizer" },
+  { key: "verifier", icon: IconShieldCheck, name: "Verifier" },
+  { key: "critic", icon: IconShield, name: "Critic" },
+  { key: "synthesizer", icon: IconChart, name: "Synthesizer" },
+];
+
+function AgentRow({ icon: Ic, name, desc, status, index }) {
+  const label = STATE_LABEL[status] || "Queued";
   return (
-    <div className="agent-row">
-      <span className="agent-ic"><Ic size={17} /></span>
-      <div className="agent-main">
-        <div className="agent-top">
-          <span className="agent-name">{name}</span>
-          <span className="agent-status" style={{ color }}>{status === "waiting" ? "Waiting ⋯" : label}</span>
-        </div>
-        <div className="agent-desc">{desc}</div>
-        <div className="bar"><div className={status === "done" ? "green" : ""} style={{ width: `${progress}%` }} /></div>
-        {meta ? <div className="agent-desc" style={{ marginTop: 5, marginBottom: 0 }}>{meta}</div> : null}
-      </div>
-    </div>
+    <li className={`spine-node s-${status}`}>
+      <span className="spine-idx">{status === "done" ? "\u2713" : (index ?? "")}</span>
+      <span className="spine-body">
+        <span className="spine-title">
+          <Ic size={13} className="spine-ic" />
+          {name}
+          <span className="spine-state">{label}</span>
+        </span>
+        <span className="spine-desc">{desc}</span>
+      </span>
+    </li>
   );
 }
 
@@ -33,93 +54,88 @@ export default function IntelligencePanel({
 
   const agents = run ? deriveAgents(run) : [];
   const health = run ? deriveHealth(run) : [];
-  const working = run && !run.done && !run.error ? agents.filter((a) => a.status === "active").length : 0;
+  const working = agents.filter((a) => a.status === "active").length;
 
   return (
-    <aside className="intel">
+    <aside className="intel" aria-label="Research intelligence">
       <div className="intel-head">
         <div>
-          <h2>Research Intelligence</h2>
-          <p>
+          <h2>Intelligence</h2>
+          <p aria-live="polite" aria-atomic="true">
             {run ? (
               run.replay ? (
-                <><strong>Session replay</strong> · Read-only record</>
+                <><strong>Session replay</strong> · figures from the stored trace</>
+              ) : run.done ? (
+                <><strong>Run complete</strong> · figures from the finished trace</>
               ) : (
-                <><strong>{working} agents working</strong> · Real-time research</>
+                <><strong>{working} agent{working === 1 ? "" : "s"} working</strong> · streaming live</>
               )
             ) : (
-              "No active research"
+              "No active run"
             )}
           </p>
         </div>
-        <button className="icon-btn" onClick={onCollapse} title="Collapse panel" aria-label="Collapse panel">
-          <IconChevronUp size={15} />
+        <button className="icon-btn" onClick={onCollapse} title="Collapse panel" aria-label="Collapse the intelligence panel">
+          <IconChevronRight size={15} />
         </button>
       </div>
 
-      <section className="intel-section">
-        <h3>Agents</h3>
-        {agents.length > 0 ? (
-          agents.map((a) => <AgentRow key={a.name} {...a} />)
-        ) : (
-          <p className="empty">Agents appear here once a run starts.</p>
-        )}
-      </section>
+      {!run ? (
+        <IdleState />
+      ) : (
+        <>
+          <section className="intel-section">
+            <h3>Pipeline</h3>
+            <ol className="spine">
+              {agents.map((a, i) => <AgentRow key={a.name} index={i + 1} {...a} />)}
+            </ol>
+          </section>
 
-      <section className="intel-section">
-        <h3>Research health</h3>
-        {health.length > 0 ? (
-          health.map((r) => (
-            <div className="health-row" key={r.label}>
-              <r.icon size={15} className={`tone-${r.tone}`} />
-              <span className="k">{r.label}</span>
-              <span className="v" style={r.hot ? { color: "var(--mars-soft)" } : undefined}>{r.value}</span>
-            </div>
-          ))
-        ) : (
-          <p className="empty">No health signals yet.</p>
-        )}
-        <CitationHealthRow health={run?.citationHealth} />
-      </section>
+          <section className="intel-section">
+            <h3>Research health</h3>
+            {health.map((r) => (
+              <div className="health-row" key={r.label}>
+                <r.icon size={15} className={`tone-${r.tone}`} />
+                <span className="k">{r.label}</span>
+                <span className="v" style={r.hot ? { color: "var(--mars-soft)" } : undefined}>{r.value}</span>
+              </div>
+            ))}
+            <CitationHealthRow health={run.citationHealth} />
+          </section>
 
-      <EvidenceGrades distribution={run?.evidenceDistribution} />
+          <ConfidenceBreakdown breakdown={run.breakdown} />
+          <RedTeamPanel redteam={run.redteam} />
+          <EvidenceGrades distribution={run.evidenceDistribution} />
+          <BudgetMeter budget={run.budget} />
 
-      <section className="intel-section">
-        <h3>Execution waves</h3>
-        <WaveStrip waves={run?.waves} waveReport={run?.waveReport} />
-      </section>
-
-      <section className="intel-section">
-        <h3>Cost &amp; budget</h3>
-        <BudgetMeter budget={run?.budget} />
-      </section>
-
-      <section className="intel-section">
-        <h3>Confidence breakdown</h3>
-        <ConfidenceBreakdown breakdown={run?.breakdown} />
-      </section>
-
-      <section className="intel-section">
-        <h3>Red team</h3>
-        <RedTeamPanel redteam={run?.redteam} />
-      </section>
-
-      {run?.error && run?.resumable ? (
-        <section className="intel-section">
-          <button className="btn" onClick={onResume} disabled={run?.resuming} style={{ width: "100%" }}>
-            <IconRefresh size={14} /> {run?.resuming ? "Resuming…" : "Resume from checkpoint"}
-          </button>
-        </section>
-      ) : null}
-
-      <section className="intel-section">
-        <div className="health-row">
-          <IconRefresh size={15} className="tone-muted" />
-          <span className="k">Estimated completion</span>
-          <span className="v">{run && !run.done ? "in progress" : run?.done ? "done" : "—"}</span>
-        </div>
-      </section>
+          {run.error && run.resumable ? (
+            <section className="intel-section">
+              <button className="btn" onClick={onResume} disabled={run.resuming} style={{ width: "100%" }}>
+                <IconRefresh size={14} /> {run.resuming ? "Resuming…" : "Resume from checkpoint"}
+              </button>
+            </section>
+          ) : null}
+        </>
+      )}
     </aside>
+  );
+}
+
+/* The idle rail is orientation, not a column of "nothing yet". It explains
+ * what this panel becomes once a run starts, in one compact block. */
+function IdleState() {
+  return (
+    <section className="intel-section intel-idle">
+      <p className="intel-lede">
+        Ask a question and this rail becomes the run's instrument panel:
+      </p>
+      <ul className="intel-idle-list">
+        <li><IconTarget size={14} /> The seven-agent pipeline as it advances</li>
+        <li><IconChart size={14} /> A confidence breakdown from measured signals</li>
+        <li><IconShieldCheck size={14} /> Claim verification and citation health</li>
+        <li><IconAlert size={14} /> Cost, budget and adversarial review</li>
+      </ul>
+    </section>
   );
 }
 
@@ -132,19 +148,26 @@ const SIGNAL_LABELS = {
   citation_support: "Citation support",
   axis_coverage: "Axis coverage",
   claim_verification_strength: "Source-term overlap",
+  claim_evidence_quality: "Claim evidence quality",
   cross_source_agreement: "Cross-source agreement",
   critic_survival: "Critic survival",
   freshness: "Freshness",
 };
 
+/* Unknown keys are humanised rather than printed raw, so a new backend
+ * signal never shows up as snake_case in the console. */
+function signalLabel(key) {
+  if (SIGNAL_LABELS[key]) return SIGNAL_LABELS[key];
+  return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function ConfidenceBreakdown({ breakdown }) {
   const signals = breakdown?.signals;
-  if (!signals || typeof signals !== "object") {
-    return <p className="empty">Signal detail arrives with the first critic pass.</p>;
-  }
+  if (!signals || typeof signals !== "object") return null;
   const overall = typeof breakdown.overall === "number" ? Math.round(breakdown.overall * 100) : null;
   return (
-    <div>
+    <section className="intel-section">
+      <h3>Confidence breakdown</h3>
       {overall !== null ? (
         <div className="health-row">
           <IconChart size={15} className="tone-muted" />
@@ -157,30 +180,28 @@ function ConfidenceBreakdown({ breakdown }) {
         return (
           <div key={key}>
             <div className="health-row" style={{ paddingBottom: 2 }}>
-              <span className="k">{SIGNAL_LABELS[key] || key}</span>
+              <span className="k">{signalLabel(key)}</span>
               <span className="v">{pct !== null ? `${pct}%` : "—"}</span>
             </div>
             <div className="bar" style={{ marginBottom: 8 }}>
               <div style={{ width: `${pct ?? 0}%` }} />
             </div>
             {key === "freshness" && pct === 0 ? (
-              <div className="budget-sub" style={{ textAlign: "left", marginTop: -4, marginBottom: 8 }}>
+              <div className="budget-sub note" style={{ marginBottom: 8 }}>
                 publish dates not captured yet
               </div>
             ) : null}
           </div>
         );
       })}
-    </div>
+    </section>
   );
 }
 
 function BudgetMeter({ budget }) {
-  /* Cost-aware reasoning (Feature 12): live spend against the run's
-   * ceilings — dollars, tokens, calls, cache hits. */
-  if (!budget || typeof budget !== "object") {
-    return <p className="empty">Budget telemetry arrives with the first LLM call.</p>;
-  }
+  /* Rendered only when the run actually reported telemetry, so a replay
+   * (which carries none) does not show a dead "arrives later" section. */
+  if (!budget || typeof budget !== "object") return null;
   const tokens = budget.spent_tokens ?? 0;
   const calls = budget.llm_calls ?? 0;
   const usd = typeof budget.spent_usd === "number" ? budget.spent_usd : 0;
@@ -189,7 +210,8 @@ function BudgetMeter({ budget }) {
   const hitRate = budget.cache_hit_rate ?? 0;
   const fmtTokens = tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
   return (
-    <div>
+    <section className="intel-section">
+      <h3>Cost &amp; budget</h3>
       <div className="health-row">
         <span className="k">LLM calls</span>
         <span className="v">{calls}{hits > 0 ? ` (${hits} cached)` : ""}</span>
@@ -214,32 +236,12 @@ function BudgetMeter({ budget }) {
         </>
       ) : null}
       {hits > 0 ? (
-        <div className="budget-sub" style={{ textAlign: "left", marginBottom: 6 }}>
+        <div className="budget-sub note">
           cache hit rate {Math.round(hitRate * 100)}% — repeated prompts served from disk, free
         </div>
       ) : null}
-    </div>
+    </section>
   );
-}
-
-function WaveStrip({ waves, waveReport }) {
-  /* Dependency-wave execution (Feature 03): the plan's shape and what each
-   * wave produced. */
-  const shape = Array.isArray(waves) ? waves.filter(Array.isArray) : [];
-  const report = Array.isArray(waveReport) ? waveReport : [];
-  if (!shape.length && !report.length) {
-    return <p className="empty">Wave structure appears once the plan is built.</p>;
-  }
-  const items = (shape.length ? shape : report.map(() => [])).map((w, i) => {
-    const info = report[i];
-    return (
-      <div className="health-row" key={i}>
-        <span className="k">Wave {i + 1}{shape.length ? ` · ${w.length} contract${w.length === 1 ? "" : "s"}` : ""}</span>
-        <span className="v">{info ? `${info.facts_extracted} fact${info.facts_extracted === 1 ? "" : "s"}` : "pending"}</span>
-      </div>
-    );
-  });
-  return <div>{items}</div>;
 }
 
 function CitationHealthRow({ health }) {
@@ -285,20 +287,18 @@ function EvidenceGrades({ distribution }) {
 }
 
 function RedTeamPanel({ redteam }) {
-  /* Adversarial review (Feature 08): the critic's red team attacks the
-   * evidence every pass. The survival score is computed from the findings,
-   * never taken from the model. Show the score, then the highest-severity
-   * attacks so a run's weaknesses are visible instead of only in the trace. */
-  if (!redteam || typeof redteam !== "object") {
-    return <p className="empty">No adversarial review yet.</p>;
-  }
-  const score = typeof redteam.survival_score === "number"
+  /* Adversarial review: only rendered when the critic actually reported
+   * attacks. The survival score is computed from the findings, never taken
+   * from the model. */
+  const findings = Array.isArray(redteam?.findings) ? redteam.findings : [];
+  const score = typeof redteam?.survival_score === "number"
     ? Math.round(redteam.survival_score * 100) : null;
-  const findings = Array.isArray(redteam.findings) ? redteam.findings : [];
+  if (score === null && !findings.length) return null;
   const top = [...findings].sort((a, b) => (b.severity || 0) - (a.severity || 0)).slice(0, 4);
   const weak = score !== null && score < 60;
   return (
-    <div>
+    <section className="intel-section">
+      <h3>Red team</h3>
       <div className="health-row">
         <IconShield size={15} className={weak ? "tone-warn" : "tone-good"} />
         <span className="k">Evidence survival</span>
@@ -306,63 +306,59 @@ function RedTeamPanel({ redteam }) {
           {score !== null ? `${score}%` : "—"}
         </span>
       </div>
-      {top.length > 0 ? (
-        top.map((f, i) => (
-          <div key={`${f.kind}-${i}`} className="budget-sub" style={{ textAlign: "left", marginBottom: 6 }}>
-            <strong>{f.kind || "weakness"}</strong>
-            {typeof f.severity === "number" ? ` (${Math.round(f.severity * 100)}%)` : ""} — {f.statement}
-          </div>
-        ))
-      ) : (
-        <div className="budget-sub" style={{ textAlign: "left", marginBottom: 6 }}>
-          No weakness found in the evidence base.
+      {top.map((f, i) => (
+        <div key={`${f.kind}-${i}`} className="budget-sub note">
+          <strong>{f.kind || "weakness"}</strong>
+          {typeof f.severity === "number" ? ` (${Math.round(f.severity * 100)}%)` : ""} — {f.statement}
         </div>
-      )}
-    </div>
+      ))}
+    </section>
   );
 }
 
+/* ---------- agent state ----------
+ * Status is decided by which artifacts exist — the same monotonic ladder the
+ * live pipeline strip uses — and each agent gets ONE honest descriptor drawn
+ * from real counts. No estimated per-agent percentages. */
 function deriveAgents(run) {
   const planned = run.plan.length;
-  const hasSearch = run.snippets > 0;
-  const hasFacts = run.findings.length > 0;
-  const critiques = run.critiques.length;
-  const done = run.done;
+  const sources = run.snippets || 0;
+  const claims = run.findings.length;
+  const verified = run.verifiedCount || 0;
+  const passes = run.critiques.length;
+  const done = !!run.done;
+  const live = !done && !run.error;
 
-  const st = (isDone, isActive) => (isDone ? "done" : isActive ? "active" : "waiting");
-  const pct = (isDone, isActive, base) => (isDone ? 100 : isActive ? base : 8);
+  // How far along the pipeline the run has actually reached (0..7).
+  let reached = 0;
+  if (run.intent || run.route || planned) reached = 2;
+  if (sources) reached = 3;
+  if (claims) reached = 4;
+  if (verified) reached = 5;
+  if (passes) reached = 6;
+  if (done) reached = 7;
 
-  const active = !done && !run.error;
-  return [
-    {
-      icon: IconTarget, name: "Planner", desc: planned ? "Strategy created" : "Decomposing your question…",
-      status: st(planned > 0, active), meta: planned ? `${planned} sub-questions` : null, progress: pct(planned > 0, active, 55),
-    },
-    {
-      icon: IconSearch, name: "Search", desc: hasSearch ? "Gathering sources…" : "Waiting for plan",
-      status: st(hasFacts, active && planned > 0), meta: hasSearch ? `${run.snippets} sources` : null,
-      progress: pct(hasFacts, active && planned > 0, hasSearch ? 65 : 30),
-    },
-    {
-      icon: IconDoc, name: "Summarizer", desc: hasFacts ? "Extracting claims…" : "Waiting for evidence",
-      status: st(hasFacts && critiques > 0, active && hasSearch), meta: hasFacts ? `${run.findings.length} claims` : null,
-      progress: pct(hasFacts && critiques > 0, active && hasSearch, hasFacts ? 70 : 25),
-    },
-    {
-      icon: IconShieldCheck, name: "Verifier", desc: run.verifiedCount > 0 ? "Checking claims…" : "Waiting for claims",
-      status: st(critiques > 0, active && hasFacts), meta: run.verifiedCount > 0 ? `${run.verifiedCount} verified` : null,
-      progress: pct(critiques > 0, active && hasFacts, run.verifiedCount > 0 ? 60 : 20),
-    },
-    {
-      icon: IconShield, name: "Critic", desc: critiques > 0 ? "Stress-testing conclusions…" : "Waiting for verified claims",
-      status: st(done && critiques > 0, active && hasFacts), meta: critiques > 0 ? `${critiques} review pass${critiques === 1 ? "" : "es"}` : null,
-      progress: pct(done && critiques > 0, active && hasFacts, critiques > 0 ? 55 : 15),
-    },
-    {
-      icon: IconChart, name: "Synthesizer", desc: done ? "Report delivered" : "Waiting for approval",
-      status: st(done, active && critiques > 0), meta: null, progress: pct(done, active && critiques > 0, 40),
-    },
-  ];
+  const desc = {
+    orchestrator: run.modeLabel ? `${run.modeLabel} strategy` : "complexity scored",
+    planner: planned ? `${planned} sub-question${planned === 1 ? "" : "s"}` : "decomposing the question",
+    search: sources ? `${sources} source${sources === 1 ? "" : "s"}` : "retrieving and ranking sources",
+    summarizer: claims ? `${claims} claim${claims === 1 ? "" : "s"} extracted` : "extracting claims",
+    verifier: verified ? `${verified} verified` : "checking claims against sources",
+    critic: passes ? `${passes} review pass${passes === 1 ? "" : "es"}` : "judging sufficiency",
+    synthesizer: done ? "report delivered" : "writing the cited answer",
+  };
+
+  return PIPELINE.map((stage, i) => {
+    const index = i + 1;
+    const isDone = reached > index;
+    const isActive = reached === index && live;
+    return {
+      icon: stage.icon,
+      name: stage.name,
+      status: isDone ? "done" : isActive ? "active" : "waiting",
+      desc: desc[stage.key],
+    };
+  });
 }
 
 function deriveHealth(run) {
@@ -404,6 +400,9 @@ function deriveHealth(run) {
       tone: run.quality.passed ? "good" : "warn",
       value: `${run.quality.overall}/100`, hot: !run.quality.passed,
     });
+  }
+  if (run.error) {
+    rows.push({ icon: IconAlert, label: "Run status", value: "interrupted", tone: "bad", hot: true });
   }
   return rows;
 }

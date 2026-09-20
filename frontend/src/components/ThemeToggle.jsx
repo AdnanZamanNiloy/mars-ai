@@ -1,6 +1,10 @@
 /* Global theme toggle. Flips `data-theme` on <html> and persists to the
- * shared `mars-docs-theme` key, so the choice survives reloads and is
- * picked up by the docs iframe (which reads the same key on boot). */
+ * shared `mars-docs-theme` key, so the choice survives reloads and is picked
+ * up by the docs iframe (which reads the same key on boot).
+ *
+ * Mounted in BOTH the landing nav and the console sidebar footer — previously
+ * it appeared only on the landing page, so there was no way to switch theme
+ * once inside the console. */
 
 import { useState } from "react";
 import { applyTheme, getStoredTheme } from "../theme";

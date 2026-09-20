@@ -1,15 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  clearProviderChain,
-  createProviderChain,
-  deleteProviderChain,
-  listProviderChains,
-  renameProviderChain,
-  reorderProviderChain,
-  setProviderChainEnabled,
-  setProviderChainMembers,
+  clearProviderChain, createProviderChain, deleteProviderChain, listProviderChains,
+  renameProviderChain, reorderProviderChain, setProviderChainEnabled, setProviderChainMembers,
 } from "../api";
 import { chainRole, resolveChainMembers } from "../lib";
+import ConfirmButton from "./ConfirmButton";
 
 /* Provider fallback chains: ordered primary → fallback lists built from the
  * saved providers above. At most one chain is enabled; the runtime tries
@@ -19,18 +14,17 @@ import { chainRole, resolveChainMembers } from "../lib";
 
 export default function ChainsSection({ providers, onError }) {
   const [chains, setChains] = useState([]);
-  const [enabledId, setEnabledId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState("");
+  const [addingTo, setAddingTo] = useState(null);
 
   const refresh = useCallback(async () => {
     try {
       const data = await listProviderChains();
       setChains(Array.isArray(data?.chains) ? data.chains : []);
-      setEnabledId(data?.enabled_id ?? null);
     } catch (e) {
       if (onError) onError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -38,9 +32,7 @@ export default function ChainsSection({ providers, onError }) {
     }
   }, [onError]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  useEffect(() => { refresh(); }, [refresh]);
 
   const fail = (e) => {
     if (onError) onError(e instanceof Error ? e.message : String(e));
@@ -73,10 +65,7 @@ export default function ChainsSection({ providers, onError }) {
       else await setProviderChainEnabled(chain.id, true);
     });
 
-  const remove = (chain) => {
-    if (!window.confirm(`Delete fallback chain "${chain.name}"? Providers themselves are kept.`)) return;
-    run(() => deleteProviderChain(chain.id));
-  };
+  const remove = (chain) => run(() => deleteProviderChain(chain.id));
 
   const saveName = (chain) =>
     run(async () => {
@@ -107,8 +96,9 @@ export default function ChainsSection({ providers, onError }) {
       <div className="view-head chain-head">
         <h3>Fallback chains</h3>
         <p>
-          Try provider 1 first; on a provider/transient failure, continue to
-          provider 2, then 3. Only one chain runs at a time.
+          Provider 1 is tried first. On a provider or transient failure the runtime continues
+          to provider 2, then 3 — so one outage does not end a run. Only one chain is enabled
+          at a time.
         </p>
       </div>
 
@@ -116,7 +106,7 @@ export default function ChainsSection({ providers, onError }) {
         <input
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
-          placeholder="New chain name (e.g. production)"
+          placeholder="New chain name, e.g. production"
           maxLength={60}
           aria-label="New fallback chain name"
         />
@@ -128,12 +118,15 @@ export default function ChainsSection({ providers, onError }) {
       {loading ? <p className="empty">Loading chains…</p> : null}
       {!loading && chains.length === 0 ? (
         <p className="empty">
-          No fallback chains yet. Add one, then order saved providers as primary and fallbacks.
+          No fallback chains yet. Add one, then order your saved providers as primary and
+          fallbacks.
         </p>
       ) : null}
 
       {chains.map((chain) => {
-        const { members, available } = resolveChainMembers(providers, chain.members.map((m) => m.provider_id));
+        const { members, available } = resolveChainMembers(
+          providers, chain.members.map((m) => m.provider_id),
+        );
         return (
           <div key={chain.id} className={`chain-card${chain.is_enabled ? " enabled" : ""}`}>
             <div className="chain-card-head">
@@ -144,6 +137,7 @@ export default function ChainsSection({ providers, onError }) {
                     onChange={(e) => setEditName(e.target.value)}
                     maxLength={60}
                     aria-label={`Rename chain ${chain.name}`}
+                    autoFocus
                   />
                   <button className="btn-primary" onClick={() => saveName(chain)} disabled={busy || !editName.trim()}>
                     Save
@@ -154,11 +148,9 @@ export default function ChainsSection({ providers, onError }) {
                 <>
                   <span className="chain-title">
                     {chain.name}
-                    {chain.is_enabled ? (
-                      <span className="tag tone-blue">Enabled</span>
-                    ) : (
-                      <span className="tag">Disabled</span>
-                    )}
+                    <span className={`tag tone-${chain.is_enabled ? "good" : "muted"}`}>
+                      {chain.is_enabled ? "Serving traffic" : "Disabled"}
+                    </span>
                   </span>
                   <span className="chain-actions">
                     <button className="btn" onClick={() => toggle(chain)} disabled={busy}>
@@ -171,9 +163,13 @@ export default function ChainsSection({ providers, onError }) {
                     >
                       Rename
                     </button>
-                    <button className="btn btn-danger" onClick={() => remove(chain)} disabled={busy}>
-                      Delete
-                    </button>
+                    <ConfirmButton
+                      className="btn btn-danger"
+                      label="Delete"
+                      confirmLabel="Confirm delete"
+                      onConfirm={() => remove(chain)}
+                      disabled={busy}
+                    />
                   </span>
                 </>
               )}
@@ -188,32 +184,32 @@ export default function ChainsSection({ providers, onError }) {
                     <span className="chain-member-body">
                       <span className="chain-member-name">
                         {p.name}
-                        <span className={`tag tone-${role.tone}`}>{role.label}</span>
+                        <span className={`tag tone-${index === 0 ? "warn" : "muted"}`}>{role.label}</span>
                       </span>
                       <span className="chain-member-meta">{p.model} · {p.base_url}</span>
                     </span>
                     <span className="chain-member-actions">
                       <button
-                        className="btn" title="Move up"
+                        type="button" className="btn btn-sm" title="Move up"
                         onClick={() => move(chain, index, index - 1)}
                         disabled={busy || index === 0}
-                        aria-label={`Move ${p.name} up`}
+                        aria-label={`Move ${p.name} earlier in the chain`}
                       >
                         ↑
                       </button>
                       <button
-                        className="btn" title="Move down"
+                        type="button" className="btn btn-sm" title="Move down"
                         onClick={() => move(chain, index, index + 1)}
                         disabled={busy || index === members.length - 1}
-                        aria-label={`Move ${p.name} down`}
+                        aria-label={`Move ${p.name} later in the chain`}
                       >
                         ↓
                       </button>
                       <button
-                        className="btn btn-danger"
+                        type="button" className="btn btn-sm"
                         onClick={() => removeMember(chain, p.id)}
                         disabled={busy}
-                        aria-label={`Remove ${p.name} from chain`}
+                        aria-label={`Remove ${p.name} from this chain`}
                       >
                         Remove
                       </button>
@@ -226,25 +222,34 @@ export default function ChainsSection({ providers, onError }) {
               ) : null}
             </ol>
 
+            {/* Button-based picker with the role made explicit, replacing the
+                <select> that silently labelled the first member "Primary". */}
             <div className="chain-add-member">
-              <label>
-                Add provider
-                <select
-                  value=""
-                  onChange={(e) => { if (e.target.value) addMember(chain, Number(e.target.value)); }}
-                  disabled={busy || available.length === 0}
-                  aria-label={`Add provider to ${chain.name}`}
-                >
-                  <option value="">
-                    {available.length === 0 ? "All providers already in this chain" : "Select a provider…"}
-                  </option>
-                  {available.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {members.length === 0 ? "Primary — " : "Fallback — "}{p.name} ({p.model})
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="chain-picker">
+                <span className="eyebrow">
+                  Add {members.length === 0 ? "primary" : `fallback ${members.length + 1}`}
+                </span>
+                {available.length === 0 ? (
+                  <p className="empty" style={{ marginTop: 8 }}>
+                    Every saved provider is already in this chain.
+                  </p>
+                ) : (
+                  <div className="chain-picker-list">
+                    {available.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="chain-picker-btn"
+                        disabled={busy}
+                        onClick={() => addMember(chain, p.id)}
+                      >
+                        <span className="chain-picker-name">{p.name}</span>
+                        <span className="chain-picker-model">{p.model}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         );

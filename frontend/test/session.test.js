@@ -27,6 +27,7 @@ const {
   updateMission,
   removeMission,
   loadMissions,
+  formatTime,
 } = await import("../src/lib.js");
 
 test("active session id persists across reload", () => {
@@ -89,6 +90,29 @@ test("a brand-new session takes the first message as its title source", () => {
   upsertMission({ sessionId: "chat-9", runId: "run-1", query: "first ever message" });
   const m = loadMissions().find((x) => x.sessionId === "chat-9");
   assert.equal(m.query, "first ever message");
+});
+
+/* Regression: replayed user turns passed no timestamp, and `new Date(undefined)`
+ * yields an Invalid Date whose toLocaleTimeString is the literal string
+ * "Invalid Date" (it does NOT throw, so the old try/catch never caught it).
+ * The bubble rendered that text. formatTime must now return "" for anything
+ * that is not a real date. */
+test("formatTime renders a real date, never the literal 'Invalid Date'", () => {
+  const out = formatTime("2026-09-20T13:02:15.294424+00:00");
+  assert.ok(/\d{1,2}:\d{2}\s?(AM|PM)/i.test(out), `expected a clock time, got ${JSON.stringify(out)}`);
+  assert.ok(!/invalid/i.test(out));
+});
+
+test("formatTime returns empty string for missing/blank/invalid input", () => {
+  for (const bad of [undefined, null, "", "not-a-date", NaN]) {
+    const out = formatTime(bad);
+    assert.equal(out, "", `formatTime(${JSON.stringify(bad)}) must be "" — got ${JSON.stringify(out)}`);
+  }
+});
+
+test("formatTime accepts a Date instance unchanged", () => {
+  const out = formatTime(new Date("2026-09-20T13:02:00Z"));
+  assert.ok(/\d{1,2}:\d{2}\s?(AM|PM)/i.test(out));
 });
 
 test("updateMission and removeMission target the session, not the run", () => {

@@ -7,9 +7,15 @@
 
 export const THEME_KEY = "mars-docs-theme";
 
+/* Resolve once, in this order: an explicit stored choice, then the OS
+   preference, then dark. This must match the inline bootstrap in index.html
+   exactly, or first paint and React state can disagree. */
 export function getStoredTheme() {
   try {
-    return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark";
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored === "light" || stored === "dark") return stored;
+    if (window.matchMedia("(prefers-color-scheme: light)").matches) return "light";
+    return "dark";
   } catch (e) {
     return "dark";
   }

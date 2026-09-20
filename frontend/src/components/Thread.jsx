@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { formatTime } from "../lib";
-import { IconCheck, IconChevronDown, IconClock, IconCopy, IconInfo, IconPencil, IconRefresh } from "./icons";
+import { IconCheck, IconChevronDown, IconCopy, IconInfo, IconPencil, IconRefresh } from "./icons";
 
-/* Chat-style thread: right-aligned user bubbles, plain MARS responses
- * with a working action row (copy, read aloud, feedback, regenerate). */
+/* Chat thread: right-aligned user bubbles, MARS responses, working action row. */
 
 export function UserMessage({
   text, time, onEdit, editing, onCancelEdit, onSubmitEdit, disabled,
@@ -36,7 +35,9 @@ export function UserMessage({
     return (
       <div className="msg-user anim-rise" data-message-id={messageId}>
         <div className="bubble bubble-edit">
+          <label className="eyebrow" htmlFor={`edit-${messageId}`}>Editing question</label>
           <textarea
+            id={`edit-${messageId}`}
             className="msg-edit-input"
             autoFocus
             rows={1}
@@ -51,19 +52,19 @@ export function UserMessage({
               }
               if (e.key === "Escape") onCancelEdit?.();
             }}
-            aria-label="Edit message"
           />
           <div className="msg-edit-actions">
-            <span className="msg-edit-info" title="Editing this message" aria-hidden="true">
-              <IconInfo size={13} />
+            <span className="msg-edit-info" title="Resending replaces this turn and everything after it">
+              <IconInfo size={12} />
             </span>
+            <span style={{ flex: 1 }} />
             <button className="msg-edit-cancel" onClick={onCancelEdit} disabled={disabled}>Cancel</button>
             <button
               className="msg-edit-save"
               onClick={() => onSubmitEdit?.(draft)}
               disabled={disabled || (draft || "").trim().length < 5}
             >
-              Save
+              Resend
             </button>
           </div>
         </div>
@@ -81,8 +82,8 @@ export function UserMessage({
             className="icon-btn user-action-btn"
             onClick={() => onRegenerate()}
             disabled={disabled || !canRegenerate}
-            title="Regenerate"
-            aria-label="Regenerate"
+            title="Run this question again"
+            aria-label="Run this question again"
           >
             <IconRefresh size={13} />
           </button>
@@ -93,7 +94,7 @@ export function UserMessage({
             onClick={() => onEdit()}
             disabled={disabled}
             title="Edit and resend"
-            aria-label="Edit message"
+            aria-label="Edit this question"
           >
             <IconPencil size={13} />
           </button>
@@ -102,7 +103,7 @@ export function UserMessage({
           className="icon-btn user-action-btn"
           onClick={copy}
           title={copied ? "Copied" : "Copy"}
-          aria-label="Copy"
+          aria-label="Copy question"
         >
           {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
         </button>
@@ -130,12 +131,12 @@ export function MessageActions({ text, onRegenerate, canRegenerate }) {
   };
 
   return (
-    <div className="msg-actions" role="toolbar" aria-label="Message actions">
-      <button className="icon-btn" onClick={copy} title={copied ? "Copied" : "Copy"} aria-label="Copy">
+    <div className="msg-actions" role="toolbar" aria-label="Report actions">
+      <button className="icon-btn" onClick={copy} title={copied ? "Copied" : "Copy report"} aria-label="Copy report">
         {copied ? <IconCheck size={15} /> : <IconCopy size={15} />}
       </button>
       {canRegenerate ? (
-        <button className="icon-btn" onClick={onRegenerate} title="Regenerate" aria-label="Regenerate">
+        <button className="icon-btn" onClick={onRegenerate} title="Regenerate report" aria-label="Regenerate report">
           <IconRefresh size={15} />
         </button>
       ) : null}
@@ -158,7 +159,7 @@ export function MarsMessageShell({ text, onRegenerate, canRegenerate, children }
 
 export function TypingRow() {
   return (
-    <span className="typing-pill">
+    <span className="typing-pill" role="status">
       <i /><i /><i />
       Agents reviewing…
     </span>
@@ -166,17 +167,18 @@ export function TypingRow() {
 }
 
 export function ThinkingSteps({ steps }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   if (!steps || steps.length === 0) return null;
+  // Collapsed by default: the report is the product, the trace is support.
   return (
-    <div className="steps-card anim-rise">
+    <div className="steps-card">
       <button
         className="steps-head"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
       >
-        <IconChevronDown size={14} className={open ? "flip" : ""} />
-        {open ? "Less steps" : `${steps.length} steps`}
+        <IconChevronDown size={13} className={open ? "flip" : ""} />
+        {open ? "Hide pipeline trace" : `Pipeline trace · ${steps.length} step${steps.length === 1 ? "" : "s"}`}
       </button>
       {open ? (
         <div className="steps-list">
@@ -197,11 +199,11 @@ export function ErrorCard({ message, resumable, onResume, resuming }) {
   const noKey = /LLM key|GROQ_API_KEY|HUGGINGFACE/i.test(message || "");
   return (
     <div className="error-box anim-rise" role="alert">
-      <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-        <IconClock size={16} style={{ flex: "none", marginTop: 2 }} />
+      <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
+        <IconInfo size={15} style={{ flex: "none", marginTop: 2 }} />
         <div style={{ flex: 1 }}>
-          <div><strong>{noKey ? "Model access not configured" : "Research interrupted"}</strong></div>
-          <div style={{ marginTop: 5 }}>{message}</div>
+          <strong>{noKey ? "Model access not configured" : "Research interrupted"}</strong>
+          <div style={{ marginTop: 5, color: "var(--t2)" }}>{message}</div>
           {resumable && !noKey ? (
             <div style={{ marginTop: 11 }}>
               <button className="btn" onClick={onResume} disabled={resuming}>

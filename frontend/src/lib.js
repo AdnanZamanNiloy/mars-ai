@@ -47,12 +47,14 @@ export function trustOf(domain) {
 }
 
 export function formatTime(isoOrDate) {
-  try {
-    const d = isoOrDate instanceof Date ? isoOrDate : new Date(isoOrDate);
-    return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  } catch {
-    return "";
-  }
+  // Missing/blank/invalid input must render nothing — `new Date(undefined)`
+  // does not throw, it yields an Invalid Date whose `toLocaleTimeString`
+  // returns the literal string "Invalid Date", which used to leak into the
+  // UI whenever a caller omitted the timestamp (e.g. replayed user turns).
+  if (isoOrDate == null || isoOrDate === "") return "";
+  const d = isoOrDate instanceof Date ? isoOrDate : new Date(isoOrDate);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
 export function timeAgo(iso) {

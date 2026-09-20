@@ -1,20 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  clearActiveProvider,
-  createProvider,
-  deleteProvider,
-  listProviders,
-  setActiveProvider,
-  testProvider,
-  updateProvider,
+  clearActiveProvider, createProvider, deleteProvider, listProviders, setActiveProvider,
+  testProvider, updateProvider,
 } from "../api";
 import ChainsSection from "./ChainsSection";
+import ConfirmButton from "./ConfirmButton";
 
-/* Providers tab: user-managed OpenAI-compatible LLM endpoints. Exactly one
- * may be active — the active model is the ONLY one research uses when no
- * fallback chain is enabled. Below, optional fallback chains layer an
- * ordered primary→fallback list on top. Keys are encrypted server-side; the
- * UI only ever sees a last-4 hint. */
+/* Providers: user-managed OpenAI-compatible LLM endpoints. Exactly one may be
+ * active — the active model is the ONLY one research uses when no fallback
+ * chain is enabled. Below, optional fallback chains layer an ordered
+ * primary→fallback list on top. Keys are encrypted server-side; the UI only
+ * ever sees a last-4 hint. */
+
 const EMPTY = { name: "", base_url: "", api_key: "", model: "" };
 
 export default function ProvidersView() {
@@ -28,6 +25,7 @@ export default function ProvidersView() {
   const [formError, setFormError] = useState("");
   const [probes, setProbes] = useState({});
   const [timeouts, setTimeouts] = useState({});
+  const [showForm, setShowForm] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -42,9 +40,7 @@ export default function ProvidersView() {
     }
   }, []);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh ]);
+  useEffect(() => { refresh(); }, [refresh]);
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
@@ -52,12 +48,14 @@ export default function ProvidersView() {
     setEditingId(p.id);
     setForm({ name: p.name, base_url: p.base_url, api_key: "", model: p.model });
     setFormError("");
+    setShowForm(true);
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setForm(EMPTY);
     setFormError("");
+    setShowForm(false);
   };
 
   const submit = async (e) => {
@@ -82,7 +80,6 @@ export default function ProvidersView() {
   };
 
   const remove = async (p) => {
-    if (!window.confirm(`Delete provider "${p.name}"? Saved runs keep working; future research falls back to the default chain.`)) return;
     try {
       await deleteProvider(p.id);
       await refresh();
@@ -137,58 +134,73 @@ export default function ProvidersView() {
     <div className="view anim-rise">
       <div className="view-head">
         <h2>Providers</h2>
-        <p>{providers.length} saved · {active ? `active: ${active.name}` : "no active model — default chain in use"}</p>
+        <p>
+          {providers.length} saved ·{" "}
+          {active
+            ? <>serving traffic: <strong style={{ color: "var(--t2)" }}>{active.name}</strong></>
+            : "no active model — the default chain is used"}
+        </p>
       </div>
 
-      {loading ? <p className="empty">Loading providers…</p> : null}
-      {error ? <div className="error-box">{error}</div> : null}
+      {error ? <div className="error-box" role="alert">{error}</div> : null}
 
       {active ? (
         <div className="provider-active">
           <span className="dot live" />
           <span>
-            <b>{active.name}</b> · {active.model} — all research, agents and synthesis run on this model only.
+            <b>{active.name}</b> · {active.model} — every agent and the synthesizer run on this
+            model only.
           </span>
           <button className="btn" onClick={deactivate}>Use default chain</button>
         </div>
       ) : null}
 
-      <form className="provider-form" onSubmit={submit}>
-        <h3>{editingId ? "Edit provider" : "Add provider"}</h3>
-        <label>
-          Provider name
-          <input value={form.name} onChange={set("name")} placeholder="e.g. openai" maxLength={60} required />
-        </label>
-        <label>
-          Base URL
-          <input
-            value={form.base_url} onChange={set("base_url")}
-            placeholder="https://api.openai.com/v1" inputMode="url" required
-          />
-        </label>
-        <label>
-          API key
-          <input
-            value={form.api_key} onChange={set("api_key")} type="password"
-            autoComplete="new-password"
-            placeholder={editingId ? "Leave blank to keep the stored key" : "Stored encrypted, never displayed"}
-            required={!editingId}
-          />
-        </label>
-        <label>
-          Model ID
-          <input value={form.model} onChange={set("model")} placeholder="e.g. gpt-4o-mini" required />
-        </label>
-        {formError ? <div className="error-box">{formError}</div> : null}
-        <div className="provider-form-actions">
-          <button className="btn-primary" type="submit" disabled={saving}>
-            {saving ? "Saving…" : editingId ? "Save changes" : "Add provider"}
+      {/* The form is collapsed until needed, so the saved list (the thing you
+          actually scan) owns the first viewport. */}
+      {!showForm ? (
+        <div className="filter-bar">
+          <button className="btn-primary" onClick={() => setShowForm(true)}>
+            Add provider
           </button>
-          {editingId ? (
-            <button className="btn" type="button" onClick={cancelEdit}>Cancel</button>
-          ) : null}
         </div>
-      </form>
+      ) : (
+        <form className="provider-form" onSubmit={submit}>
+          <h3>{editingId ? "Edit provider" : "Add provider"}</h3>
+          <label>
+            Provider name
+            <input value={form.name} onChange={set("name")} placeholder="e.g. openai" maxLength={60} required />
+          </label>
+          <label>
+            Base URL
+            <input
+              value={form.base_url} onChange={set("base_url")}
+              placeholder="https://api.openai.com/v1" inputMode="url" required
+            />
+          </label>
+          <label>
+            API key
+            <input
+              value={form.api_key} onChange={set("api_key")} type="password"
+              autoComplete="new-password"
+              placeholder={editingId ? "Leave blank to keep the stored key" : "Stored encrypted, never displayed"}
+              required={!editingId}
+            />
+          </label>
+          <label>
+            Model ID
+            <input value={form.model} onChange={set("model")} placeholder="e.g. gpt-4o-mini" required />
+          </label>
+          {formError ? <div className="error-box" role="alert">{formError}</div> : null}
+          <div className="provider-form-actions">
+            <button className="btn-primary" type="submit" disabled={saving}>
+              {saving ? "Saving…" : editingId ? "Save changes" : "Add provider"}
+            </button>
+            <button className="btn" type="button" onClick={cancelEdit}>Cancel</button>
+          </div>
+        </form>
+      )}
+
+      {loading ? <p className="empty">Loading providers…</p> : null}
 
       {providers.map((p) => {
         const probeState = probes[p.id];
@@ -199,16 +211,16 @@ export default function ProvidersView() {
             <span className="body">
               <p className="q">
                 {p.name}
-                {isActive ? <span className="tag tone-blue">Active model</span> : null}
+                {isActive ? <span className="tag tone-good">Serving traffic</span> : null}
               </p>
               <p className="meta-line">{p.model} · {p.base_url}</p>
               <p className="meta-line sub">{p.has_key ? `key stored (${p.key_hint})` : "no key stored"}</p>
               {probeState ? (
-                <p className={`meta-line probe-${probeState.state}`}>{probeState.msg}</p>
+                <p className={`meta-line probe-${probeState.state}`} role="status">{probeState.msg}</p>
               ) : null}
               <span className="meta">
                 {!isActive ? (
-                  <button className="btn" onClick={() => activate(p.id)}>Use this model</button>
+                  <button className="btn" onClick={() => activate(p.id)}>Serve traffic</button>
                 ) : null}
                 <button className="btn" onClick={() => probe(p.id)}>
                   {probeState?.state === "testing" ? "Testing…" : "Test connection"}
@@ -223,14 +235,25 @@ export default function ProvidersView() {
                   <span>s</span>
                 </label>
                 <button className="btn" onClick={() => startEdit(p)}>Edit</button>
-                <button className="btn btn-danger" onClick={() => remove(p)}>Delete</button>
+                <ConfirmButton
+                  className="btn btn-danger"
+                  label="Delete"
+                  confirmLabel="Confirm delete"
+                  title={`Delete provider ${p.name}`}
+                  onConfirm={() => remove(p)}
+                />
+                {!isActive ? null : null}
               </span>
             </span>
           </div>
         );
       })}
+
       {!loading && providers.length === 0 ? (
-        <p className="empty">No providers yet — add your first OpenAI-compatible endpoint above.</p>
+        <p className="empty">
+          No providers yet — add an OpenAI-compatible endpoint and it becomes the model every
+          agent runs on.
+        </p>
       ) : null}
 
       <ChainsSection providers={providers} onError={setError} />

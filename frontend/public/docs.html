@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta name="theme-color" content="#0d0d0f" />
+<meta name="theme-color" content="#0e1013" />
 <meta name="description" content="MARS — Multi-Agent Research System. Architecture, research workflow, agents, evidence verification, confidence and citations." />
 <title>MARS — Documentation</title>
 <link rel="icon" type="image/svg+xml" href="/mars.svg" />
@@ -24,88 +24,110 @@
    ============================================================ */
 :root,
 :root[data-theme="dark"] {
-  --bg: #0d0d0f;
-  --bg-grad-a: rgba(232, 121, 79, 0.10);
-  --bg-grad-b: rgba(232, 121, 79, 0.05);
-  --surface: #151517;
-  --surface-2: #1b1b1e;
-  --surface-3: #212124;
-  --elevated: #202023;
-  --line: #2a2a2e;
-  --line-strong: #37373d;
-  --line-soft: #232327;
-  --track: #2a2a2e;
+  --bg: #0e1013;
+  --bg-soft: #14171b;
+  --background: #0e1013;
+  --surface: #191d22;
+  --surface-2: #21262d;
+  --surface-3: #1e2228;
+  --elevated: #1e2228;
+  --line: #2b3138;
+  --line-strong: #3a424c;
+  --line-soft: #232930;
+  --track: #262c33;
 
-  --t1: #ececee;
-  --t2: #a3a3ab;
-  --t3: #7d7d86;
-  --t4: #5f5f68;
+  --t1: #eef1f5;
+  --t2: #a9b2bd;
+  --t3: #838d99;
+  --t4: #737d89;
 
-  --mars: #E8794F;
-  --mars-soft: #e88f6b;
+  --mars: #f0824d;
+  --mars-soft: #f09c72;
   --mars-deep: #b85c38;
-  --mars-glow: rgba(232, 121, 79, 0.20);
-  --mars-wash: rgba(232, 121, 79, 0.08);
-  --mint: #a7d9c0;
-  --amber: #e6c07b;
-  --red: #cd6f63;
-  --blue: #8fb7e8;
+  --mars-glow: rgba(240, 130, 77, 0.28);
+  --mars-wash: rgba(240, 130, 77, 0.09);
+  --mint: #5fd0a0;
+  --amber: #e0b34e;
+  --red: #e87a6c;
+  --blue: #7aa7e8;
 
-  --code-bg: #101012;
-  --code-line: #26262b;
-  --sel: rgba(232, 121, 79, 0.26);
-  --shadow-card: 0 18px 44px rgba(0, 0, 0, 0.42);
-  --shadow-pop: 0 24px 64px rgba(0, 0, 0, 0.5);
-  --scrim: rgba(6, 6, 8, 0.7);
+  --green-wash: rgba(95, 208, 160, 0.12);
+  --amber-wash: rgba(224, 179, 78, 0.12);
+  --red-wash: rgba(232, 122, 108, 0.11);
+  --blue-wash: rgba(122, 167, 232, 0.12);
+
+  --card: #191d22;
+  --card-2: #21262d;
+
+  --code-bg: #14171b;
+  --code-line: #232930;
+  --sel: rgba(240, 130, 77, 0.26);
+  --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.38);
+  --shadow-pop: 0 18px 46px rgba(0, 0, 0, 0.55);
+  --scrim: rgba(6, 8, 10, 0.62);
 
   --r-sm: 8px;
-  --r-md: 12px;
-  --r-lg: 16px;
-  --r-xl: 22px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 18px;
 
   --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
 
-  --nav-w: 288px;
-  --topbar-h: 60px;
-  --content-max: 860px;
+  --nav-w: 272px;
+  --topbar-h: 56px;
+  --content-max: 820px;
+
+  --bg-grad-a: rgba(240, 130, 77, 0.10);
+  --bg-grad-b: rgba(240, 130, 77, 0.05);
   color-scheme: dark;
 }
 
 :root[data-theme="light"] {
-  --bg: #f7f6f4;
-  --bg-grad-a: rgba(232, 121, 79, 0.10);
-  --bg-grad-b: rgba(232, 121, 79, 0.05);
+  --bg: #f4f2ef;
+  --bg-soft: #ffffff;
+  --background: #f4f2ef;
   --surface: #ffffff;
-  --surface-2: #fbfaf9;
-  --surface-3: #f2f0ee;
+  --surface-2: #f7f5f2;
+  --surface-3: #ffffff;
   --elevated: #ffffff;
-  --line: #e4e1dd;
-  --line-strong: #d3cfc9;
-  --line-soft: #ece9e5;
-  --track: #e7e4e0;
+  --line: #ddd8d1;
+  --line-strong: #c6bfb6;
+  --line-soft: #e7e2db;
+  --track: #e6e1d9;
 
-  --t1: #1b1a19;
-  --t2: #55524e;
-  --t3: #767069;
-  --t4: #9a948c;
+  --t1: #16181c;
+  --t2: #4d535c;
+  --t3: #676d76;
+  --t4: #7b8189;
 
-  --mars: #c85a2e;
-  --mars-soft: #b8501f;
-  --mars-deep: #9c3f14;
-  --mars-glow: rgba(200, 90, 46, 0.18);
-  --mars-wash: rgba(200, 90, 46, 0.07);
-  --mint: #2f7d5c;
-  --amber: #9a6b12;
-  --red: #b0443a;
-  --blue: #35619e;
+  --mars: #c2521f;
+  --mars-soft: #a8451a;
+  --mars-deep: #8f3a13;
+  --mars-glow: rgba(194, 82, 31, 0.22);
+  --mars-wash: rgba(194, 82, 31, 0.08);
+  --mint: #1f7a53;
+  --amber: #8a5e08;
+  --red: #b03a2c;
+  --blue: #2c5b9e;
 
-  --code-bg: #f2f0ee;
-  --code-line: #e2ded9;
-  --sel: rgba(200, 90, 46, 0.2);
-  --shadow-card: 0 16px 40px rgba(30, 24, 18, 0.08);
-  --shadow-pop: 0 24px 60px rgba(30, 24, 18, 0.14);
-  --scrim: rgba(30, 24, 18, 0.36);
+  --green-wash: rgba(31, 122, 83, 0.1);
+  --amber-wash: rgba(138, 94, 8, 0.1);
+  --red-wash: rgba(176, 58, 44, 0.09);
+  --blue-wash: rgba(44, 91, 158, 0.1);
+
+  --card: #ffffff;
+  --card-2: #f7f5f2;
+
+  --code-bg: #f4f2ef;
+  --code-line: #e2ddd6;
+  --sel: rgba(194, 82, 31, 0.18);
+  --shadow-card: 0 8px 24px rgba(40, 30, 20, 0.07);
+  --shadow-pop: 0 18px 46px rgba(40, 30, 20, 0.16);
+  --scrim: rgba(30, 24, 18, 0.38);
+
+  --bg-grad-a: rgba(194, 82, 31, 0.10);
+  --bg-grad-b: rgba(194, 82, 31, 0.05);
   color-scheme: light;
 }
 
@@ -120,7 +142,7 @@ body {
   background: var(--bg);
   color: var(--t1);
   font-family: var(--font);
-  font-size: 15.5px;
+  font-size: 15px;
   line-height: 1.65;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -216,7 +238,9 @@ a:hover { text-decoration: underline; text-underline-offset: 2px; }
 .sidenav {
   position: fixed; top: var(--topbar-h); bottom: 0; left: 0; width: var(--nav-w);
   overflow-y: auto; padding: 22px 14px 40px; border-right: 1px solid var(--line-soft);
-  background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%);
+  /* Flat, single surface: a top-to-bottom surface→bg gradient made the top
+     of the rail read as a different theme from the rest of the page. */
+  background: var(--bg);
   z-index: 50;
 }
 .content {

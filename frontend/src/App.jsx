@@ -4,6 +4,7 @@ import { MODE_META, loadActiveSessionId, loadKnowledge, loadMissions, newSession
 import Sidebar from "./components/Sidebar";
 import Composer from "./components/Composer";
 import { ErrorCard, MarsMessageShell, ThinkingSteps, TypingRow, UserMessage } from "./components/Thread";
+import RunProgress from "./components/RunProgress";
 import AnswerCard, { ReplayAnswerCard } from "./components/AnswerCard";
 import ClaimDrawer from "./components/ClaimDrawer";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -15,7 +16,7 @@ import AgentsView from "./components/AgentsView";
 import ProvidersView from "./components/ProvidersView";
 import Landing from "./components/Landing";
 import DocsView from "./components/DocsView";
-import { IconChevronDown, IconChevronLeft, IconDoc, IconFolder, IconLayers, IconMenu, IconPencil, IconPin, IconTrash } from "./components/icons";
+import { IconChevronDown, IconChevronLeft, IconDoc, IconFolder, IconLayers, IconMenu, IconPencil, IconPin, IconSpark, IconTrash } from "./components/icons";
 
 let seq = 1;
 const nid = () => `m${Date.now()}-${seq++}`;
@@ -285,6 +286,7 @@ export default function App() {
 
   const controllerRef = useRef(null);
   const threadRef = useRef(null);
+  const workspaceRef = useRef(null); // skip-link / focus target
   const runRef = useRef(null); // tempId of the in-flight run
   const parentRef = useRef(null); // parent runId for challenge runs
   const sessionIdRef = useRef(sessionId); // stable chat id for async handlers
@@ -863,6 +865,26 @@ export default function App() {
         : titleMessage.query))
     : (VIEW_TITLES[view] || "Command Center");
 
+  /* Screen-reader status line. The console streams for minutes; without this
+   * a non-visual user has no signal that a run started, is progressing, or
+   * finished. Deliberately coarse — it announces STATE, not every token. */
+  const liveStatus = (() => {
+    const r = activeRun;
+    if (running && r) {
+      const bits = [];
+      if (r.findings?.length) bits.push(`${r.verifiedCount || 0} of ${r.findings.length} claims verified`);
+      if (r.snippets) bits.push(`${r.snippets} sources`);
+      return `Research in progress${bits.length ? `: ${bits.join(", ")}` : ""}.`;
+    }
+    if (r?.error) return `Research interrupted: ${r.error}`;
+    if (r?.done) {
+      const n = r.findings?.length || 0;
+      return n ? `Research complete. ${n} claim${n === 1 ? "" : "s"} assessed.` : "Research complete.";
+    }
+    if (lastMessage?.kind === "replay") return `Opened saved research: ${lastMessage.query || pageTitle}.`;
+    return "";
+  })();
+
   /* Browser tab title follows the session: "query — MARS" while research
    * is on screen, plain "MARS" everywhere else. Favicon stays put. */
   useEffect(() => {
@@ -883,7 +905,6 @@ export default function App() {
     saveMissions(updateMission(targetSessionId, { pinned: !(missions.find((m) => m.sessionId === targetSessionId)?.pinned) }));
   }, [missions, saveMissions]);
   const deleteMission = useCallback((targetSessionId) => {
-    if (!window.confirm("Delete this research chat? This cannot be undone.")) return;
     saveMissions(removeMission(targetSessionId));
     if (sessionIdRef.current === targetSessionId) startNew();
   }, [saveMissions, startNew]);
@@ -895,6 +916,25 @@ export default function App() {
       <DocsView />
     ) : (
     <div className="shell">
+      {/* Keyboard users can jump straight past the rail to the workspace.
+          The target is the scrollable thread, marked tabindex=-1 so it can
+          receive programmatic focus without entering the tab order. */}
+      <a
+        className="skip-link"
+        href="#workspace-main"
+        onClick={(e) => {
+          e.preventDefault();
+          workspaceRef.current?.focus();
+        }}
+      >
+        Skip to research workspace
+      </a>
+      {/* One polite live region announces run state changes (started,
+          verified count, done, error) without stealing focus. Streaming
+          research was previously silent to screen readers. */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {liveStatus}
+      </div>
       <ErrorBoundary>
       <Sidebar
         view={view}
@@ -914,7 +954,7 @@ export default function App() {
 
       <div className="workspace-wrap">
         <ErrorBoundary>
-        <main className="workspace">
+        <main className="workspace" id="workspace-main" ref={workspaceRef} tabIndex={-1}>
           <PageTitle
             title={pageTitle}
             mission={view === "workspace" ? activeMission : null}
@@ -954,6 +994,7 @@ export default function App() {
                 <ProvidersView />
               ) : messages.length === 0 ? (
                 <WelcomeHero
+                  onSubmit={submitQuery}
                   composer={
                     <Composer
                       value={composer}
@@ -974,6 +1015,7 @@ export default function App() {
                   running={running}
                   onResume={resumeRun}
                   onRegenerate={submitQuery}
+                  onAbort={abortRun}
                   steps={traceLog}
                   editingMessageId={editingMessageId}
                   onEditMessage={handleEditMessage}
@@ -1031,7 +1073,7 @@ export default function App() {
   );
 }
 
-function ThreadMessage({ message, running, onResume, onRegenerate, steps, editingMessageId, onEditMessage }) {
+function ThreadMessage({ message, running, onResume, onRegenerate, onAbort, steps, editingMessageId, onEditMessage }) {
   // A restored replay carries its OWN pipeline steps (from its trace), so a
   // multi-question chat shows each run's real steps instead of the global
   // log's most-recent run duplicated across every card.
@@ -1078,7 +1120,7 @@ function ThreadMessage({ message, running, onResume, onRegenerate, steps, editin
           <div className="error-box">The run finished without producing a report.</div>
         ) : null}
         {running && !run.done && !run.error ? (
-          <div style={{ marginTop: 14 }}><TypingRow /></div>
+          <RunProgress run={run} onAbort={onAbort} />
         ) : null}
       </MarsMessageShell>
     );
@@ -1088,7 +1130,13 @@ function ThreadMessage({ message, running, onResume, onRegenerate, steps, editin
     const report = trace.final_report?.report_markdown || "";
     return (
       <>
-      <UserMessage text={message.query} />
+      <UserMessage
+        text={message.query}
+        time={message.at}
+        messageId={message.id}
+        canRegenerate={!running && message.query.length > 0}
+        onRegenerate={onRegenerate ? () => onRegenerate(message.query) : undefined}
+      />
       <MarsMessageShell
         id={message.id}
         text={report}
@@ -1166,20 +1214,36 @@ function PageTitle({ title, mission, view, onNavigate, showLibrary, onRename, on
     );
   }
 
+  if (!mission) {
+    // No persisted session behind this chat yet (first message not run), so
+    // there is nothing to act on — render the title as plain text.
+    return (
+      <div className="page-title-bar">
+        <span className="page-title-text" title={title}>{title}</span>
+        {showLibrary ? <LibraryMenu view={view} onNavigate={onNavigate} /> : null}
+      </div>
+    );
+  }
+
   return (
     <div className="page-title-bar">
-      <span className="page-title-text" title={title}>{title}</span>
-      {mission ? (
-        <div className="title-menu-wrap" ref={wrapRef}>
-          <button
-            className="icon-btn title-menu-btn"
-            onClick={() => setOpen((o) => !o)}
-            aria-label="Session actions"
-            aria-expanded={open}
-            aria-haspopup="menu"
-          >
-            <IconChevronDown size={15} />
-          </button>
+      <div className="title-menu-wrap" ref={wrapRef}>
+        {/* The title itself is the control: it sits beside the chevron and
+         * reads as clickable, so it must open the session menu rather than
+         * being a dead span. One button carries both the label and the caret
+         * so there is a single, obvious hit target (min 32px tall). */}
+        <button
+          type="button"
+          className="page-title-btn"
+          onClick={() => setOpen((o) => !o)}
+          aria-label="Session actions"
+          aria-expanded={open}
+          aria-haspopup="menu"
+          title={title}
+        >
+          <span className="page-title-text">{title}</span>
+          <IconChevronDown size={15} className={`nav-chev${open ? " open" : ""}`} />
+        </button>
           {open ? (
             <div className="title-menu" role="menu">
               <button
@@ -1196,22 +1260,60 @@ function PageTitle({ title, mission, view, onNavigate, showLibrary, onRename, on
               </button>
             </div>
           ) : null}
-        </div>
-      ) : null}
+      </div>
       {showLibrary ? <LibraryMenu view={view} onNavigate={onNavigate} /> : null}
     </div>
   );
 }
 
-function WelcomeHero({ composer }) {
+const EXAMPLES = [
+  { q: "Compare the commercial viability of solid-state and sodium-ion grid storage in 2025", mode: "deep" },
+  { q: "What regulatory changes affected EU AI model providers in the past 18 months?", mode: "audit" },
+  { q: "Should a mid-size logistics firm replace its diesel fleet with electric now, or wait?", mode: "executive" },
+  { q: "Stress-test the claim that remote work reduces per-employee productivity", mode: "redteam" },
+];
+
+/* The first screen is the working tool, not a brochure. One line of
+ * orientation sits above the composer, and the capability paragraph is
+ * replaced by example questions that launch a real run — the old paragraph
+ * described the product inside the product; this demonstrates it. */
+function WelcomeHero({ composer, onSubmit }) {
   return (
-    <div className="hero-card anim-rise">
-      <h2>What should MARS <span className="accent">investigate</span>?</h2>
-      <p>
-        A team of research agents plans the inquiry, gathers sources, verifies claims,
-        challenges conclusions and synthesizes a cited report live to this console.
+    <div className="welcome anim-rise">
+      <span className="welcome-kicker">
+        <span className="dot live" aria-hidden="true" />
+        7 coordinated agents
+      </span>
+      <h1>What should MARS investigate?</h1>
+      <p className="lede">
+        Ask a question and watch the pipeline work: plan, search, extract, verify, critique,
+        synthesize. Every claim in the final report stays tied to the source that produced it.
       </p>
-      {composer ? <div className="hero-composer">{composer}</div> : null}
+      {composer ? <div className="welcome-composer">{composer}</div> : null}
+
+      <div className="welcome-label">Or start from an example</div>
+      <div className="example-grid">
+        {EXAMPLES.map((ex) => (
+          <button
+            key={ex.q}
+            type="button"
+            className="example-btn"
+            onClick={() => onSubmit?.(ex.q)}
+          >
+            <IconSpark size={14} />
+            <span>
+              {ex.q}
+              <span className="ex-mode">{MODE_META[ex.mode]?.label || ex.mode} mode</span>
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <div className="welcome-facts">
+        <span>6 research modes</span>
+        <span>Bring your own OpenAI-compatible key</span>
+        <span>Cited, verifiable reports</span>
+      </div>
     </div>
   );
 }

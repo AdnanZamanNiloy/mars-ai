@@ -25,6 +25,7 @@ export const IconLayers = (p) => base({ ...p, children: <><polygon points="12 2 
 export const IconAgents = (p) => base({ ...p, children: <><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></> });
 export const IconFlask = (p) => base({ ...p, children: <><path d="M9 3h6M10 3v6L4.5 19a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L14 9V3" /><path d="M7 15h10" /></> });
 export const IconSearch = (p) => base({ ...p, children: <><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></> });
+export const IconSpark = (p) => base({ ...p, children: <><path d="M12 3v4M12 17v4M3 12h4M17 12h4" /><circle cx="12" cy="12" r="3.2" /></> });
 export const IconChart = (p) => base({ ...p, children: <><path d="M3 3v18h18" /><path d="M7 15v3M12 10v8M17 6v12" /></> });
 export const IconShield = (p) => base({ ...p, children: <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></> });
 export const IconShieldCheck = (p) => base({ ...p, children: <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="m9 12 2 2 4-4" /></> });
@@ -37,6 +38,7 @@ export const IconRoute = (p) => base({ ...p, children: <><circle cx="6" cy="19" 
 export const IconChevronDown = (p) => base({ ...p, children: <path d="m6 9 6 6 6-6" /> });
 export const IconChevronUp = (p) => base({ ...p, children: <path d="m18 15-6-6-6 6" /> });
 export const IconChevronLeft = (p) => base({ ...p, children: <path d="m15 18-6-6 6-6" /> });
+export const IconChevronRight = (p) => base({ ...p, children: <path d="m9 18 6-6-6-6" /> });
 export const IconRefresh = (p) => base({ ...p, children: <><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></> });
 export const IconMenu = (p) => base({ ...p, children: <><path d="M4 6h16M4 12h16M4 18h16" /></> });
 export const IconMore = (p) => base({ ...p, children: <><circle cx="12" cy="5" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="12" cy="19" r="1.4" /></> });
@@ -54,3 +56,6 @@ export const IconCopy = (p) => base({ ...p, children: <><rect x="9" y="9" width=
 export const IconSpeaker = (p) => base({ ...p, children: <><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /></> });
 export const IconThumbUp = (p) => base({ ...p, children: <><path d="M7 10v12M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z" /></> });
 export const IconThumbDown = (p) => base({ ...p, children: <><path d="M17 14V2M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z" /></> });
+/* GitHub mark is a filled glyph, not a stroked outline — override the
+   stroke-based base so it renders correctly at small sizes. */
+export const IconGithub = (p) => base({ ...p, fill: "currentColor", stroke: "none", children: <path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.8 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.3 11.3 0 0 1 6 0C17.7 4.2 18.7 4.5 18.7 4.5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.5-2.7 5.5-5.3 5.8.4.4.8 1.1.8 2.2v3.3c0 .4.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5Z" /> });
