@@ -45,17 +45,20 @@ test(".title-menu has a z-index so it paints above the header", () => {
   assert.match(body, /z-index\s*:\s*\d+/, ".title-menu must declare a z-index");
 });
 
-test(".title-menu anchors to the right (below the arrow, not the title start)", () => {
-  // Scoped to the session menu only; the shared surface rule defaults left:0.
+test(".title-menu stays inside the header for short titles (left-anchored)", () => {
+  // Left-anchored to the wrap (which begins at the header's left padding), so
+  // a short title's menu cannot extend left past the header into the sidebar.
   const body = ruleBody(".title-menu:not(.library-menu)");
-  assert.match(body, /left\s*:\s*auto/, "title menu must not left-anchor under the label");
-  assert.match(body, /right\s*:\s*0/, "title menu must right-align with the arrow/button");
+  assert.match(body, /left\s*:\s*0/, "title menu must left-anchor to stay in the header");
+  assert.match(body, /right\s*:\s*auto/, "title menu must not right-anchor past the header edge");
 });
 
-test(".title-menu-wrap is a positioned anchor and does not grow", () => {
+test(".title-menu-wrap is a positioned anchor that claims free space", () => {
   const body = ruleBody(".title-menu-wrap");
   assert.match(body, /position\s*:\s*relative/, "wrap must establish the containing block");
-  assert.match(body, /flex\s*:\s*0\s+1\s+auto|flex\s*:\s*none/, "wrap must not grow with the menu");
+  // flex-grow: the wrap must claim the bar's free space so a short title is
+  // not clipped; it keeps min-width:0 so the text can still ellipsize.
+  assert.match(body, /flex\s*:\s*1\s+1\s+auto/, "wrap must grow to give the title room");
 });
 
 test(".library-btn and .library-menu are styled and positioned", () => {

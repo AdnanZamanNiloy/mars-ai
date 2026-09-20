@@ -236,20 +236,24 @@
   right: 4px;
   min-width: 152px;
 }
-/* The session menu anchors to the RIGHT edge of the title/arrow button so it
-   opens directly below the arrow, not under the left of the title. The wrap
-   tightly contains the button, so right:0 lines the menu's right edge up with
-   the arrow. (Left-anchored would sit under the label's start.) */
-.title-menu:not(.library-menu) { left: auto; right: 0; }
+/* The session menu anchors its LEFT edge to the title/arrow control. The
+   wrap begins at the header's left padding, so a left anchor keeps the menu
+   inside the header for every title length. (Right-anchoring made a short
+   title's menu extend leftward past the header and overlap the sidebar.) */
+.title-menu:not(.library-menu) {
+  left: 0;
+  right: auto;
+}
 
 /* Anchor for the title/Library dropdowns. position: relative gives the
-   absolutely-positioned menu a containing block; the wrap itself stays a
-   non-growing flex item so the bar's height and border never change. */
+   absolutely-positioned menu a containing block. flex: 1 1 auto lets the
+   title claim the bar's free space so a short title is never clipped; the
+   text itself still ellipsizes only when it is genuinely too long. */
 .title-menu-wrap {
   position: relative;
   display: inline-flex;
   align-items: center;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
 }
 .library-menu-wrap { flex: none; }
