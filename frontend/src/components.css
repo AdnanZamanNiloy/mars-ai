@@ -343,6 +343,9 @@
 .bar > div.green { background: var(--bar-green); }
 .bar > div.blue { background: var(--bar-blue); }
 .bar > div.amber { background: var(--amber); }
+/* Confidence breakdown bars use the MARS orange accent; other .bar users
+   (e.g. the budget meter) keep the neutral --bar fill. */
+.confidence-breakdown .bar > div { background: var(--mars); }
 
 .health-row { display: flex; align-items: center; gap: 10px; padding: 5.5px 2px; }
 .health-row svg { flex: none; }
@@ -389,69 +392,20 @@
   font: 700 10.5px/1 var(--mono);
   font-variant-numeric: tabular-nums;
 }
-.spine-node.s-done .spine-idx { border-color: color-mix(in srgb, var(--mint) 45%, transparent); color: var(--mint); }
+.spine-node.s-done .spine-idx { border-color: color-mix(in srgb, var(--mars) 45%, transparent); color: var(--mars); }
 .spine-node.s-active .spine-idx { border-color: var(--mars); color: var(--mars); animation: pulse 1.6s ease-in-out infinite; }
 .spine-body { min-width: 0; flex: 1; }
 .spine-title { font-size: 12.5px; font-weight: 650; color: var(--t1); display: flex; align-items: baseline; gap: 8px; }
 .spine-title .spine-state { font-size: 10.5px; font-weight: 650; margin-left: auto; flex: none; }
 /* The stage icon carries the state hue so status is not dot-only. */
 .spine-ic { flex: none; color: var(--t4); transition: color 0.2s; }
-.spine-node.s-done .spine-ic { color: var(--mint); }
+.spine-node.s-done .spine-ic { color: var(--mars); }
 .spine-node.s-active .spine-ic { color: var(--mars); }
-.spine-node.s-done .spine-state { color: var(--mint); }
+.spine-node.s-done .spine-state { color: var(--mars); }
 .spine-node.s-active .spine-state { color: var(--mars); }
 .spine-node.s-waiting .spine-state { color: var(--t4); }
 .spine-desc { font-size: 11.5px; color: var(--t3); margin-top: 2px; line-height: 1.5; }
 .spine-meta { font-size: 10.5px; color: var(--t4); margin-top: 3px; font-variant-numeric: tabular-nums; }
-
-/* ============================================================
-   RUN PROGRESS — the live instrument panel while a run streams.
-   Replaces the old three-dancing-dots row with the real pipeline
-   so a multi-minute run reads as "which stage, and what has it
-   produced", not an indeterminate spinner.
-   ============================================================ */
-.run-progress {
-  margin-top: 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  background: var(--card-2);
-  padding: 12px 14px;
-}
-.run-progress-head {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding-bottom: 11px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid var(--line-soft);
-}
-.run-progress-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
-  font-weight: 650;
-  color: var(--t1);
-}
-.run-progress-meta {
-  font-size: 11px;
-  color: var(--t3);
-  font-variant-numeric: tabular-nums;
-}
-.run-abort { margin-left: auto; color: var(--t2); }
-.run-abort:hover:not(:disabled) { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, var(--line)); }
-
-/* Compact variant: the run panel is support, not the product, so the spine
-   here is tighter than the sidebar/agents one it borrows the look from. */
-.run-spine-compact .spine-node { padding: 5px 0; }
-.run-spine-compact .spine-idx { width: 20px; height: 20px; font-size: 9.5px; }
-.run-spine-compact::before { left: 9.5px; top: 12px; bottom: 12px; }
-.run-spine-compact .spine-title { font-size: 12px; }
-.run-spine-compact .spine-state { color: var(--t4); }
-.run-spine-compact .spine-node.s-done .spine-state { color: var(--mint); }
-.run-spine-compact .spine-node.s-active .spine-state { color: var(--mars); }
-.run-spine-compact .spine-node.s-done .spine-idx svg { display: block; }
-.run-spine-compact .spine-desc { margin-top: 1px; }
 
 /* ============================================================
    COMPOSER

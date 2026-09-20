@@ -18,8 +18,8 @@ import {
 
 const STATE_LABEL = { done: "Complete", active: "Working", waiting: "Queued" };
 
-/* Canonical pipeline — same seven agents, same order, as AgentsView and the
- * live RunProgress strip, so "agent 3" means the same thing everywhere. */
+/* Canonical pipeline — same seven agents, same order, as AgentsView, so
+ * "agent 3" means the same thing everywhere. */
 const PIPELINE = [
   { key: "orchestrator", icon: IconTarget, name: "Orchestrator" },
   { key: "planner", icon: IconTarget, name: "Planner" },
@@ -166,7 +166,7 @@ function ConfidenceBreakdown({ breakdown }) {
   if (!signals || typeof signals !== "object") return null;
   const overall = typeof breakdown.overall === "number" ? Math.round(breakdown.overall * 100) : null;
   return (
-    <section className="intel-section">
+    <section className="intel-section confidence-breakdown">
       <h3>Confidence breakdown</h3>
       {overall !== null ? (
         <div className="health-row">
@@ -329,14 +329,17 @@ function deriveAgents(run) {
   const done = !!run.done;
   const live = !done && !run.error;
 
-  // How far along the pipeline the run has actually reached (0..7).
+  // How far along the pipeline the run has actually reached (0..8).
+  // A stage i (1-based) is done when reached > i, so a fully delivered run
+  // must reach 8 to mark the 7th stage (Synthesizer) done — reaching 7 left
+  // Synthesizer stuck on "Queued" after the report shipped.
   let reached = 0;
   if (run.intent || run.route || planned) reached = 2;
   if (sources) reached = 3;
   if (claims) reached = 4;
   if (verified) reached = 5;
   if (passes) reached = 6;
-  if (done) reached = 7;
+  if (done) reached = 8;
 
   const desc = {
     orchestrator: run.modeLabel ? `${run.modeLabel} strategy` : "complexity scored",

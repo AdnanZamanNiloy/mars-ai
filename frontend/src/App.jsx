@@ -4,7 +4,6 @@ import { MODE_META, loadActiveSessionId, loadKnowledge, loadMissions, newSession
 import Sidebar from "./components/Sidebar";
 import Composer from "./components/Composer";
 import { ErrorCard, MarsMessageShell, ThinkingSteps, TypingRow, UserMessage } from "./components/Thread";
-import RunProgress from "./components/RunProgress";
 import AnswerCard, { ReplayAnswerCard } from "./components/AnswerCard";
 import ClaimDrawer from "./components/ClaimDrawer";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -1118,9 +1117,6 @@ function ThreadMessage({ message, running, onResume, onRegenerate, onAbort, step
         ) : null}
         {run.done && !run.report && !run.error ? (
           <div className="error-box">The run finished without producing a report.</div>
-        ) : null}
-        {running && !run.done && !run.error ? (
-          <RunProgress run={run} onAbort={onAbort} />
         ) : null}
       </MarsMessageShell>
     );

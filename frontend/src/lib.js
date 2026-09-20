@@ -1,7 +1,7 @@
 /* Pure helpers: report parsing, formatting, session mission log.
  * No backend calls here (see api.js). No fake research data anywhere. */
 
-export function extractSection(markdown, heading, nextHeadings) {
+function extractSection(markdown, heading, nextHeadings) {
   if (!markdown) return "";
   const start = markdown.indexOf(heading);
   if (start === -1) return "";

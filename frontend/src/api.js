@@ -5,7 +5,7 @@
  * (budget rides on `critic` and `final_report`, not its own event.)
  */
 
-export async function streamNDJSON(url, { method = "POST", body, signal, onEvent, onHttpError }) {
+async function streamNDJSON(url, { method = "POST", body, signal, onEvent, onHttpError }) {
   const response = await fetch(url, {
     method,
     headers: { "Content-Type": "application/json" },
