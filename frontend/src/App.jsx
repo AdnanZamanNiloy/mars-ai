@@ -373,19 +373,6 @@ export default function App() {
     }
   }, []);
 
-  /* After sending, go to the TRUE bottom so the new user turn AND the live
-   * "Agents reviewing…" indicator are fully visible above the composer.
-   * Anchoring on the user bubble could leave the processing row clipped. */
-  const scrollToLatestTurn = useCallback((behavior = "smooth") => {
-    const el = threadRef.current;
-    if (!el) return;
-    try {
-      el.scrollTo({ top: el.scrollHeight, behavior });
-    } catch {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, []);
-
   useEffect(() => {
     const el = threadRef.current;
     if (!el) return;
@@ -646,18 +633,17 @@ export default function App() {
       // chat has none yet (first message, or after "New Chat").
       if (!sessionIdRef.current) setActiveSession(newSessionId());
       const at = new Date().toISOString();
-      const userId = nid();
       setMessages((prev) => [
         ...prev,
-        { id: userId, kind: "user", text: queryText, at },
+        { id: nid(), kind: "user", text: queryText, at },
         { id: nid(), kind: "run", run, at },
       ]);
       setTraceLog([]);
       setSelectedFinding(null);
-      // Sending re-engages following and brings the new turn + the start of
-      // its processing into view, clear of the composer.
+      // Sending re-engages following. Jump to the very bottom so the new user
+      // message AND the live "Agents reviewing…" row are fully visible.
       autoScrollRef.current = true;
-      requestAnimationFrame(() => scrollToLatestTurn("smooth"));
+      requestAnimationFrame(() => scrollThreadToBottom("smooth"));
       go("workspace");
     }
 
@@ -695,7 +681,7 @@ export default function App() {
       parentRef.current = null;
       setRunning(false);
     }
-  }, [running, mode, patchRun, pushTrace, handleEvent, saveMissions, setActiveSession, scrollToLatestTurn]);
+  }, [running, mode, patchRun, pushTrace, handleEvent, saveMissions, setActiveSession, scrollThreadToBottom]);
 
   const submitQuery = useCallback((text) => {
     const v = text.trim();
