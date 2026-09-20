@@ -1,14 +1,60 @@
 import { useState } from "react";
 import { formatTime } from "../lib";
-import { IconCheck, IconChevronDown, IconClock, IconCopy, IconRefresh } from "./icons";
+import { IconCheck, IconChevronDown, IconClock, IconCopy, IconPencil, IconRefresh } from "./icons";
 
 /* Chat-style thread: right-aligned user bubbles, plain MARS responses
  * with a working action row (copy, read aloud, feedback, regenerate). */
 
-export function UserMessage({ text, time }) {
+export function UserMessage({ text, time, onEdit, editing, onCancelEdit, onSubmitEdit, disabled }) {
+  const [draft, setDraft] = useState(text || "");
+
+  if (editing) {
+    return (
+      <div className="msg-user anim-rise">
+        <div className="bubble bubble-edit">
+          <textarea
+            className="msg-edit-input"
+            autoFocus
+            value={draft}
+            disabled={disabled}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                onSubmitEdit?.(draft);
+              }
+              if (e.key === "Escape") onCancelEdit?.();
+            }}
+            aria-label="Edit message"
+          />
+          <div className="msg-edit-actions">
+            <button className="btn" onClick={onCancelEdit} disabled={disabled}>Cancel</button>
+            <button
+              className="btn-primary"
+              onClick={() => onSubmitEdit?.(draft)}
+              disabled={disabled || (draft || "").trim().length < 5}
+            >
+              Resend
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="msg-user anim-rise">
       <div className="bubble" title={time}>{text}</div>
+      {onEdit ? (
+        <button
+          className="icon-btn msg-edit-btn"
+          onClick={() => onEdit()}
+          title="Edit and resend"
+          aria-label="Edit message"
+        >
+          <IconPencil size={13} />
+        </button>
+      ) : null}
     </div>
   );
 }

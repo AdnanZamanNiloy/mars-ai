@@ -597,14 +597,18 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                 )
                 return
             except asyncio.CancelledError:
-                # Client disconnected mid-stream: Starlette cancels this
-                # generator. A cancelled scope cannot await, so the run is
-                # marked via a DETACHED task — otherwise the row sits in
-                # 'running' forever and the trace lies about the run.
+                # Client disconnected or pressed Stop mid-stream: Starlette
+                # cancels this generator. A cancelled scope cannot await, so
+                # the run is marked via a DETACHED task — otherwise the row
+                # sits in 'running' forever and the trace lies about the run.
+                # 'cancelled' (not 'timeout') so the UI/DB tell a user stop
+                # apart from a real timeout; neither is resumable, and no
+                # report is saved on this path (only the normal completion
+                # below writes one), so a partial answer can never persist.
                 cost = round(usage.snapshot().get("spent_usd", 0.0) or 0.0, 6)
                 asyncio.get_running_loop().create_task(
                     complete_research_run(
-                        settings.database_url, request_id, "timeout",
+                        settings.database_url, request_id, "cancelled",
                         confidence=0.0, estimated_cost=cost,
                     )
                 )
@@ -860,7 +864,7 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
                 return
             except asyncio.CancelledError:
                 asyncio.get_running_loop().create_task(
-                    _persist_complete(settings.database_url, request_id, "timeout", 0.0, None)
+                    _persist_complete(settings.database_url, request_id, "cancelled", 0.0, None)
                 )
                 if resume_session_id:
                     asyncio.get_running_loop().create_task(

@@ -41,7 +41,7 @@
 .msg { display: flex; gap: 14px; margin-bottom: 26px; }
 .msg-body { flex: 1; min-width: 0; }
 
-.msg-user { display: flex; justify-content: flex-end; margin-bottom: 22px; }
+.msg-user { display: flex; justify-content: flex-end; align-items: flex-start; gap: 6px; margin-bottom: 22px; }
 .bubble {
   max-width: 75%;
   overflow-wrap: anywhere;
@@ -53,6 +53,28 @@
   line-height: 1.5;
   color: var(--t1);
 }
+
+/* Edit-and-resend: the pencil appears on the user bubble; the edit state
+ * swaps the bubble for a textarea plus Cancel/Resend actions. */
+.msg-edit-btn { opacity: 0; width: 28px; height: 28px; color: var(--t4); }
+.msg-user:hover .msg-edit-btn { opacity: 1; }
+.msg-edit-btn:hover { color: var(--t1); }
+.bubble-edit { display: flex; flex-direction: column; gap: 8px; width: 75%; max-width: 75%; }
+.msg-edit-input {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  background: var(--card);
+  color: var(--t1);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.msg-edit-input:focus { outline: none; border-color: var(--line-hover); }
+.msg-edit-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 .msg-mars { display: flex; gap: 12px; margin-bottom: 26px; }
 

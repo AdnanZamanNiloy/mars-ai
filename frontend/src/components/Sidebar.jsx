@@ -21,6 +21,7 @@ const DOT = {
   completed: "done",
   failed: "bad",
   aborted: "idle",
+  cancelled: "idle",
 };
 
 export default function Sidebar({ view, onNavigate, missions, activeSessionId, onOpenMission, onNew, open, onClose, onRename, onTogglePin, onDelete }) {

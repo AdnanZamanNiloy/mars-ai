@@ -78,6 +78,16 @@ export function confidenceLabel(value) {
 const MISSIONS_KEY = "mars.missions.v1";
 const MAX_MISSIONS = 30;
 
+/* Interrupt-and-edit: drop the edited user turn and everything after it, so
+ * the resend can append a fresh turn in its place. Returns the original list
+ * unchanged when the id isn't found (nothing to edit). Pure and testable. */
+export function truncateFromMessage(messages, messageId) {
+  if (!Array.isArray(messages)) return [];
+  const idx = messages.findIndex((m) => m && m.id === messageId);
+  if (idx === -1) return messages;
+  return messages.slice(0, idx);
+}
+
 /* The active chat's stable session id. One chat = one id, reused for every
  * follow-up question; only "New Chat" mints a fresh one. Kept in its own key
  * so an interrupted write to the session list can't lose the active chat. */

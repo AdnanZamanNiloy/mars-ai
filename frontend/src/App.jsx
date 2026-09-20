@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchSession, fetchTrace, listSessions, resumeResearch, startResearch } from "./api";
-import { MODE_META, loadActiveSessionId, loadKnowledge, loadMissions, newSessionId, parseReport, removeKnowledgeItem, removeMission, saveActiveSessionId, saveKnowledgeItem, updateMission, upsertMission } from "./lib";
+import { MODE_META, loadActiveSessionId, loadKnowledge, loadMissions, newSessionId, parseReport, removeKnowledgeItem, removeMission, saveActiveSessionId, saveKnowledgeItem, truncateFromMessage, updateMission, upsertMission } from "./lib";
 import Sidebar from "./components/Sidebar";
 import Composer from "./components/Composer";
 import { ErrorCard, MarsMessageShell, ThinkingSteps, TypingRow, UserMessage } from "./components/Thread";
@@ -281,12 +281,14 @@ export default function App() {
   const [intelCollapsed, setIntelCollapsed] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [replaying, setReplaying] = useState(false);
+  const [editingMessageId, setEditingMessageId] = useState(null);
 
   const controllerRef = useRef(null);
   const threadRef = useRef(null);
   const runRef = useRef(null); // tempId of the in-flight run
   const parentRef = useRef(null); // parent runId for challenge runs
   const sessionIdRef = useRef(sessionId); // stable chat id for async handlers
+  const abortedRef = useRef(new Set()); // tempIds of runs the user stopped
 
   const setActiveSession = useCallback((id) => {
     sessionIdRef.current = id || "";
@@ -387,6 +389,10 @@ export default function App() {
   }, []);
 
   const handleEvent = useCallback((tempId, evt) => {
+    // Ignore any late event from a run the user stopped or replaced. Without
+    // this, a buffered chunk could patch an orphaned run and even persist a
+    // partial report after the interrupt.
+    if (abortedRef.current.has(tempId)) return;
     switch (evt.type) {
       case "progress":
         if (evt.request_id) {
@@ -619,18 +625,20 @@ export default function App() {
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
+        // Register the stop so any late in-flight event is dropped.
+        abortedRef.current.add(tempId);
         setMessages((prev) => prev.map((m) => {
           if (m.kind !== "run" || m.run.tempId !== tempId) return m;
           const run = { ...m.run, aborted: true, resuming: false };
           if (run.runId) {
             saveMissions(upsertMission({
               sessionId: sessionIdRef.current, runId: run.runId, query: run.query, mode: run.mode,
-              status: "aborted", confidence: null, cost: null,
+              status: "cancelled", confidence: null, cost: null,
             }));
           }
           return { ...m, run };
         }));
-        pushTrace({ text: "Research aborted by user", kind: "warn" });
+        pushTrace({ text: "Research stopped by user", kind: "warn" });
       } else {
         handleEvent(tempId, { type: "error", message: err instanceof Error ? err.message : "Unknown stream error" });
       }
@@ -652,6 +660,40 @@ export default function App() {
   const abortRun = useCallback(() => {
     controllerRef.current?.abort();
   }, []);
+
+  /* Interrupt-and-edit: stop any active run, drop everything from the edited
+   * user turn onward, then resend the new text in the SAME session so the
+   * chat's history stays coherent. The truncated turns are removed from the
+   * thread; the backend already recorded the interrupted run as 'cancelled'
+   * with no report, so nothing partial is shown as an answer. */
+  const editAndResend = useCallback((messageId, newText) => {
+    const v = (newText || "").trim();
+    if (v.length < 5) return;
+    controllerRef.current?.abort();
+    setMessages((prev) => truncateFromMessage(prev, messageId));
+    setEditingMessageId(null);
+    setComposer("");
+    setTraceLog([]);
+    setSelectedFinding(null);
+    // launch() appends the fresh user + run pair and reuses the session id.
+    setTimeout(() => launch(v), 0);
+  }, [launch]);
+
+  /* Single entry point from the thread: open the editor for a user turn, or
+   * submit it. A null id closes the editor without resending. */
+  const handleEditMessage = useCallback((messageId, newText) => {
+    if (messageId == null) {
+      setEditingMessageId(null);
+      return;
+    }
+    if (newText === undefined) {
+      // Opening the editor: stop nothing yet — the user may cancel. If a run
+      // is active, the composer's Stop remains the way to halt it.
+      setEditingMessageId(messageId);
+      return;
+    }
+    editAndResend(messageId, newText);
+  }, [editAndResend]);
 
   const startNew = useCallback(() => {
     controllerRef.current?.abort();
@@ -863,6 +905,8 @@ export default function App() {
                   onResume={resumeRun}
                   onRegenerate={submitQuery}
                   steps={traceLog}
+                  editingMessageId={editingMessageId}
+                  onEditMessage={handleEditMessage}
                 />)
               )}
             </div>
@@ -917,13 +961,23 @@ export default function App() {
   );
 }
 
-function ThreadMessage({ message, running, onResume, onRegenerate, steps }) {
+function ThreadMessage({ message, running, onResume, onRegenerate, steps, editingMessageId, onEditMessage }) {
   // A restored replay carries its OWN pipeline steps (from its trace), so a
   // multi-question chat shows each run's real steps instead of the global
   // log's most-recent run duplicated across every card.
   const stepList = message.kind === "replay" ? (message.steps || []) : steps;
   if (message.kind === "user") {
-    return <UserMessage text={message.text} />;
+    const isEditing = editingMessageId === message.id;
+    return (
+      <UserMessage
+        text={message.text}
+        editing={isEditing}
+        disabled={running}
+        onEdit={onEditMessage ? () => onEditMessage(message.id) : undefined}
+        onCancelEdit={() => onEditMessage?.(null)}
+        onSubmitEdit={(txt) => onEditMessage?.(message.id, txt)}
+      />
+    );
   }
   if (message.kind === "run") {
     const { run } = message;

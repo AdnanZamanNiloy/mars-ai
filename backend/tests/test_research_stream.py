@@ -345,7 +345,7 @@ async def test_expansion_pass_findings_stream_and_persist_with_flags(tmp_path):
     assert by_claim["Claim three"] == 1, "pass-2 claim must persist with its real verified flag"
 
 
-async def test_client_disconnect_marks_run_timeout(tmp_path):
+async def test_client_disconnect_marks_run_cancelled(tmp_path):
     """When the stream is cancelled (client disconnect), the run must be
     marked 'timeout' via a detached task instead of sitting in 'running'
     forever — abandoned runs previously made the trace lie."""
@@ -383,6 +383,6 @@ async def test_client_disconnect_marks_run_timeout(tmp_path):
         async with aiosqlite.connect(db_path) as db:
             cur = await db.execute("SELECT status FROM research_runs")
             row = await cur.fetchone()
-        if row and row[0] == "timeout":
+        if row and row[0] == "cancelled":
             break
-    assert row and row[0] == "timeout", f"run stuck in status {row}"
+    assert row and row[0] == "cancelled", f"run stuck in status {row}"

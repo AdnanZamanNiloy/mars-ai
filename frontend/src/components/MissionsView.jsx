@@ -10,6 +10,7 @@ const DOT = {
   completed: "done",
   failed: "bad",
   aborted: "idle",
+  cancelled: "idle",
 };
 
 export function statusLabel(status) {
@@ -19,6 +20,7 @@ export function statusLabel(status) {
     case "completed": return "Completed";
     case "failed": return "Failed";
     case "aborted": return "Aborted";
+    case "cancelled": return "Stopped";
     default: return status || "Unknown";
   }
 }
