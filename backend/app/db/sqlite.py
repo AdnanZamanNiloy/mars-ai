@@ -294,6 +294,12 @@ async def init_db(database_path: str) -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_chain_member_unique "
             "ON provider_chain_members(chain_id, provider_id)"
         )
+        # One-time repair of a pre-exclusivity state: a single active model and
+        # an enabled chain could coexist. The runtime prefers the chain, so
+        # clear the stale active flag to make serving mode unambiguous.
+        cur = await db.execute("SELECT id FROM provider_chains WHERE is_enabled = 1 LIMIT 1")
+        if await cur.fetchone() is not None:
+            await db.execute("UPDATE llm_providers SET is_active = 0")
         await db.execute(
             "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);"
         )

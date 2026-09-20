@@ -70,6 +70,34 @@ export function timeAgo(iso) {
   return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
+/* Session last-active label: the compact, human phrasing shown beside each
+ * saved chat. Uses calendar days (not raw 24h buckets) so "yesterday" is
+ * accurate, then falls back to a short date ("Sep 20"). Pure and
+ * timezone-aware via the local Date, so it can be unit-tested. */
+export function lastActiveLabel(iso, now = Date.now()) {
+  if (iso === null || iso === undefined || iso === "") return "";
+  const then = new Date(iso);
+  const thenMs = then.getTime();
+  if (Number.isNaN(thenMs)) return "";
+  const secs = Math.max(0, Math.floor((now - thenMs) / 1000));
+  if (secs < 60) return "just now";
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.floor(mins / 60);
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+  const startOfThen = new Date(thenMs);
+  startOfThen.setHours(0, 0, 0, 0);
+  const dayDiff = Math.round((startOfToday.getTime() - startOfThen.getTime()) / 86_400_000);
+  if (dayDiff <= 0) {
+    // Same calendar day: express in hours.
+    return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  }
+  if (dayDiff === 1) return "yesterday";
+  if (dayDiff < 7) return `${dayDiff} days ago`;
+  return then.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 export function confidenceLabel(value) {
   if (typeof value !== "number" || Number.isNaN(value)) return "unknown";
   if (value >= 0.8) return "high";

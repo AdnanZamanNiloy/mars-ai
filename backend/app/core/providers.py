@@ -206,7 +206,10 @@ async def delete_provider(database_path: str, provider_id: int) -> bool:
 
 
 async def set_active_provider(database_path: str, provider_id: int) -> Dict[str, Any]:
-    """Exactly-one invariant: one transaction clears all flags, sets one."""
+    """Serving mode = Single Model. Exactly one active provider, and this is
+    mutually exclusive with an enabled fallback chain: setting a single model
+    disables any enabled chain in the SAME transaction. Enforced here (not
+    only in the route) so no code path can leave both modes active."""
     async with aiosqlite.connect(database_path) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute("SELECT * FROM llm_providers WHERE id = ?", (int(provider_id),))
@@ -218,6 +221,8 @@ async def set_active_provider(database_path: str, provider_id: int) -> Dict[str,
             "UPDATE llm_providers SET is_active = 1, updated_at = ? WHERE id = ?",
             (_utcnow(), int(provider_id)),
         )
+        # Mutual exclusion: a single active model turns off every chain.
+        await db.execute("UPDATE provider_chains SET is_enabled = 0")
         await db.commit()
         cur = await db.execute("SELECT * FROM llm_providers WHERE id = ?", (int(provider_id),))
         return _public(dict(await cur.fetchone()))
@@ -416,6 +421,8 @@ async def set_chain_enabled(database_path: str, chain_id: int, enabled: bool) ->
                 "UPDATE provider_chains SET is_enabled = 1, updated_at = ? WHERE id = ?",
                 (_utcnow(), int(chain_id)),
             )
+            # Mutual exclusion: an enabled chain turns off every single model.
+            await db.execute("UPDATE llm_providers SET is_active = 0")
         else:
             await db.execute(
                 "UPDATE provider_chains SET is_enabled = 0, updated_at = ? WHERE id = ?",

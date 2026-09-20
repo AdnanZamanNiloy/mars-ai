@@ -466,14 +466,18 @@ async def test_no_enabled_chain_uses_legacy_single_provider_path(db_path):
 
 
 async def test_provider_chains_enabled_flag_is_a_kill_switch(db_path):
-    """provider_chains_enabled=False ignores a stored+enabled chain and uses
-    the active provider instead (the chain data is left intact)."""
+    """provider_chains_enabled=False forces the single-provider path even when
+    a chain is stored. Serving modes are mutually exclusive, so selecting the
+    active model disables the chain; the kill switch then makes the (disabled)
+    chain irrelevant. The chain record itself is never destroyed."""
     from app.core import providers as provider_store
 
     a = await _provider(db_path, "a", "https://a.example.com/v1")
     b = await _provider(db_path, "b", "https://b.example.com/v1")
     await _chain(db_path, "main", [b, a], enabled=True)
     await provider_store.set_active_provider(db_path, a["id"])
+    # Mutually exclusive: choosing the single model turned the chain off.
+    assert await provider_store.get_enabled_chain(db_path) is None
     client = LLMClient(_settings(db_path, provider_chains_enabled=False))
     with respx.mock(assert_all_called=False) as mock:
         ra = mock.post(A_URL).mock(return_value=_ok({"via": "a"}))
@@ -481,8 +485,8 @@ async def test_provider_chains_enabled_flag_is_a_kill_switch(db_path):
         result = await client.generate_json("sp", "up")
     assert result == {"via": "a"}
     assert rb.call_count == 0, "disabled chain must not run"
-    # Data survives the flag being flipped back on.
-    assert await store.get_enabled_chain(db_path) is not None
+    # The chain record survives (data is intact, just not enabled).
+    assert await provider_store.get_chain(db_path, (await provider_store.list_chains(db_path))[0]["id"])
 
 
 # ---------------------------------------------------------------------------

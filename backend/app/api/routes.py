@@ -192,13 +192,19 @@ async def delete_llm_provider(provider_id: int, request: Request) -> Dict[str, A
 
 @router.post("/providers/{provider_id}/active")
 async def set_active_llm_provider(provider_id: int, request: Request) -> Dict[str, Any]:
-    """Exactly one active provider: setting one clears the rest."""
+    """Serving mode = Single Model. Exactly one active provider, and it
+    disables any enabled fallback chain: the two serving modes are mutually
+    exclusive, so selecting a single model automatically turns off chains."""
     from app.core import providers as provider_store
 
+    db_path = _providers_db(request)
     try:
-        row = await provider_store.set_active_provider(_providers_db(request), provider_id)
+        row = await provider_store.set_active_provider(db_path, provider_id)
     except LookupError:
         raise HTTPException(status_code=404, detail=f"Unknown provider id: {provider_id}")
+    enabled = await provider_store.get_enabled_chain(db_path)
+    if enabled is not None:
+        await provider_store.set_chain_enabled(db_path, enabled["id"], False)
     return {"active": row}
 
 
@@ -350,16 +356,18 @@ async def reorder_provider_chain(
 async def set_provider_chain_enabled(
     chain_id: int, request: Request, body: ChainEnabledIn | None = None
 ) -> Dict[str, Any]:
-    """Enable (exactly one chain at a time) or disable a chain."""
+    """Serving mode = Fallback Chain. Enabling a chain clears any active
+    single model: the two serving modes are mutually exclusive."""
     from app.core import providers as provider_store
 
     enabled = True if body is None else bool(body.enabled)
+    db_path = _providers_db(request)
     try:
-        row = await provider_store.set_chain_enabled(
-            _providers_db(request), chain_id, enabled
-        )
+        row = await provider_store.set_chain_enabled(db_path, chain_id, enabled)
     except LookupError:
         raise HTTPException(status_code=404, detail=f"Unknown chain id: {chain_id}")
+    if enabled:
+        await provider_store.clear_active_provider(db_path)
     return {"chain": row}
 
 

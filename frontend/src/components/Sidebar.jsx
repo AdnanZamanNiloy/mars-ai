@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { lastActiveLabel } from "../lib";
 import {
   IconAgents, IconCompass, IconMissions, IconMore, IconPencil, IconPin,
   IconPlus, IconTrash,
@@ -106,8 +107,8 @@ export default function Sidebar({
             )}
             <span className="sub">
               <span>{m.mode || "standard"}</span>
-              {typeof m.confidence === "number" ? (
-                <span>{Math.round(m.confidence * 100)}%</span>
+              {m.updatedAt || m.lastActive ? (
+                <span>{lastActiveLabel(m.updatedAt || m.lastActive)}</span>
               ) : null}
             </span>
           </span>

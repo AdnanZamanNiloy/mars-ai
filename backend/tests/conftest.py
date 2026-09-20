@@ -53,16 +53,24 @@ def _disable_live_citation_check(monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolate_provider_store(monkeypatch):
     """Unit tests must never read the developer's real research.db: an
-    active provider selected in the Providers tab would hijack every
-    LLMClient chain in tests that don't override database_url. The store
-    returns None for the default path; tmp-DB tests keep the real lookup."""
+    active provider OR an enabled fallback chain selected in the Providers
+    tab would hijack every LLMClient call in tests that don't override
+    database_url. Both lookups return empty for the default path; tmp-DB
+    tests keep the real behavior."""
     from app.core import providers as store
 
-    real = store.get_active_provider
+    real_active = store.get_active_provider
+    real_chain = store.get_chain_providers
 
-    async def _patched(database_path):
+    async def _patched_active(database_path):
         if str(database_path) in ("", "./research.db"):
             return None
-        return await real(database_path)
+        return await real_active(database_path)
 
-    monkeypatch.setattr(store, "get_active_provider", _patched)
+    async def _patched_chain(database_path):
+        if str(database_path) in ("", "./research.db"):
+            return []
+        return await real_chain(database_path)
+
+    monkeypatch.setattr(store, "get_active_provider", _patched_active)
+    monkeypatch.setattr(store, "get_chain_providers", _patched_chain)
