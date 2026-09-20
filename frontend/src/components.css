@@ -91,7 +91,33 @@
   line-height: 1.5;
 }
 .msg-edit-input:focus { outline: none; border-color: var(--line-hover); }
-.msg-edit-actions { display: flex; justify-content: flex-end; gap: 8px; }
+/* Compact single-row edit actions: [info] Cancel Save. */
+.msg-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+.msg-edit-info { display: inline-flex; align-items: center; color: var(--t4); }
+.msg-edit-cancel,
+.msg-edit-save {
+  font-size: 11.5px;
+  line-height: 1;
+  padding: 4px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--t3);
+  cursor: pointer;
+}
+.msg-edit-cancel:hover:not(:disabled) { color: var(--t1); border-color: var(--line-hover); }
+.msg-edit-save {
+  background: var(--card-2);
+  color: var(--t2);
+}
+.msg-edit-save:hover:not(:disabled) { color: var(--t1); border-color: var(--line-hover); }
+.msg-edit-cancel:disabled,
+.msg-edit-save:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .msg-mars { display: flex; gap: 12px; margin-bottom: 26px; }
 

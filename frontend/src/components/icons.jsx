@@ -49,6 +49,7 @@ export const IconPlus = (p) => base({ ...p, children: <><path d="M12 5v14M5 12h1
 export const IconSend = (p) => base({ ...p, children: <><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></> });
 export const IconStop = (p) => base({ ...p, children: <rect x="6" y="6" width="12" height="12" rx="2" /> });
 export const IconClock = (p) => base({ ...p, children: <><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></> });
+export const IconInfo = (p) => base({ ...p, children: <><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></> });
 export const IconCopy = (p) => base({ ...p, children: <><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></> });
 export const IconSpeaker = (p) => base({ ...p, children: <><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /></> });
 export const IconThumbUp = (p) => base({ ...p, children: <><path d="M7 10v12M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z" /></> });

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { formatTime } from "../lib";
-import { IconCheck, IconChevronDown, IconClock, IconCopy, IconPencil, IconRefresh } from "./icons";
+import { IconCheck, IconChevronDown, IconClock, IconCopy, IconInfo, IconPencil, IconRefresh } from "./icons";
 
 /* Chat-style thread: right-aligned user bubbles, plain MARS responses
  * with a working action row (copy, read aloud, feedback, regenerate). */
@@ -47,13 +47,16 @@ export function UserMessage({
             aria-label="Edit message"
           />
           <div className="msg-edit-actions">
-            <button className="btn" onClick={onCancelEdit} disabled={disabled}>Cancel</button>
+            <span className="msg-edit-info" title="Editing this message" aria-hidden="true">
+              <IconInfo size={13} />
+            </span>
+            <button className="msg-edit-cancel" onClick={onCancelEdit} disabled={disabled}>Cancel</button>
             <button
-              className="btn-primary"
+              className="msg-edit-save"
               onClick={() => onSubmitEdit?.(draft)}
               disabled={disabled || (draft || "").trim().length < 5}
             >
-              Resend
+              Save
             </button>
           </div>
         </div>
