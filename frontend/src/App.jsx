@@ -388,9 +388,15 @@ export default function App() {
   useEffect(() => {
     if (!autoScrollRef.current) return;
     // Smooth-follow the newest message as the run streams; a raw jump here
-    // fights in-flight layout and causes visible jitter.
+    // fights in-flight layout and causes visible jitter. `running` in the
+    // deps matters: the "Agents reviewing…" row mounts only once the run
+    // starts, after the submit scroll — following it keeps it in view.
     scrollThreadToBottom("smooth");
-  }, [messages, scrollThreadToBottom]);
+    const t = setTimeout(() => {
+      if (autoScrollRef.current) scrollThreadToBottom("auto");
+    }, 120);
+    return () => clearTimeout(t);
+  }, [messages, running, scrollThreadToBottom]);
 
   const patchRun = useCallback((tempId, patch) => {
     setMessages((prev) =>
