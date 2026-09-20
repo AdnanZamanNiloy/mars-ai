@@ -153,9 +153,31 @@ CREATE TABLE IF NOT EXISTS llm_providers (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS provider_chains (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    is_enabled INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS provider_chain_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chain_id INTEGER NOT NULL REFERENCES provider_chains(id) ON DELETE CASCADE,
+    provider_id INTEGER NOT NULL REFERENCES llm_providers(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
 """
 
-SCHEMA_VERSION = 4
+# Bounded number of chains + members: these are user-authored lists, and an
+# unbounded count is just a slower way to hit the same OOM a module-level
+# dict did (AGENTS.md §4.3/§5). Enforced in the store, documented here.
+MAX_PROVIDER_CHAINS = 20
+MAX_CHAIN_MEMBERS = 12
+
+SCHEMA_VERSION = 5
 
 # Process-level memo: paths whose schema has been ensured this process.
 # Avoids re-running the CREATE TABLE block on every connect while still
@@ -262,6 +284,16 @@ async def init_db(database_path: str) -> None:
             await db.execute("ALTER TABLE claims ADD COLUMN agent TEXT NOT NULL DEFAULT ''")
         if "challenged" not in claim_names:
             await db.execute("ALTER TABLE claims ADD COLUMN challenged INTEGER NOT NULL DEFAULT 0")
+        # Provider fallback chains (additive, idempotent): ordered lists of
+        # existing providers. A single enabled chain drives the runtime chain;
+        # members are ordered by `position` and unique per chain.
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chain_members ON provider_chain_members(chain_id, position, id)"
+        )
+        await db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_chain_member_unique "
+            "ON provider_chain_members(chain_id, provider_id)"
+        )
         await db.execute(
             "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);"
         )

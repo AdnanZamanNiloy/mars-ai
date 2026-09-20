@@ -518,6 +518,61 @@
 .timeout-field input:focus { border-color: var(--mars); }
 .btn-danger { color: var(--danger); }
 
+/* ---------- provider fallback chains ---------- */
+
+.chain-section { margin-top: 28px; }
+.chain-head h3 { font-size: 15px; font-weight: 650; margin: 0 0 4px; }
+.chain-head p { color: var(--t3); font-size: 12.5px; margin: 0 0 14px; max-width: 60ch; }
+.chain-add { display: flex; gap: 10px; margin-bottom: 16px; }
+.chain-add input {
+  flex: 1; padding: 9px 11px;
+  background: var(--bg-soft); border: 1px solid var(--line); border-radius: 8px;
+  color: var(--t1); font-size: 13.5px; outline: none;
+}
+.chain-add input:focus { border-color: var(--mars); }
+.chain-card {
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--r-md); padding: 15px 17px; margin-bottom: 14px;
+  color: var(--t1);
+}
+.chain-card.enabled { border-color: var(--mars-deep); }
+.chain-card-head {
+  display: flex; align-items: center; gap: 10px;
+  justify-content: space-between; margin-bottom: 12px;
+}
+.chain-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 650; }
+.chain-actions { display: flex; gap: 8px; }
+.chain-rename { display: flex; gap: 8px; flex: 1; }
+.chain-rename input {
+  flex: 1; padding: 7px 10px;
+  background: var(--bg-soft); border: 1px solid var(--line); border-radius: 8px;
+  color: var(--t1); font-size: 13px; outline: none;
+}
+.chain-members { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.chain-member {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--bg-soft); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px 12px;
+}
+.chain-member.role-primary { border-color: var(--mars-deep); }
+.chain-order {
+  flex: none; width: 24px; height: 24px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--card); border: 1px solid var(--line);
+  font-size: 12px; font-weight: 650; color: var(--t2);
+}
+.chain-member-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.chain-member-name { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; }
+.chain-member-meta { font-size: 11.5px; color: var(--t3); word-break: break-all; }
+.chain-member-actions { display: flex; gap: 6px; flex: none; }
+.chain-add-member label { display: block; font-size: 12px; color: var(--t3); }
+.chain-add-member select {
+  display: block; width: 100%; margin-top: 5px; padding: 8px 10px;
+  background: var(--bg-soft); border: 1px solid var(--line); border-radius: 8px;
+  color: var(--t1); font-size: 13px; outline: none;
+}
+.chain-add-member select:focus { border-color: var(--mars); }
+
 /* ---------- welcome hero ---------- */
 
 .hero-card { text-align: center; padding: 60px 20px 0; }

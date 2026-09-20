@@ -104,6 +104,23 @@ class ProviderTestIn(BaseModel):
     timeout_sec: float | None = None
 
 
+class ChainIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=60)
+
+
+class ChainUpdate(BaseModel):
+    name: str | None = Field(default=None, max_length=60)
+
+
+class ChainMembersIn(BaseModel):
+    # Ordered provider ids: index 0 is the primary, the rest are fallbacks.
+    provider_ids: list[int] = Field(default_factory=list, max_length=12)
+
+
+class ChainEnabledIn(BaseModel):
+    enabled: bool = True
+
+
 def _providers_db(request: Request) -> str:
     settings = getattr(request.app.state, "settings", None)
     if settings is None:
@@ -164,8 +181,12 @@ async def update_llm_provider(provider_id: int, body: ProviderUpdate, request: R
 async def delete_llm_provider(provider_id: int, request: Request) -> Dict[str, Any]:
     from app.core import providers as provider_store
 
-    if not await provider_store.delete_provider(_providers_db(request), provider_id):
+    db_path = _providers_db(request)
+    if not await provider_store.delete_provider(db_path, provider_id):
         raise HTTPException(status_code=404, detail=f"Unknown provider id: {provider_id}")
+    # Cascade through chain membership: a deleted provider must never leave a
+    # dangling (and subsequently un-resolvable) member in an enabled chain.
+    await provider_store.remove_provider_from_chains(db_path, provider_id)
     return {"deleted": True}
 
 
@@ -232,6 +253,126 @@ async def test_llm_provider(
         return {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
     latency_ms = int((_time.monotonic() - started) * 1000)
     return {"ok": True, "latency_ms": latency_ms}
+
+
+# ---------------------------------------------------------------------------
+# Provider fallback chains
+# ---------------------------------------------------------------------------
+
+@router.get("/provider-chains")
+async def list_provider_chains(request: Request) -> Dict[str, Any]:
+    """All chains (ordered members included) plus the enabled chain id."""
+    from app.core import providers as provider_store
+
+    chains = await provider_store.list_chains(_providers_db(request))
+    enabled = next((c["id"] for c in chains if c.get("is_enabled")), None)
+    return {"chains": chains, "enabled_id": enabled}
+
+
+@router.post("/provider-chains", status_code=201)
+async def create_provider_chain(body: ChainIn, request: Request) -> Dict[str, Any]:
+    from app.core import providers as provider_store
+
+    try:
+        row = await provider_store.save_chain(_providers_db(request), name=body.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"chain": row}
+
+
+@router.put("/provider-chains/{chain_id}")
+async def update_provider_chain(chain_id: int, body: ChainUpdate, request: Request) -> Dict[str, Any]:
+    """Rename a chain. Omit name to no-op."""
+    from app.core import providers as provider_store
+
+    db_path = _providers_db(request)
+    existing = await provider_store.get_chain(db_path, chain_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail=f"Unknown chain id: {chain_id}")
+    try:
+        row = await provider_store.save_chain(
+            db_path, chain_id=chain_id, name=body.name if body.name is not None else existing["name"],
+        )
+    except LookupError:
+        raise HTTPException(status_code=404, detail=f"Unknown chain id: {chain_id}")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"chain": row}
+
+
+@router.delete("/provider-chains/{chain_id}")
+async def delete_provider_chain(chain_id: int, request: Request) -> Dict[str, Any]:
+    from app.core import providers as provider_store
+
+    if not await provider_store.delete_chain(_providers_db(request), chain_id):
+        raise HTTPException(status_code=404, detail=f"Unknown chain id: {chain_id}")
+    return {"deleted": True}
+
+
+@router.put("/provider-chains/{chain_id}/members")
+async def set_provider_chain_members(
+    chain_id: int, body: ChainMembersIn, request: Request
+) -> Dict[str, Any]:
+    """Replace the chain's ordered members (index 0 = primary). Adding,
+    removing and reordering all go through here."""
+    from app.core import providers as provider_store
+
+    try:
+        row = await provider_store.set_chain_members(
+            _providers_db(request), chain_id, body.provider_ids
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"chain": row}
+
+
+@router.post("/provider-chains/{chain_id}/reorder")
+async def reorder_provider_chain(
+    chain_id: int, body: ChainMembersIn, request: Request
+) -> Dict[str, Any]:
+    """Reorder the chain's EXISTING members (same set, new order)."""
+    from app.core import providers as provider_store
+
+    try:
+        row = await provider_store.reorder_chain_members(
+            _providers_db(request), chain_id, body.provider_ids
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"chain": row}
+
+
+@router.post("/provider-chains/{chain_id}/enabled")
+async def set_provider_chain_enabled(
+    chain_id: int, request: Request, body: ChainEnabledIn | None = None
+) -> Dict[str, Any]:
+    """Enable (exactly one chain at a time) or disable a chain."""
+    from app.core import providers as provider_store
+
+    enabled = True if body is None else bool(body.enabled)
+    try:
+        row = await provider_store.set_chain_enabled(
+            _providers_db(request), chain_id, enabled
+        )
+    except LookupError:
+        raise HTTPException(status_code=404, detail=f"Unknown chain id: {chain_id}")
+    return {"chain": row}
+
+
+@router.post("/provider-chains/clear")
+async def clear_provider_chain(request: Request) -> Dict[str, Any]:
+    """Disable whichever chain is enabled (returns to single-provider mode)."""
+    from app.core import providers as provider_store
+
+    db_path = _providers_db(request)
+    enabled = await provider_store.get_enabled_chain(db_path)
+    if enabled is not None:
+        await provider_store.set_chain_enabled(db_path, enabled["id"], False)
+    return {"enabled_id": None}
 
 
 @router.get("/research/{run_id}/trace")

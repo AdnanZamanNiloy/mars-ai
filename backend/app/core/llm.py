@@ -271,6 +271,51 @@ def classify_provider_failure(exc: BaseException) -> str:
     return ""
 
 
+# HTTP statuses that mean "THIS provider cannot serve now" and stopping at it
+# would waste the run: auth/payment/quota/model-missing/throttle/outage.
+# A 400 with a generic validation body is NOT in here — that is a malformed
+# USER request, and the identical payload will be rejected by every member of
+# the chain, so failing over is pointless and hides a real bug.
+_CHAIN_FAILOVER_STATUSES = frozenset({401, 402, 403, 404, 408, 409, 413, 425, 429})
+
+
+def chain_failover_eligible(exc: BaseException) -> bool:
+    """Should an enabled provider CHAIN advance to the next member on `exc`?
+
+    True only for failures that are specific to the provider or the transport
+    and that a different provider may not share:
+
+      * timeouts / connection / transport errors — the provider is unreachable
+      * 5xx / 429 / 408 / 425 — outage, throttle, provider-side stall
+      * 401/402/403 — this provider's key/wallet/quota, not the request
+      * 404 model-not-found or permanent 400 bodies (bad key, no credits,
+        unknown model) — provider-side determinism
+      * PromptTooLargeError — the CALLER shrinks the payload; a different
+        provider with a bigger window may accept it, so advancing is fine
+
+    False for a generic 4xx (a malformed/user-invalid request): the SAME
+    payload would be rejected identically everywhere, so advancing would spend
+    every other provider's quota to reach the same error. Also False for
+    anything unrecognized — an unknown error must not silently burn a chain.
+    """
+    if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
+        return True
+    if isinstance(exc, PromptTooLargeError):
+        return True
+    if _permanent_client_error(exc):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
+        status = exc.response.status_code
+        if status in _CHAIN_FAILOVER_STATUSES:
+            return True
+        if 500 <= status < 600:
+            return True
+        return False
+    if isinstance(exc, httpx.HTTPError):
+        return True
+    return False
+
+
 def _retry_after_hint(exc: BaseException | None) -> float:
     """The provider's own retry hint, in seconds, or 0 when none given.
 
@@ -345,10 +390,24 @@ class LLMClient:
         # short hold (10s) collapses the spam while still retrying soon
         # enough that a startup-ordering issue self-heals.
         self._provider_store_down_until: float = 0.0
+        # Per-chain-member circuit breakers, keyed by (endpoint, model).
+        # Independently bounded by MAX_CHAIN_MEMBERS, reset on success, and
+        # evicted when a chain changes — not per-request state (AGENTS.md
+        # §4.3). Keying by identity (not name) means reordering/renaming a
+        # provider never inherits another provider's failure count.
+        self._chain_breakers: Dict[tuple, CircuitBreaker] = {}
+        # Last chain outcome for this process, for diagnostics/UI: which
+        # provider succeeded and why earlier members were skipped/failed.
+        # Bounded (one entry overwritten per call) — never grows.
+        self._last_chain_run: Dict[str, Any] | None = None
 
     async def probe_targets(self) -> List[Dict[str, str]]:
-        """Providers a pre-flight probe should ping. Exclusive active
-        provider → that one only; otherwise the full env chain."""
+        """Providers a pre-flight probe should ping. An enabled chain → all
+        of its members (the chain is the run's whole provider story).
+        Exclusive active provider → that one only; otherwise the env chain."""
+        chain = await self._resolve_chain()
+        if chain:
+            return [{**config, "style": "openai"} for config in chain]
         custom, exclusive = await self._resolve_custom()
         fallback_ok = bool(getattr(self.settings, "active_provider_fallback", False))
         targets: List[Dict[str, str]] = []
@@ -543,7 +602,178 @@ class LLMClient:
             }, True
         return self._custom_config(), False
 
+    async def _resolve_chain(self) -> List[Dict[str, str]]:
+        """Ordered, enabled chain members as call configs, or [] when no chain
+        is enabled/unreadable. Members carry the decrypted key server-side
+        only. Deduped by provider id by the store (loop protection)."""
+        if not bool(getattr(self.settings, "provider_chains_enabled", True)):
+            return []
+        now = time.monotonic()
+        if now < self._provider_store_down_until:
+            return []
+        try:
+            from app.core.providers import get_chain_providers
+
+            rows = await get_chain_providers(self.settings.database_url)
+        except Exception as exc:
+            logger.warning(
+                "[LLM] provider chain store unreadable, using single-provider chain: %s",
+                exc, exc_info=exc,
+            )
+            self._provider_store_down_until = now + 10.0
+            return []
+        self._provider_store_down_until = 0.0
+        configs: List[Dict[str, str]] = []
+        for row in rows or []:
+            base = str(row.get("base_url", "") or "").strip().rstrip("/")
+            if not base:
+                continue
+            endpoint = base if base.lower().endswith("/chat/completions") else base + "/chat/completions"
+            key = str(row.get("api_key", "") or "")
+            model = str(row.get("model", "") or "")
+            if not (key and model):
+                # A member with no usable key/model is skipped, not fatal:
+                # it must not block the rest of the chain.
+                logger.warning("[LLM] chain member '%s' has no key/model, skipping", row.get("name"))
+                continue
+            configs.append({
+                "api_key": key,
+                "endpoint": endpoint,
+                "model": model,
+                "name": str(row.get("name", "") or "provider"),
+            })
+        return configs
+
+    def _chain_breaker(self, config: Dict[str, str]) -> CircuitBreaker:
+        identity = (config["endpoint"], config["model"])
+        breaker = self._chain_breakers.get(identity)
+        if breaker is None:
+            breaker = CircuitBreaker(threshold=3, cooldown_sec=60.0)
+            self._chain_breakers[identity] = breaker
+        return breaker
+
+    async def _generate_with_chain(self, system_prompt: str, user_prompt: str) -> str | None:
+        """Execute the enabled provider chain in configured order.
+
+        Returns the completion text on success, or None when no chain is
+        enabled (caller falls through to the legacy single-provider logic).
+        When a chain IS enabled but every member fails, raises
+        AllProvidersFailedError with per-member reasons — the same fail-fast
+        contract the rest of the pipeline already handles, so callers' own
+        deterministic fallbacks engage exactly as before.
+
+        Session/request state is preserved across attempts: prompts, the
+        semaphore, the usage ledger and the response cache all persist on
+        `self`, so a fallback attempt is the SAME logical request on a
+        different provider, never a fresh one.
+        """
+        chain = await self._resolve_chain()
+        if not chain:
+            return None
+
+        # Cache is keyed on the PRIMARY (member #1) identity: a cached answer
+        # for this exact prompt means the chain already succeeded, so no
+        # member is contacted. Fallback members share the same logical request.
+        primary = chain[0]
+        cached = llm_cache.get(primary["endpoint"], primary["model"], system_prompt, user_prompt)
+        if cached is not None:
+            self._record_usage(
+                cached["text"], provider="cache", model=primary["model"],
+                input_tokens=cached.get("input_tokens") or None,
+                output_tokens=cached.get("output_tokens") or None,
+                cached=True,
+            )
+            return cached["text"]
+
+        failures: List[Dict[str, str]] = []
+        size_failures = 0
+        attempted = 0
+        async with self._llm_semaphore:
+            for index, config in enumerate(chain):
+                breaker = self._chain_breaker(config)
+                if breaker.is_open():
+                    reason = "circuit breaker open (recent provider failures)"
+                    failures.append({"provider": config["name"], "reason": reason, "kind": "skipped"})
+                    logger.warning(
+                        "[LLM] chain member %d/%d '%s' skipped: %s",
+                        index + 1, len(chain), config["name"], reason,
+                    )
+                    continue
+                attempted += 1
+                try:
+                    result = await self._call_custom(system_prompt, user_prompt, config)
+                    breaker.record_success()
+                    self._cache_and_record(result, system_prompt, user_prompt)
+                    self._last_chain_run = {
+                        "succeeded": config["name"],
+                        "succeeded_index": index,
+                        "total": len(chain),
+                        "failures": failures,
+                    }
+                    if index > 0:
+                        logger.info(
+                            "[LLM] chain fell over to member %d/%d '%s' after %d failure(s)",
+                            index + 1, len(chain), config["name"], len(failures),
+                        )
+                    return result.text
+                except Exception as exc:
+                    detail = f"{type(exc).__name__}: {str(exc)[:160] or type(exc).__name__}"
+                    self._last_errors[config["name"]] = detail
+                    if isinstance(exc, PromptTooLargeError):
+                        size_failures += 1
+                    self._record_provider_failure(breaker, exc)
+                    self._record_degradation(exc)
+                    kind = classify_provider_failure(exc) or "unknown"
+                    eligible = chain_failover_eligible(exc)
+                    failures.append({
+                        "provider": config["name"], "reason": detail,
+                        "kind": kind, "failover": eligible,
+                    })
+                    logger.warning(
+                        "[LLM] chain member %d/%d '%s' failed (%s, failover=%s): %s",
+                        index + 1, len(chain), config["name"], kind, eligible, detail,
+                    )
+                    if not eligible:
+                        # A user-invalid / non-retryable request: advancing
+                        # would spend every other provider to reach the same
+                        # error. Stop here and surface the real cause.
+                        self._last_chain_run = {
+                            "succeeded": None, "succeeded_index": None,
+                            "total": len(chain), "failures": failures,
+                        }
+                        raise AllProvidersFailedError(
+                            f"Provider chain stopped at member {index + 1}/{len(chain)} "
+                            f"'{config['name']}': {detail}. This failure is not eligible for "
+                            "fallback (the request itself was rejected)."
+                        ) from exc
+
+        self._last_chain_run = {
+            "succeeded": None, "succeeded_index": None,
+            "total": len(chain), "failures": failures,
+        }
+        if attempted > 0 and size_failures == attempted:
+            # Every member rejected the SIZE: healthy providers, oversized
+            # payload. Let the caller's ladder shrink and retry.
+            raise PromptTooLargeError(
+                f"all {attempted} chain provider(s) rejected the request size as too large"
+            )
+        detail = "; ".join(f"{f['provider']}: {f['reason']}" for f in failures)
+        raise AllProvidersFailedError(
+            f"All {len(chain)} provider(s) in the fallback chain failed — "
+            f"{detail or 'unknown errors'}. The run will continue on deterministic fallbacks."
+        )
+
     async def _generate_with_fallback(self, system_prompt: str, user_prompt: str) -> str:
+        # ---- Enabled provider CHAIN takes over the whole call ----
+        # A chain is an explicit, ordered user choice: try member #1, fall
+        # over in order, stop at the first success. It replaces (does not
+        # extend) the legacy custom→groq→hf logic; when no chain is enabled
+        # this returns None and the code below runs byte-for-byte as before,
+        # so single-provider selection stays fully compatible.
+        chain_result = await self._generate_with_chain(system_prompt, user_prompt)
+        if chain_result is not None:
+            return chain_result
+
         groq_key = _real_key(self.settings.groq_api_key)
         hf_key = _real_key(self.settings.huggingface_api_key)
         custom, exclusive = await self._resolve_custom()

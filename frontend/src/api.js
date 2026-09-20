@@ -165,3 +165,46 @@ export function testProvider(id, timeoutSec = null) {
   const body = timeoutSec === null || timeoutSec === undefined ? undefined : { timeout_sec: timeoutSec };
   return apiJSON(`/api/providers/${encodeURIComponent(id)}/test`, { method: "POST", body });
 }
+
+/* ---------- Provider fallback chains ---------- */
+
+export function listProviderChains() {
+  return apiJSON("/api/provider-chains");
+}
+
+export function createProviderChain(name) {
+  return apiJSON("/api/provider-chains", { method: "POST", body: { name } });
+}
+
+export function renameProviderChain(id, name) {
+  return apiJSON(`/api/provider-chains/${encodeURIComponent(id)}`, { method: "PUT", body: { name } });
+}
+
+export function deleteProviderChain(id) {
+  return apiJSON(`/api/provider-chains/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function setProviderChainMembers(id, providerIds) {
+  return apiJSON(`/api/provider-chains/${encodeURIComponent(id)}/members`, {
+    method: "PUT",
+    body: { provider_ids: providerIds },
+  });
+}
+
+export function reorderProviderChain(id, providerIds) {
+  return apiJSON(`/api/provider-chains/${encodeURIComponent(id)}/reorder`, {
+    method: "POST",
+    body: { provider_ids: providerIds },
+  });
+}
+
+export function setProviderChainEnabled(id, enabled = true) {
+  return apiJSON(`/api/provider-chains/${encodeURIComponent(id)}/enabled`, {
+    method: "POST",
+    body: { enabled },
+  });
+}
+
+export function clearProviderChain() {
+  return apiJSON("/api/provider-chains/clear", { method: "POST" });
+}

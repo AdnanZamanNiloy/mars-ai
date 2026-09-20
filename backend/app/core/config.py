@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     # env chain (Groq/HF) instead of degrading the run. Strict exclusivity
     # (False) never spends another provider's key without your say-so.
     active_provider_fallback: bool = False
+    # Provider fallback chains (Providers tab): when True, an ENABLED user
+    # chain (ordered list of saved providers) replaces the single-provider
+    # selection entirely for LLM calls. False disables chain resolution
+    # regardless of what is stored — an operator kill switch that leaves
+    # chain data intact. Default True so the feature works out of the box;
+    # with no chain enabled, resolution changes nothing.
+    provider_chains_enabled: bool = True
 
     mars_secret_key: str = ""
 

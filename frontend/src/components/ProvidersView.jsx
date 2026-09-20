@@ -8,11 +8,13 @@ import {
   testProvider,
   updateProvider,
 } from "../api";
+import ChainsSection from "./ChainsSection";
 
 /* Providers tab: user-managed OpenAI-compatible LLM endpoints. Exactly one
- * may be active — the active model is the ONLY one research uses (no
- * fallback chain while one is selected). Keys are encrypted server-side;
- * the UI only ever sees a last-4 hint. */
+ * may be active — the active model is the ONLY one research uses when no
+ * fallback chain is enabled. Below, optional fallback chains layer an
+ * ordered primary→fallback list on top. Keys are encrypted server-side; the
+ * UI only ever sees a last-4 hint. */
 const EMPTY = { name: "", base_url: "", api_key: "", model: "" };
 
 export default function ProvidersView() {
@@ -230,6 +232,8 @@ export default function ProvidersView() {
       {!loading && providers.length === 0 ? (
         <p className="empty">No providers yet — add your first OpenAI-compatible endpoint above.</p>
       ) : null}
+
+      <ChainsSection providers={providers} onError={setError} />
     </div>
   );
 }

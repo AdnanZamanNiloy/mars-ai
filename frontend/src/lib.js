@@ -223,6 +223,36 @@ export function removeKnowledgeItem(item) {
   return list;
 }
 
+/* ---- Provider fallback chain helpers ---- */
+
+/* A chain member's role label and tone, derived purely from its position.
+ * Member #1 is the primary; everyone after is a fallback. Shared by the UI
+ * and its tests so "which provider is primary" can never drift between the
+ * two. */
+export function chainRole(position) {
+  if (position === 0) return { label: "Primary", tone: "primary" };
+  return { label: `Fallback ${position}`, tone: "fallback" };
+}
+
+/* Given the full provider list and a chain's ordered member ids, return the
+ * members as provider objects in chain order, plus any saved providers that
+ * are not part of the chain (available to add). Dangling ids (a provider
+ * deleted out from under a chain) are dropped rather than rendered blank. */
+export function resolveChainMembers(providers, memberIds) {
+  const byId = new Map((providers || []).map((p) => [p.id, p]));
+  const members = [];
+  const used = new Set();
+  for (const id of memberIds || []) {
+    const p = byId.get(id);
+    if (p && !used.has(id)) {
+      members.push(p);
+      used.add(id);
+    }
+  }
+  const available = (providers || []).filter((p) => !used.has(p.id));
+  return { members, available };
+}
+
 export const MODE_META = {
   quick: { label: "Quick scan", hint: "2 agents · 1 pass · fastest" },
   standard: { label: "Standard", hint: "3 agents · up to 3 passes" },
