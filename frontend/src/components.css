@@ -958,24 +958,9 @@
   flex-direction: column;
   overflow-x: hidden;
   /* Flat base only: the corner washes (warm top-right, blue bottom-left)
-     made the page read as two different themes. The .landing-grid cell
-     pattern below provides the surface texture instead. */
+     made the page read as two different themes. One theme, no texture. */
   background: var(--bg);
   color: var(--t1);
-}
-/* A single faint grid instead of blobs + orbiting stars: it reads as an
-   instrument surface and costs nothing. */
-.landing-grid {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background-image:
-    linear-gradient(var(--line-soft) 1px, transparent 1px),
-    linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
-  background-size: 62px 62px;
-  mask-image: radial-gradient(ellipse 88% 62% at 50% 22%, #000 12%, transparent 76%);
-  -webkit-mask-image: radial-gradient(ellipse 88% 62% at 50% 22%, #000 12%, transparent 76%);
-  opacity: 0.6;
 }
 
 .landing-nav {

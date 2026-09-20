@@ -36,8 +36,6 @@ const LEDGER = [
 export default function Landing({ onStart, onDocs }) {
   return (
     <div className="landing">
-      <div className="landing-grid" aria-hidden="true" />
-
       <header className="landing-nav">
         <a
           className="landing-brand"
