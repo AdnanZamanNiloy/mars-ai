@@ -28,15 +28,22 @@ export function UserMessage({
   };
 
   if (editing) {
+    const autoGrow = (el) => {
+      if (!el) return;
+      el.style.height = "26px";
+      el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+    };
     return (
       <div className="msg-user anim-rise">
         <div className="bubble bubble-edit">
           <textarea
             className="msg-edit-input"
             autoFocus
+            rows={1}
             value={draft}
             disabled={disabled}
-            onChange={(e) => setDraft(e.target.value)}
+            ref={autoGrow}
+            onChange={(e) => { setDraft(e.target.value); autoGrow(e.target); }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();

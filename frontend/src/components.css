@@ -76,35 +76,46 @@
 .user-action-btn { width: 24px; height: 24px; color: var(--t4); }
 .user-action-btn:hover { color: var(--t1); background: transparent; }
 .user-action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.bubble-edit { display: flex; flex-direction: column; gap: 8px; width: 75%; max-width: 75%; }
+/* Compact edit card: hugs its content, never stretches to message width. */
+.bubble-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: auto;
+  max-width: 340px;
+  padding: 6px 8px;
+}
 .msg-edit-input {
   width: 100%;
-  min-height: 64px;
-  resize: vertical;
+  min-height: 0;
+  height: 26px;
+  resize: none;
+  overflow: hidden;
   background: var(--card);
   color: var(--t1);
   border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 9px 12px;
+  border-radius: 6px;
+  padding: 4px 7px;
   font: inherit;
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 12.5px;
+  line-height: 1.3;
 }
 .msg-edit-input:focus { outline: none; border-color: var(--line-hover); }
-/* Compact single-row edit actions: [info] Cancel Save. */
+/* Tiny single-row edit actions: [info] Cancel Save. */
 .msg-edit-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 2px;
+  gap: 4px;
+  margin-top: 0;
 }
 .msg-edit-info { display: inline-flex; align-items: center; color: var(--t4); }
+.msg-edit-info svg { width: 11px; height: 11px; }
 .msg-edit-cancel,
 .msg-edit-save {
-  font-size: 11.5px;
+  font-size: 10.5px;
   line-height: 1;
-  padding: 4px 9px;
-  border-radius: 7px;
+  padding: 3px 7px;
+  border-radius: 5px;
   border: 1px solid var(--line);
   background: transparent;
   color: var(--t3);
