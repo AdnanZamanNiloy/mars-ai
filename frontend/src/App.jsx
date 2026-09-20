@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchSession, fetchTrace, listSessions, resumeResearch, startResearch } from "./api";
-import { MODE_META, loadActiveSessionId, loadKnowledge, loadMissions, newSessionId, parseReport, removeKnowledgeItem, removeMission, saveActiveSessionId, saveKnowledgeItem, truncateFromMessage, updateMission, upsertMission } from "./lib";
+import { MODE_META, loadActiveSessionId, loadKnowledge, loadMissions, newSessionId, parseReport, removeKnowledgeItem, removeMission, saveActiveSessionId, saveKnowledgeItem, shouldAutoScroll, truncateFromMessage, updateMission, upsertMission } from "./lib";
 import Sidebar from "./components/Sidebar";
 import Composer from "./components/Composer";
 import { ErrorCard, MarsMessageShell, ThinkingSteps, TypingRow, UserMessage } from "./components/Thread";
@@ -289,6 +289,7 @@ export default function App() {
   const parentRef = useRef(null); // parent runId for challenge runs
   const sessionIdRef = useRef(sessionId); // stable chat id for async handlers
   const abortedRef = useRef(new Set()); // tempIds of runs the user stopped
+  const autoScrollRef = useRef(true); // follow the stream unless user scrolled up
 
   const setActiveSession = useCallback((id) => {
     sessionIdRef.current = id || "";
@@ -359,14 +360,37 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /* Navigation helper: scroll a thread to its bottom, honoring the user's
+   * intent. `autoScrollRef` is true unless the user scrolled up to read —
+   * then we leave the viewport alone so streaming doesn't yank it back. */
+  const scrollThreadToBottom = useCallback((behavior = "auto") => {
+    const el = threadRef.current;
+    if (!el) return;
+    try {
+      el.scrollTo({ top: el.scrollHeight, behavior });
+    } catch {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, []);
+
   useEffect(() => {
     const el = threadRef.current;
     if (!el) return;
-    // Follow the stream only while the user is already near the bottom;
-    // yanking the view on every event fights anyone scrolling back up.
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
-    if (nearBottom) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+    // A near-bottom position means the user is following the stream; a
+    // deliberate scroll up flips intent off until they return to the bottom.
+    const onScroll = () => {
+      autoScrollRef.current = shouldAutoScroll(el);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (!autoScrollRef.current) return;
+    // Smooth-follow the newest message as the run streams; a raw jump here
+    // fights in-flight layout and causes visible jitter.
+    scrollThreadToBottom("smooth");
+  }, [messages, scrollThreadToBottom]);
 
   const patchRun = useCallback((tempId, patch) => {
     setMessages((prev) =>
@@ -558,6 +582,11 @@ export default function App() {
         }));
         pushTrace({ key: "findings", text: "Claims extracted", kind: "done" });
         pushTrace({ text: "Final report delivered", kind: "done" });
+        // The finished answer can be much taller than the stream snapshot;
+        // settle at the bottom so the full response is visible.
+        if (autoScrollRef.current) {
+          requestAnimationFrame(() => scrollThreadToBottom("smooth"));
+        }
         break;
       case "error": {
         const message = evt.message || "Unknown stream error";
@@ -580,7 +609,7 @@ export default function App() {
       default:
         break;
     }
-  }, [patchRun, pushTrace, saveMissions]);
+  }, [patchRun, pushTrace, saveMissions, scrollThreadToBottom]);
 
   const launch = useCallback(async (queryText, { resumeRun = null, parentRunId = null } = {}) => {
     if (running) return;
@@ -611,6 +640,9 @@ export default function App() {
       ]);
       setTraceLog([]);
       setSelectedFinding(null);
+      // Sending re-engages following and brings the new turn into view.
+      autoScrollRef.current = true;
+      requestAnimationFrame(() => scrollThreadToBottom("smooth"));
       go("workspace");
     }
 
@@ -648,7 +680,7 @@ export default function App() {
       parentRef.current = null;
       setRunning(false);
     }
-  }, [running, mode, patchRun, pushTrace, handleEvent, saveMissions, setActiveSession]);
+  }, [running, mode, patchRun, pushTrace, handleEvent, saveMissions, setActiveSession, scrollThreadToBottom]);
 
   const submitQuery = useCallback((text) => {
     const v = text.trim();

@@ -88,6 +88,15 @@ export function truncateFromMessage(messages, messageId) {
   return messages.slice(0, idx);
 }
 
+/* Auto-scroll intent: should the stream keep the newest content in view?
+ * True while the viewport is within `threshold` px of the bottom. Once the
+ * user scrolls further up to read older turns, this is false and streaming
+ * must not yank them back down. Pure so it can be unit-tested. */
+export function shouldAutoScroll({ scrollHeight, scrollTop, clientHeight }, threshold = 160) {
+  const distance = scrollHeight - scrollTop - clientHeight;
+  return distance < threshold;
+}
+
 /* The active chat's stable session id. One chat = one id, reused for every
  * follow-up question; only "New Chat" mints a fresh one. Kept in its own key
  * so an interrupted write to the session list can't lose the active chat. */
