@@ -26,7 +26,6 @@ from __future__ import annotations
 import io
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
 from html import escape as html_escape
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -500,7 +499,3 @@ def render_report(trace: Dict[str, Any], fmt: str) -> Tuple[bytes, str, str]:
     if fmt == "docx":
         return render_docx(doc), FORMAT_MEDIA_TYPES["docx"], safe_filename(doc.query, doc.run_id, "docx")
     return render_pdf(doc), FORMAT_MEDIA_TYPES["pdf"], safe_filename(doc.query, doc.run_id, "pdf")
-
-
-def exported_at() -> str:
-    return datetime.utcnow().isoformat() + "Z"
