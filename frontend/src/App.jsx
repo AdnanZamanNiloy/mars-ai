@@ -299,6 +299,17 @@ export default function App() {
 
   const saveMissions = useCallback((list) => setMissions(list), []);
 
+  /* One place that turns a run's terminal/stream status into a mission row.
+   * All five call sites previously repeated the same field mapping; they now
+   * pass only what differs (session override, confidence, cost, extras). */
+  const saveRunMission = useCallback((run, { status, sessionId: sid, confidence = null, cost = null, ...extra }) => {
+    if (!run?.runId) return;
+    saveMissions(upsertMission({
+      sessionId: sid ?? sessionIdRef.current, runId: run.runId, query: run.query, mode: run.mode,
+      status, confidence, cost, ...extra,
+    }));
+  }, [saveMissions]);
+
   /* Refresh the sidebar chat list from the backend on mount so chats created
    * on another tab or before a localStorage clear are still discoverable. */
   useEffect(() => {
@@ -606,12 +617,11 @@ export default function App() {
             resuming: false,
           };
           if (run.runId) {
-            saveMissions(upsertMission({
-              sessionId: sessionIdRef.current, runId: run.runId, query: run.query, mode: run.mode,
+            saveRunMission(run, {
               status: "completed", confidence: run.confidence,
               cost: run.budget && typeof run.budget.spent_usd === "number" ? run.budget.spent_usd : null,
               degraded: run.degraded,
-            }));
+            });
           }
           return { ...m, run };
         }));
@@ -631,10 +641,7 @@ export default function App() {
           if (m.kind !== "run" || m.run.tempId !== tempId) return m;
           const run = { ...m.run, error: message, resuming: false, resumable };
           if (run.runId) {
-            saveMissions(upsertMission({
-              sessionId: sessionIdRef.current, runId: run.runId, query: run.query, mode: run.mode,
-              status: resumable ? "resumable" : "failed", confidence: null, cost: null,
-            }));
+            saveRunMission(run, { status: resumable ? "resumable" : "failed" });
           }
           return { ...m, run };
         }));
@@ -700,10 +707,7 @@ export default function App() {
           if (m.kind !== "run" || m.run.tempId !== tempId) return m;
           const run = { ...m.run, aborted: true, resuming: false };
           if (run.runId) {
-            saveMissions(upsertMission({
-              sessionId: sessionIdRef.current, runId: run.runId, query: run.query, mode: run.mode,
-              status: "cancelled", confidence: null, cost: null,
-            }));
+            saveRunMission(run, { status: "cancelled" });
           }
           return { ...m, run };
         }));
@@ -772,10 +776,7 @@ export default function App() {
       const active = [...prev].reverse().find((m) => m.kind === "run");
       const run = active?.run;
       if (run?.runId && !run.done && !run.error) {
-        saveMissions(upsertMission({
-          sessionId: sessionIdRef.current, runId: run.runId, query: run.query, mode: run.mode,
-          status: "aborted", confidence: null, cost: null,
-        }));
+        saveRunMission(run, { status: "aborted" });
       }
       return [];
     });

@@ -60,7 +60,7 @@ async def _run(n: int) -> dict:
         except httpx.TimeoutException:
             stats["timeout"] += 1
             raise
-        except (httpx.ConnectError, httpx.RemoteProtocolError, httpx.ReadError) as exc:
+        except (httpx.ConnectError, httpx.RemoteProtocolError, httpx.ReadError):
             stats["connection"] += 1
             raise
         status = int(getattr(response, "status_code", 0) or 0)

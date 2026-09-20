@@ -1092,7 +1092,6 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         read as a sourced one. No facts, no verification, no citations —
         the report states plainly that this was a direct answer.
         """
-        route = state.get("route") or {}
         result = await direct_answer_agent(
             llm, state["query"], intent=state.get("intent") or {}
         )
