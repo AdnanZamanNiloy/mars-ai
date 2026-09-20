@@ -30,8 +30,8 @@ export function UserMessage({
   if (editing) {
     const autoGrow = (el) => {
       if (!el) return;
-      el.style.height = "26px";
-      el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+      el.style.height = "48px";
+      el.style.height = `${Math.max(48, Math.min(el.scrollHeight, 180))}px`;
     };
     return (
       <div className="msg-user anim-rise">
