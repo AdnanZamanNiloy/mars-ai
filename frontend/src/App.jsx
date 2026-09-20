@@ -387,6 +387,27 @@ export default function App() {
     });
   }, [scrollThreadToBottom]);
 
+  /* Bottom lock: while the user is following (autoScrollRef) and a run is in
+   * flight, re-pin the scroll container to its true bottom whenever its
+   * CONTENT grows. Async processing steps (agent-review cards, findings) are
+   * inserted/expanded after submit, so a single post-send scroll stops short
+   * — this keeps the newest content visible as height changes. A user scroll
+   * up flips autoScrollRef off and the observer stops fighting them. */
+  useEffect(() => {
+    const el = threadRef.current;
+    if (!el) return;
+    const pin = () => {
+      if (!autoScrollRef.current) return;
+      const maxTop = el.scrollHeight - el.clientHeight;
+      if (el.scrollTop < maxTop) el.scrollTop = maxTop;
+    };
+    const observer = new ResizeObserver(pin);
+    // Observe the scrollable content itself, not the viewport: the inner
+    // container grows as steps/rows are added.
+    observer.observe(el.firstElementChild || el);
+    return () => observer.disconnect();
+  }, [view]);
+
   useEffect(() => {
     const el = threadRef.current;
     if (!el) return;
