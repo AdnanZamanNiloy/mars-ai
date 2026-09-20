@@ -360,18 +360,32 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* Navigation helper: scroll a thread to its bottom, honoring the user's
-   * intent. `autoScrollRef` is true unless the user scrolled up to read —
-   * then we leave the viewport alone so streaming doesn't yank it back. */
+  /* After sending, always land at the container's true maximum scroll
+   * position so the new user message AND the full processing/agent-review
+   * steps are visible above the fixed composer. `scrollHeight - clientHeight`
+   * is the real max — no fixed arbitrary offset, and it accounts for the
+   * padding that reserves space under the composer. */
   const scrollThreadToBottom = useCallback((behavior = "auto") => {
     const el = threadRef.current;
     if (!el) return;
+    const maxTop = el.scrollHeight - el.clientHeight;
     try {
-      el.scrollTo({ top: el.scrollHeight, behavior });
+      el.scrollTo({ top: maxTop, behavior });
     } catch {
-      el.scrollTop = el.scrollHeight;
+      el.scrollTop = maxTop;
     }
   }, []);
+
+  /* Defer the post-send scroll until the new message + run card have been
+   * laid out, then pin to the bottom across a frame or two (fonts/stream
+   * steps can change height right after render). */
+  const scrollToBottomAfterRender = useCallback((behavior = "smooth") => {
+    const settle = () => scrollThreadToBottom(behavior);
+    requestAnimationFrame(() => {
+      settle();
+      requestAnimationFrame(settle);
+    });
+  }, [scrollThreadToBottom]);
 
   useEffect(() => {
     const el = threadRef.current;
@@ -388,15 +402,9 @@ export default function App() {
   useEffect(() => {
     if (!autoScrollRef.current) return;
     // Smooth-follow the newest message as the run streams; a raw jump here
-    // fights in-flight layout and causes visible jitter. `running` in the
-    // deps matters: the "Agents reviewing…" row mounts only once the run
-    // starts, after the submit scroll — following it keeps it in view.
+    // fights in-flight layout and causes visible jitter.
     scrollThreadToBottom("smooth");
-    const t = setTimeout(() => {
-      if (autoScrollRef.current) scrollThreadToBottom("auto");
-    }, 120);
-    return () => clearTimeout(t);
-  }, [messages, running, scrollThreadToBottom]);
+  }, [messages, scrollThreadToBottom]);
 
   const patchRun = useCallback((tempId, patch) => {
     setMessages((prev) =>
@@ -646,10 +654,11 @@ export default function App() {
       ]);
       setTraceLog([]);
       setSelectedFinding(null);
-      // Sending re-engages following. Jump to the very bottom so the new user
-      // message AND the live "Agents reviewing…" row are fully visible.
+      // Sending re-engages following and pins to the true bottom once the
+      // new turn + run card have rendered, so the message and the full
+      // processing steps clear the fixed composer.
       autoScrollRef.current = true;
-      requestAnimationFrame(() => scrollThreadToBottom("smooth"));
+      scrollToBottomAfterRender("smooth");
       go("workspace");
     }
 
@@ -687,7 +696,7 @@ export default function App() {
       parentRef.current = null;
       setRunning(false);
     }
-  }, [running, mode, patchRun, pushTrace, handleEvent, saveMissions, setActiveSession, scrollThreadToBottom]);
+  }, [running, mode, patchRun, pushTrace, handleEvent, saveMissions, setActiveSession, scrollToBottomAfterRender]);
 
   const submitQuery = useCallback((text) => {
     const v = text.trim();
