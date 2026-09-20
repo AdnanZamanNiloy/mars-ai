@@ -143,14 +143,25 @@ export function loadMissions() {
  * sessionId groups every question asked in the same chat, and runId points at
  * the most recent run so the backend can still supply that run's trace. */
 export function upsertMission(mission) {
-  const list = loadMissions().filter((m) => m.sessionId !== mission.sessionId);
-  list.unshift({ ...mission, updatedAt: new Date().toISOString() });
+  const list = loadMissions();
+  const existing = list.find((m) => m.sessionId === mission.sessionId);
+  // The chat is named by its FIRST message. Later follow-ups must not rename
+  // it, so the stored title (and the query it falls back to) is preserved;
+  // only an explicitly-supplied title, or a brand-new session, sets it.
+  const merged = {
+    ...existing,
+    ...mission,
+    title: mission.title || existing?.title || "",
+    query: existing?.query || mission.query,
+  };
+  const rest = list.filter((m) => m.sessionId !== mission.sessionId);
+  rest.unshift({ ...merged, updatedAt: new Date().toISOString() });
   try {
-    localStorage.setItem(MISSIONS_KEY, JSON.stringify(list.slice(0, MAX_MISSIONS)));
+    localStorage.setItem(MISSIONS_KEY, JSON.stringify(rest.slice(0, MAX_MISSIONS)));
   } catch {
     /* storage full or unavailable — missions just won't persist */
   }
-  return list.slice(0, MAX_MISSIONS);
+  return rest.slice(0, MAX_MISSIONS);
 }
 
 export function removeMission(sessionId) {

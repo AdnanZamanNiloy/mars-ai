@@ -1,8 +1,9 @@
 /* Chat-session persistence regression tests (frontend helpers).
  *
- * The bug: every question created a new session. These lock in the helper
- * contract that App.jsx relies on — one stable active session id, a chat
- * list keyed by sessionId (not runId), and New Chat minting a new id.
+ * The bug: every question created a new session and renamed the chat. These
+ * lock in the helper contract that App.jsx relies on — one stable active
+ * session id, a chat list keyed by sessionId (not runId), a stable title
+ * across follow-ups, and New Chat minting a new id.
  *
  * Runs on Node's built-in test runner with a tiny localStorage stub, so no
  * new dependency and no browser is required.
@@ -60,6 +61,34 @@ test("a different sessionId creates a separate chat (New Chat)", () => {
   upsertMission({ sessionId: "chat-2", runId: "run-b", query: "q2" });
   const ids = loadMissions().map((m) => m.sessionId).sort();
   assert.deepEqual(ids, ["chat-1", "chat-2"]);
+});
+
+test("multiple follow-ups keep the original title source", () => {
+  store.clear();
+  upsertMission({ sessionId: "chat-1", runId: "run-a", query: "what is RAG?", status: "running" });
+  upsertMission({ sessionId: "chat-1", runId: "run-b", query: "and how does it work?", status: "completed" });
+  upsertMission({ sessionId: "chat-1", runId: "run-c", query: "give an example", status: "completed" });
+  const m = loadMissions().find((x) => x.sessionId === "chat-1");
+  assert.equal(m.query, "what is RAG?", "title falls back to the FIRST message");
+  assert.equal(m.title, "", "no explicit title supplied on any message");
+  // Latest run still tracked for trace/replay.
+  assert.equal(m.runId, "run-c");
+});
+
+test("an explicit title is never overwritten by follow-ups", () => {
+  store.clear();
+  upsertMission({ sessionId: "chat-1", runId: "run-a", query: "q1", title: "Renamed chat" });
+  upsertMission({ sessionId: "chat-1", runId: "run-b", query: "q2" });
+  const m = loadMissions().find((x) => x.sessionId === "chat-1");
+  assert.equal(m.title, "Renamed chat");
+  assert.equal(m.query, "q1");
+});
+
+test("a brand-new session takes the first message as its title source", () => {
+  store.clear();
+  upsertMission({ sessionId: "chat-9", runId: "run-1", query: "first ever message" });
+  const m = loadMissions().find((x) => x.sessionId === "chat-9");
+  assert.equal(m.query, "first ever message");
 });
 
 test("updateMission and removeMission target the session, not the run", () => {
