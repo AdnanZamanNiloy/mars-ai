@@ -149,6 +149,10 @@ CREATE TABLE IF NOT EXISTS llm_providers (
     api_key_enc TEXT NOT NULL,
     key_hint TEXT NOT NULL DEFAULT '',
     model TEXT NOT NULL,
+    -- Human-readable label for the endpoint (`model` stays the id sent to the
+    -- provider API). Kept nullable-with-default so every existing row and the
+    -- ALTER in init_db resolve to the same shape.
+    model_name TEXT DEFAULT '',
     is_active INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -284,6 +288,16 @@ async def init_db(database_path: str) -> None:
             await db.execute("ALTER TABLE claims ADD COLUMN agent TEXT NOT NULL DEFAULT ''")
         if "challenged" not in claim_names:
             await db.execute("ALTER TABLE claims ADD COLUMN challenged INTEGER NOT NULL DEFAULT 0")
+        # Provider model label (additive, idempotent). `model` is the id sent to
+        # the provider API; `model_name` is the human label shown in the UI.
+        # Gated on PRAGMA (not on SCHEMA_VERSION) so a database written by any
+        # build converges to one shape: CREATE TABLE IF NOT EXISTS never adds
+        # columns to an existing table, so a DB created before this column
+        # existed would otherwise keep it missing forever.
+        provider_cols = await db.execute("PRAGMA table_info(llm_providers)")
+        provider_names = {r[1] for r in await provider_cols.fetchall()}
+        if "model_name" not in provider_names:
+            await db.execute("ALTER TABLE llm_providers ADD COLUMN model_name TEXT DEFAULT ''")
         # Provider fallback chains (additive, idempotent): ordered lists of
         # existing providers. A single enabled chain drives the runtime chain;
         # members are ordered by `position` and unique per chain.

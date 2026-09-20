@@ -79,9 +79,14 @@ function LibraryMenu({ view, onNavigate }) {
   );
 }
 
+/* The view name is the first path segment; anything after it is the view's
+ * own state. The Providers sub-page tab rides there ("#/providers?tab=chains")
+ * so each tab is linkable and survives a reload. Without the split a query
+ * would fail the exact-match lookup below and silently drop a deep link on
+ * the landing page. */
 function viewFromHash() {
   try {
-    const h = window.location.hash.replace(/^#\/?/, "");
+    const h = window.location.hash.replace(/^#\/?/, "").split(/[?&#]/)[0];
     return VALID_VIEWS.includes(h) ? h : "landing";
   } catch {
     return "landing";

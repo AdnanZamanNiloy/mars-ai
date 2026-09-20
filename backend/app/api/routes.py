@@ -91,6 +91,8 @@ class ProviderIn(BaseModel):
     base_url: str = Field(..., min_length=8, max_length=500)
     api_key: str = Field(..., min_length=1, max_length=2000)
     model: str = Field(..., min_length=1, max_length=200)
+    # Optional: older clients omit it and the store falls back to `model`.
+    model_name: str | None = Field(default=None, max_length=200)
 
 
 class ProviderUpdate(BaseModel):
@@ -98,6 +100,7 @@ class ProviderUpdate(BaseModel):
     base_url: str | None = Field(default=None, max_length=500)
     api_key: str | None = Field(default=None, max_length=2000)
     model: str | None = Field(default=None, max_length=200)
+    model_name: str | None = Field(default=None, max_length=200)
 
 
 class ProviderTestIn(BaseModel):
@@ -145,7 +148,7 @@ async def create_llm_provider(body: ProviderIn, request: Request) -> Dict[str, A
     try:
         row = await provider_store.save_provider(
             _providers_db(request), name=body.name, base_url=body.base_url,
-            model=body.model, api_key=body.api_key,
+            model=body.model, api_key=body.api_key, model_name=body.model_name,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -169,6 +172,7 @@ async def update_llm_provider(provider_id: int, body: ProviderUpdate, request: R
             base_url=body.base_url if body.base_url is not None else existing["base_url"],
             model=body.model if body.model is not None else existing["model"],
             api_key=body.api_key,
+            model_name=body.model_name,
         )
     except LookupError:
         raise HTTPException(status_code=404, detail=f"Unknown provider id: {provider_id}")

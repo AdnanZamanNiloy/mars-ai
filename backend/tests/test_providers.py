@@ -349,3 +349,155 @@ async def test_exclusive_probe_covers_env_fallbacks_when_enabled(db_path):
             return_value=httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]}))
         ok, _ = await client.probe_all(timeout=5.0)
     assert ok is True
+
+
+# ---------------------------------------------------------------------------
+# Regression: the orphaned `model_name` column broke /api/providers with 500.
+#
+# The persisted table had a `model_name` column and every row stored '' for it,
+# but `_public()` never selected it and no migration/INSERT/UPDATE mentioned it.
+# The store resolves at boot against whatever column set the on-disk database
+# actually has, so a database written by the build that added the column could
+# never be read back by the build that did not know about it.
+# ---------------------------------------------------------------------------
+
+
+async def test_reads_provider_rows_written_with_model_name_column(db_path):
+    """A row carrying model_name must serialize, not raise. `model_name` blank
+    resolves to the model id so the wire shape is always a usable label."""
+    import aiosqlite
+
+    from app.core import providers as store
+
+    await _seed(db_path, name="alpha")
+    async with aiosqlite.connect(db_path) as raw:
+        await raw.execute(
+            "UPDATE llm_providers SET model_name = ? WHERE name = ?",
+            ("GPT-4o mini", "alpha"),
+        )
+        await raw.commit()
+
+    rows = await store.list_providers(db_path)
+    row = next(r for r in rows if r["name"] == "alpha")
+    assert row["model_name"] == "GPT-4o mini"
+
+    # The column is present in the fresh schema, so a blank label is the
+    # documented "no separate label" state and must fall back to the id.
+    async with aiosqlite.connect(db_path) as raw:
+        await raw.execute("UPDATE llm_providers SET model_name = '' WHERE name = ?", ("alpha",))
+        await raw.commit()
+    row = next(r for r in await store.list_providers(db_path) if r["name"] == "alpha")
+    assert row["model_name"] == row["model"]
+
+
+async def test_fresh_schema_carries_the_model_name_column(db_path):
+    """init_db must create the column outright, and the ALTER path must still
+    converge an older database onto the same shape."""
+    import aiosqlite
+
+    from app.db.sqlite import init_db
+
+    async with aiosqlite.connect(db_path) as db:
+        cols = {r[1] for r in await (await db.execute("PRAGMA table_info(llm_providers)")).fetchall()}
+    assert "model_name" in cols, "fresh databases must include model_name"
+
+    # Simulate a database created before the column existed by rebuilding the
+    # table without it, then re-running the migration.
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute("ALTER TABLE llm_providers RENAME TO _old")
+        await db.execute(
+            """CREATE TABLE llm_providers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
+                base_url TEXT NOT NULL, api_key_enc TEXT NOT NULL,
+                key_hint TEXT NOT NULL DEFAULT '', model TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"""
+        )
+        await db.execute(
+            "INSERT INTO llm_providers (name, base_url, api_key_enc, key_hint, model, is_active, created_at, updated_at)"
+            " SELECT name, base_url, api_key_enc, key_hint, model, is_active, created_at, updated_at FROM _old"
+        )
+        await db.execute("DROP TABLE _old")
+        await db.commit()
+        cols = {r[1] for r in await (await db.execute("PRAGMA table_info(llm_providers)")).fetchall()}
+        assert "model_name" not in cols, "precondition: the legacy shape has no model_name"
+
+    await init_db(db_path)
+
+    async with aiosqlite.connect(db_path) as db:
+        cols = {r[1] for r in await (await db.execute("PRAGMA table_info(llm_providers)")).fetchall()}
+    assert "model_name" in cols, "init_db must migrate a legacy table forward"
+
+
+async def test_model_name_round_trips_and_is_independent_of_model(db_path):
+    """Model name is a display label; Model ID is what goes to the provider.
+    They must be independently settable, and an omitted label on partial
+    update must preserve the stored one rather than blanking it."""
+    from app.core import providers as store
+
+    created = await store.save_provider(
+        db_path, name="labelled", base_url="https://llm.example.com/v1",
+        model="gpt-4o-mini", api_key="sk-live-1234", model_name="GPT-4o mini",
+    )
+    assert created["model"] == "gpt-4o-mini"
+    assert created["model_name"] == "GPT-4o mini"
+
+    # Omitting model_name (None) keeps the stored label.
+    updated = await store.save_provider(
+        db_path, provider_id=created["id"], name="labelled",
+        base_url="https://llm.example.com/v1", model="gpt-4o-mini",
+    )
+    assert updated["model_name"] == "GPT-4o mini", "an omitted label must be preserved"
+
+    # An explicit blank clears the label back to the model id.
+    cleared = await store.save_provider(
+        db_path, provider_id=created["id"], name="labelled",
+        base_url="https://llm.example.com/v1", model="gpt-4o-mini", model_name="",
+    )
+    assert cleared["model_name"] == "gpt-4o-mini"
+
+
+async def test_provider_routes_accept_model_name(db_path):
+    """/api/providers must round-trip model_name end to end: the 500 this
+    guards against surfaced on exactly this route."""
+    import httpx
+    from fastapi import FastAPI
+
+    from app.api.routes import limiter, router as api_router
+
+    app = FastAPI()
+    app.state.settings = _settings(database_url=db_path)
+    app.state.limiter = limiter
+    app.include_router(api_router, prefix="/api")
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.post("/api/providers", json={
+            "name": "seeded", "base_url": "https://seeded.example.com/v1",
+            "api_key": "sk-seeded-7777", "model": "seeded-model",
+        })
+        listed = await client.get("/api/providers")
+        assert listed.status_code == 200, "GET /api/providers must not 500"
+        assert listed.json()["providers"], "the seeded provider must be readable"
+
+        created = await client.post("/api/providers", json={
+            "name": "routed", "base_url": "https://routed.example.com/v1",
+            "api_key": "sk-routed-9999", "model": "routed-model",
+            "model_name": "Routed Model Label",
+        })
+        assert created.status_code == 201, created.text
+        assert created.json()["provider"]["model_name"] == "Routed Model Label"
+
+        # A legacy client that omits the field entirely still succeeds.
+        legacy = await client.post("/api/providers", json={
+            "name": "legacy", "base_url": "https://legacy.example.com/v1",
+            "api_key": "sk-legacy-8888", "model": "legacy-model",
+        })
+        assert legacy.status_code == 201, legacy.text
+        assert legacy.json()["provider"]["model_name"] == "legacy-model"
+
+        renamed = await client.put(
+            f"/api/providers/{created.json()['provider']['id']}",
+            json={"model_name": "Renamed Label"},
+        )
+        assert renamed.status_code == 200, renamed.text
+        assert renamed.json()["provider"]["model_name"] == "Renamed Label"

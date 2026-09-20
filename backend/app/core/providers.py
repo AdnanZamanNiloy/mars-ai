@@ -105,6 +105,14 @@ def _validate(name: str, base_url: str, model: str) -> tuple[str, str, str]:
     return name, base_url, model
 
 
+def _validate_model_name(model_name: Optional[str], *, fallback: str) -> str:
+    """Human label for the endpoint. Blank means "no separate label", in which
+    case the UI reads the model id instead — never an error, so an older client
+    that omits the field keeps working unchanged."""
+    label = str(model_name or "").strip()[:200]
+    return label or fallback
+
+
 def _public(row: Any) -> Dict[str, Any]:
     """Wire shape: everything except the key (hint only)."""
     return {
@@ -112,6 +120,9 @@ def _public(row: Any) -> Dict[str, Any]:
         "name": row["name"],
         "base_url": row["base_url"],
         "model": row["model"],
+        # Wire shape only: the persisted column lands with the migration above,
+        # but a row read from a database that predates it still resolves.
+        "model_name": _validate_model_name(row["model_name"], fallback=row["model"]),
         "is_active": bool(row["is_active"]),
         "has_key": bool(row["api_key_enc"]),
         "key_hint": row["key_hint"] or "",
@@ -143,10 +154,15 @@ async def save_provider(
     base_url: str,
     model: str,
     api_key: Optional[str] = None,
+    model_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Insert (provider_id None) or update. api_key None on update keeps the
-    stored key; empty string on insert is rejected. Name must stay unique."""
+    stored key; empty string on insert is rejected. Name must stay unique.
+
+    `model_name` is the optional human label; blank falls back to the model id.
+    """
     name, base_url, model = _validate(name, base_url, model)
+    label = _validate_model_name(model_name, fallback=model)
     async with aiosqlite.connect(database_path) as db:
         db.row_factory = aiosqlite.Row
         if provider_id is None:
@@ -158,9 +174,9 @@ async def save_provider(
             hint = f"••••{key[-4:]}"
             try:
                 cur = await db.execute(
-                    "INSERT INTO llm_providers (name, base_url, api_key_enc, key_hint, model, is_active, created_at, updated_at)"
-                    " VALUES (?, ?, ?, ?, ?, 0, ?, ?)",
-                    (name, base_url, encrypt_api_key(key), hint, model, _utcnow(), _utcnow()),
+                    "INSERT INTO llm_providers (name, base_url, api_key_enc, key_hint, model, model_name, is_active, created_at, updated_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
+                    (name, base_url, encrypt_api_key(key), hint, model, label, _utcnow(), _utcnow()),
                 )
             except Exception as exc:
                 if "UNIQUE" in str(exc).upper():
@@ -187,10 +203,14 @@ async def save_provider(
                 if len(key) > 2000:
                     raise ValueError("API key is too long.")
                 enc, hint = encrypt_api_key(key), f"••••{key[-4:]}"
+            # An omitted label keeps the stored one; a blank one clears it back
+            # to the model id, so the two fields stay independent.
+            if model_name is None:
+                label = _validate_model_name(existing["model_name"], fallback=model)
             await db.execute(
-                "UPDATE llm_providers SET name = ?, base_url = ?, api_key_enc = ?, key_hint = ?, model = ?, updated_at = ?"
+                "UPDATE llm_providers SET name = ?, base_url = ?, api_key_enc = ?, key_hint = ?, model = ?, model_name = ?, updated_at = ?"
                 " WHERE id = ?",
-                (name, base_url, enc, hint, model, _utcnow(), int(provider_id)),
+                (name, base_url, enc, hint, model, label, _utcnow(), int(provider_id)),
             )
             new_id = int(provider_id)
         await db.commit()
