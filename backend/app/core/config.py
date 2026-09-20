@@ -142,7 +142,7 @@ class Settings(BaseSettings):
     # Full multi-agent runs take minutes (retrieval + 6 LLM stages), the
     # same as upstream GPT Researcher. Per-provider fail-fasts (auth/402/
     # timeouts) keep doomed calls from eating this budget.
-    research_timeout_sec: float = 300.0
+    research_timeout_sec: float = 1000.0
 
     # Cache (Phase 1.4)
     cache_size_limit_bytes: int = 250_000_000  # 250MB, diskcache size cap
