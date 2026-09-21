@@ -91,8 +91,19 @@ function LibraryMenu({ view, onNavigate }) {
 function viewFromHash() {
   try {
     const raw = window.location.hash.replace(/^#\/?/, "").split(/[?&#]/)[0];
-    const h = VIEW_ALIASES[raw] || raw;
-    return VALID_VIEWS.includes(h) ? h : "landing";
+    const canonical = VIEW_ALIASES[raw];
+    if (canonical) {
+      // Legacy route (e.g. "#/providers"): resolve to the canonical view AND
+      // rewrite the address bar so the URL no longer shows the old id.
+      try {
+        const rest = window.location.hash.replace(/^#\/?[^?&#]*/, "");
+        window.history.replaceState({ view: canonical }, "", `#/${canonical}${rest}`);
+      } catch {
+        /* no DOM: keep the resolved view, leave the hash alone */
+      }
+      return canonical;
+    }
+    return VALID_VIEWS.includes(raw) ? raw : "landing";
   } catch {
     return "landing";
   }
