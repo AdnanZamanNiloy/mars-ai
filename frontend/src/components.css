@@ -1121,71 +1121,6 @@
   background: var(--red-wash); border-radius: var(--r-xs);
 }
 
-/* ---------- providers: four-section control surface ---------- */
-
-.pv-section {
-  background: var(--card); border: 1px solid var(--line);
-  border-radius: var(--r-md); padding: 16px 18px; margin-bottom: 16px;
-}
-.pv-section-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
-.pv-index {
-  flex: none; width: 26px; height: 26px; border-radius: 8px;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--mars-wash); color: var(--mars);
-  font-size: 12.5px; font-weight: 750;
-}
-.pv-section-head h3 { margin: 0; font-size: 14.5px; font-weight: 680; color: var(--t1); }
-.pv-section-head p { margin: 3px 0 0; font-size: 12px; color: var(--t3); line-height: 1.55; max-width: 70ch; }
-
-.pv-form { margin: 0; }
-.pv-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
-.pv-col-2 { grid-column: 1 / -1; }
-
-/* .pv-model-list / .pv-model-card were referenced against a providers.css
- * that does not exist; the grid rules live here so the card layout (and the
- * reserved probe slot) is actually applied. */
-
-.pv-model-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
-.pv-model-card {
-  display: flex; flex-direction: column; justify-content: space-between; gap: 10px;
-  background: var(--card); border: 1px solid var(--line);
-  border-radius: var(--r-md); padding: 12px 14px;
-  /* align-items:stretch keeps every card in a row the same height, so one
-     card gaining a probe line does not reshape the grid. */
-  align-items: stretch;
-  min-height: 188px;
-}
-.pv-model-card.active { border-color: var(--mars-deep); }
-.pv-model-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.pv-model-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.pv-model-name { margin: 0; font-size: 14px; font-weight: 680; color: var(--t1); }
-.pv-model-label { margin: 0; font-size: 12px; color: var(--t3); }
-.pv-model-meta { margin: 0; display: flex; flex-direction: column; gap: 4px; }
-.pv-model-meta div { display: flex; gap: 8px; min-width: 0; }
-.pv-model-meta dt { flex: none; width: 62px; font-size: 11px; color: var(--t4); }
-.pv-model-meta dd { margin: 0; min-width: 0; font-size: 11.5px; color: var(--t2); overflow: hidden; text-overflow: ellipsis; }
-.pv-model-meta code { font-family: var(--mono); font-size: 11.5px; word-break: break-all; }
-.pv-muted { color: var(--t4); }
-/* Reserved, fixed-height result slot: the test outcome (one-line success or a
- * multi-line ConnectError) never changes the card's height or the grid shape. */
-.pv-probe {
-  margin: 0; height: 26px; overflow: hidden;
-  display: flex; align-items: center;
-  font-size: 11.5px; line-height: 1.3;
-  border-radius: var(--r-xs);
-}
-.pv-probe.probe-ok { color: var(--probe-ok); }
-.pv-probe.probe-bad { color: var(--danger); }
-.pv-probe.probe-testing { color: var(--t3); }
-/* All card actions share ONE wrapping row, spread across the card width. */
-.pv-model-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; width: 100%; }
-.pv-model-actions .btn { flex: 1 1 auto; justify-content: center; }
-.pv-timeout { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--t3); flex: 0 0 auto; }
-.pv-timeout input {
-  width: 72px; padding: 5px 9px;
-  background: var(--bg-soft); border: 1px solid var(--line); border-radius: 8px;
-  color: var(--t1); font-size: 12.5px; outline: none;
-}
 
 .chain-add { display: flex; gap: 10px; margin-bottom: 14px; }
 .chain-add input {
@@ -1227,6 +1162,6 @@
 .serving-hint { font-size: 11.5px; color: var(--t4); }
 
 @media (max-width: 720px) {
-  .pv-grid, .serving-modes { grid-template-columns: 1fr; }
+  .serving-modes { grid-template-columns: 1fr; }
 }
 

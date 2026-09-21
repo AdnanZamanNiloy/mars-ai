@@ -822,7 +822,7 @@ export default function ProvidersView() {
     <div className="view anim-rise pv-view">
       <div className="view-head pv-view-head">
         <div>
-          <h2>Providers</h2>
+          <h2>Model Controls</h2>
           <p>
             {providers.length} model{providers.length === 1 ? "" : "s"} ·{" "}
             {chains.length} chain{chains.length === 1 ? "" : "s"} · serving:{" "}
@@ -841,9 +841,9 @@ export default function ProvidersView() {
 
       {error ? <div className="error-box" role="alert">{error}</div> : null}
 
-      {/* Tab list. Counts ride on the tabs so the collapsed panels stay
+      {/* Model Controls: counts ride on the tabs so the collapsed panels stay
           legible without opening them. */}
-      <div className="pv-tabs" role="tablist" aria-label="Provider settings sections" onKeyDown={onTabKeyDown}>
+      <div className="pv-tabs" role="tablist" aria-label="Model Controls" onKeyDown={onTabKeyDown}>
         {PROVIDER_TABS.map((t) => {
           const count = t.id === "models" ? providers.length
             : t.id === "chains" ? chains.length

@@ -16,7 +16,7 @@ export function Planet({ size = 40, ring = false }) {
 
 const NAV = [
   { id: "missions", label: "Research", icon: IconMissions },
-  { id: "providers", label: "Providers", icon: IconCompass },
+  { id: "providers", label: "Model Controls", icon: IconCompass },
   { id: "agents", label: "Agents", icon: IconAgents },
 ];
 

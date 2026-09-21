@@ -850,7 +850,7 @@ export default function App() {
 
   /* Fixed page title: the current research question on the workspace view,
    * plain view names elsewhere. The menu acts on the displayed chat. */
-  const VIEW_TITLES = { missions: "Research", evidence: "Evidence", knowledge: "Knowledge", agents: "Agents", providers: "Providers" };
+  const VIEW_TITLES = { missions: "Research", evidence: "Evidence", knowledge: "Knowledge", agents: "Agents", providers: "Model Controls" };
   const titleMessage = [...messages].reverse().find((m) =>
     (m.kind === "run" && m.run?.query) ||
     (m.kind === "replay" && m.query) ||
