@@ -41,3 +41,6 @@ gpt-researcher/
 # Vendor bundle for the v3 agent integration (kept local, not versioned)
 mars-deep-research-v3.zip
 gitstat_tmp.txt
+
+# Local verification screenshots (scratch)
+.verify/
