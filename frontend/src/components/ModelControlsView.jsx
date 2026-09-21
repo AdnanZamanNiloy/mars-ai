@@ -11,7 +11,7 @@ import {
   IconCheck, IconChevronDown, IconMore, IconPencil,
   IconPlus, IconRefresh, IconX,
 } from "./icons";
-import "./providers.css";
+import "./model-controls.css";
 
 /* Providers — the model-layer control surface.
  *
@@ -35,35 +35,35 @@ const EMPTY = { name: "", base_url: "", api_key: "", model: "", model_name: "" }
 /* Tab order, exported for the test that locks this contract. The four
  * sections used to stack into one long scroll; each is now its own sub-page
  * reached from this bar, so the whole view fits without scrolling. */
-export const PROVIDER_TABS = [
+export const MODEL_CONTROL_TABS = [
   { id: "models", label: "Available models", title: "Available models" },
   { id: "add", label: "Add model", title: "Add model" },
   { id: "chains", label: "Fallback chains", title: "Fallback chains" },
   { id: "serving", label: "Serving mode", title: "Serving mode" },
 ];
 
-export const DEFAULT_PROVIDER_TAB = "models";
+export const DEFAULT_MODEL_CONTROL_TAB = "models";
 
-export function isProviderTab(value) {
-  return PROVIDER_TABS.some((t) => t.id === value);
+export function isModelControlTab(value) {
+  return MODEL_CONTROL_TABS.some((t) => t.id === value);
 }
 
-const HASH_PREFIX = "#/providers";
+const HASH_PREFIX = "#/model-controls";
 
 /* The active tab rides in the url's QUERY STRING, deliberately not as a hash
  * sub-segment: App.viewFromHash() resolves the view from the first path
- * segment, so "#/providers/serving" would land on a view that does not exist
- * and a reload would bounce to the landing page. "#/providers?tab=serving"
+ * segment, so "#/model-controls/serving" would land on a view that does not exist
+ * and a reload would bounce to the landing page. "#/model-controls?tab=serving"
  * keeps the view parseable while making each sub-page linkable and shareable.
  *
  * This is a hash-routed SPA, so the query lives INSIDE the fragment
- * ("#/providers?tab=serving") and location.search stays empty — the fragment
+ * ("#/model-controls?tab=serving") and location.search stays empty — the fragment
  * is what a user copies out of the address bar. location.search is still read
  * as a fallback so a plain "?tab=" url works too. */
 export function providerTabFromUrl(hash, search) {
   const hashRaw = String(hash ?? "").replace(/^#\/?/, "");
   const view = hashRaw.split(/[?/]/)[0];
-  if (view !== "providers") return DEFAULT_PROVIDER_TAB;
+  if (view !== "model-controls") return DEFAULT_MODEL_CONTROL_TAB;
   const query = hashRaw.includes("?") ? hashRaw.slice(hashRaw.indexOf("?") + 1) : String(search ?? "");
   let tab = null;
   try {
@@ -71,7 +71,7 @@ export function providerTabFromUrl(hash, search) {
   } catch {
     /* malformed query — fall through to the default */
   }
-  return isProviderTab(tab) ? tab : DEFAULT_PROVIDER_TAB;
+  return isModelControlTab(tab) ? tab : DEFAULT_MODEL_CONTROL_TAB;
 }
 
 const PROVIDER_PRESETS = [
@@ -653,7 +653,7 @@ function ServingModeSection({ providers, activeId, chains, busy, onSelectSingle,
 }
 
 /* ---- Page --------------------------------------------------------------- */
-export default function ProvidersView() {
+export default function ModelControlsView() {
   const [providers, setProviders] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [chains, setChains] = useState([]);
@@ -686,11 +686,11 @@ export default function ProvidersView() {
    * "back" leaves the tab rather than only rewriting the fragment. The
    * search-stripping fallback covers non-browser/test environments. */
   const goTab = useCallback((next) => {
-    if (!isProviderTab(next)) return;
+    if (!isModelControlTab(next)) return;
     setTab(next);
-    const url = next === DEFAULT_PROVIDER_TAB ? HASH_PREFIX : `${HASH_PREFIX}?tab=${next}`;
+    const url = next === DEFAULT_MODEL_CONTROL_TAB ? HASH_PREFIX : `${HASH_PREFIX}?tab=${next}`;
     try {
-      window.history.pushState({ view: "providers", tab: next }, "", url);
+      window.history.pushState({ view: "model-controls", tab: next }, "", url);
     } catch {
       try { window.location.hash = url.slice(1); } catch { /* no DOM */ }
     }
@@ -702,8 +702,8 @@ export default function ProvidersView() {
     const dir = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
     if (!dir) return;
     e.preventDefault();
-    const i = PROVIDER_TABS.findIndex((t) => t.id === tab);
-    const next = PROVIDER_TABS[(i + dir + PROVIDER_TABS.length) % PROVIDER_TABS.length];
+    const i = MODEL_CONTROL_TABS.findIndex((t) => t.id === tab);
+    const next = MODEL_CONTROL_TABS[(i + dir + MODEL_CONTROL_TABS.length) % MODEL_CONTROL_TABS.length];
     goTab(next.id);
     document.getElementById(`pv-tab-${next.id}`)?.focus();
   }, [tab, goTab]);
@@ -844,7 +844,7 @@ export default function ProvidersView() {
       {/* Model Controls: counts ride on the tabs so the collapsed panels stay
           legible without opening them. */}
       <div className="pv-tabs" role="tablist" aria-label="Model Controls" onKeyDown={onTabKeyDown}>
-        {PROVIDER_TABS.map((t) => {
+        {MODEL_CONTROL_TABS.map((t) => {
           const count = t.id === "models" ? providers.length
             : t.id === "chains" ? chains.length
             : null;

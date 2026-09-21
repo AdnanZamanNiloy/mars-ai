@@ -8,7 +8,7 @@
  * fit and leaves the trailing space empty.
  *
  * This reads the stylesheet as text rather than the rendered DOM: the failure
- * mode is a CSS regression, and a plain-Node import of ProvidersView.jsx would
+ * mode is a CSS regression, and a plain-Node import of ModelControlsView.jsx would
  * reject ("Unknown file extension"), aborting the file so `node --test` still
  * reports it as passing. The rendered result is covered by the browser check.
  *
@@ -20,7 +20,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const css = readFileSync(
-  fileURLToPath(new URL("../src/components/providers.css", import.meta.url)),
+  fileURLToPath(new URL("../src/components/model-controls.css", import.meta.url)),
   "utf8",
 );
 

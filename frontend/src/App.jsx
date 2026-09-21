@@ -12,7 +12,7 @@ import MissionsView from "./components/MissionsView";
 import EvidenceView from "./components/EvidenceView";
 import KnowledgeView from "./components/KnowledgeView";
 import AgentsView from "./components/AgentsView";
-import ProvidersView from "./components/ProvidersView";
+import ModelControlsView from "./components/ModelControlsView";
 import Landing from "./components/Landing";
 import DocsView from "./components/DocsView";
 import { IconChevronDown, IconChevronLeft, IconDoc, IconFolder, IconLayers, IconMenu, IconPencil, IconPin, IconSpark, IconTrash } from "./components/icons";
@@ -20,7 +20,11 @@ import { IconChevronDown, IconChevronLeft, IconDoc, IconFolder, IconLayers, Icon
 let seq = 1;
 const nid = () => `m${Date.now()}-${seq++}`;
 
-const VALID_VIEWS = ["landing", "workspace", "missions", "evidence", "knowledge", "agents", "providers", "docs"];
+const VALID_VIEWS = ["landing", "workspace", "missions", "evidence", "knowledge", "agents", "model-controls", "docs"];
+/* Legacy route alias: old "#/providers" links/bookmarks still resolve to the
+ * Model Controls view. Kept indefinitely — the route id was renamed to
+ * "model-controls" but the URL had already shipped. */
+const VIEW_ALIASES = { providers: "model-controls" };
 
 const LIBRARY = [
   { id: "evidence", label: "Evidence", icon: IconLayers },
@@ -80,13 +84,14 @@ function LibraryMenu({ view, onNavigate }) {
 }
 
 /* The view name is the first path segment; anything after it is the view's
- * own state. The Providers sub-page tab rides there ("#/providers?tab=chains")
+ * own state. The Providers sub-page tab rides there ("#/model-controls?tab=chains")
  * so each tab is linkable and survives a reload. Without the split a query
  * would fail the exact-match lookup below and silently drop a deep link on
  * the landing page. */
 function viewFromHash() {
   try {
-    const h = window.location.hash.replace(/^#\/?/, "").split(/[?&#]/)[0];
+    const raw = window.location.hash.replace(/^#\/?/, "").split(/[?&#]/)[0];
+    const h = VIEW_ALIASES[raw] || raw;
     return VALID_VIEWS.includes(h) ? h : "landing";
   } catch {
     return "landing";
@@ -850,7 +855,7 @@ export default function App() {
 
   /* Fixed page title: the current research question on the workspace view,
    * plain view names elsewhere. The menu acts on the displayed chat. */
-  const VIEW_TITLES = { missions: "Research", evidence: "Evidence", knowledge: "Knowledge", agents: "Agents", providers: "Model Controls" };
+  const VIEW_TITLES = { missions: "Research", evidence: "Evidence", knowledge: "Knowledge", agents: "Agents", "model-controls": "Model Controls" };
   const titleMessage = [...messages].reverse().find((m) =>
     (m.kind === "run" && m.run?.query) ||
     (m.kind === "replay" && m.query) ||
@@ -994,8 +999,8 @@ export default function App() {
                 />
               ) : view === "agents" ? (
                 <AgentsView />
-              ) : view === "providers" ? (
-                <ProvidersView />
+              ) : view === "model-controls" ? (
+                <ModelControlsView />
               ) : messages.length === 0 ? (
                 <WelcomeHero
                   onSubmit={submitQuery}
