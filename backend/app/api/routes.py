@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 import json
+from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Dict
 
 from fastapi import APIRouter, HTTPException, Request
@@ -540,8 +541,14 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
             # state after each node, so node completions are derived from the
             # first snapshot in which each marker appears.
             recorded_nodes: set = set()
+            # Superstep boundary for per-node timing: stream_mode="values"
+            # yields once per superstep, so the previous yield's timestamp is
+            # an honest started_at for every node completing in this one.
+            # (Before this, record_event stubbed started_at = ended_at and
+            # per-stage duration was unmeasurable from the trace.)
+            snapshot_boundary: list[str] = [""]
 
-            async def _record_node_events(snapshot: Dict[str, Any]) -> None:
+            async def _record_node_events(snapshot: Dict[str, Any], started_at: str) -> None:
                 def _once(node: str) -> bool:
                     if node in recorded_nodes:
                         return False
@@ -550,25 +557,25 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
 
                 if snapshot.get("sub_questions") and _once("planner"):
                     payload_json = json.dumps({"sub_questions": len(snapshot["sub_questions"])})
-                    await _persist(record_event(settings.database_url, request_id, "planner", "end", payload=payload_json))
+                    await _persist(record_event(settings.database_url, request_id, "planner", "end", payload=payload_json, started_at=started_at))
                 if snapshot.get("search_results") and _once("search"):
                     payload_json = json.dumps({"results": len(snapshot["search_results"])})
-                    await _persist(record_event(settings.database_url, request_id, "search", "end", payload=payload_json))
+                    await _persist(record_event(settings.database_url, request_id, "search", "end", payload=payload_json, started_at=started_at))
                 facts = snapshot.get("facts", [])
                 if facts and _once("summarizer"):
-                    await _persist(record_event(settings.database_url, request_id, "summarizer", "end", payload=json.dumps({"facts": len(facts)})))
+                    await _persist(record_event(settings.database_url, request_id, "summarizer", "end", payload=json.dumps({"facts": len(facts)}), started_at=started_at))
                 if facts and any("verified" in f for f in facts) and _once("verifier"):
                     verified_count = sum(1 for f in facts if f.get("verified"))
-                    await _persist(record_event(settings.database_url, request_id, "verifier", "end", payload=json.dumps({"verified": verified_count, "total": len(facts)})))
+                    await _persist(record_event(settings.database_url, request_id, "verifier", "end", payload=json.dumps({"verified": verified_count, "total": len(facts)}), started_at=started_at))
                 if snapshot.get("synthesized_answer") and _once("synthesizer"):
                     support = snapshot.get("answer_support", {}) or {}
                     await _persist(record_event(settings.database_url, request_id, "synthesizer", "end", payload=json.dumps({
                         "support_rate": support.get("rate"),
                         "cited": support.get("cited"),
                         "supported": support.get("supported"),
-                    })))
+                    }), started_at=started_at))
                 if snapshot.get("final_report") and _once("finalize"):
-                    await _persist(record_event(settings.database_url, request_id, "finalize", "end", payload=""))
+                    await _persist(record_event(settings.database_url, request_id, "finalize", "end", payload="", started_at=started_at))
 
             await _persist(ensure_session(
                 settings.database_url, session_id, title=payload.query,
@@ -618,7 +625,13 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                         last_snapshot = snapshot
                         iteration = int(snapshot.get("iteration", 0))
 
-                        await _record_node_events(snapshot)
+                        # Boundary for THIS superstep's node events: the time
+                        # the previous snapshot was observed (or run start).
+                        _now_iso = datetime.now(timezone.utc).isoformat()
+                        started_iso = snapshot_boundary[0] or _now_iso
+                        snapshot_boundary[0] = _now_iso
+
+                        await _record_node_events(snapshot, started_iso)
 
                         if snapshot.get("intent") and not emitted_intent:
                             # Understand-before-searching: surface the resolved
@@ -637,6 +650,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                                     "domain": intent_data.get("domain"),
                                     "origin": intent_data.get("origin"),
                                 }),
+                                started_at=started_iso,
                             ))
 
                         if snapshot.get("route") and not emitted_route:
@@ -655,6 +669,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                                     "path": route_data.get("path"),
                                     "origin": route_data.get("origin"),
                                 }),
+                                started_at=started_iso,
                             ))
 
                         if snapshot.get("direct_answer") and not emitted_direct:
@@ -678,6 +693,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                                     "chars": len(str(snapshot.get("direct_answer", ""))),
                                     "self_confidence": direct_meta.get("confidence"),
                                 }),
+                                started_at=started_iso,
                             ))
 
                         if snapshot.get("sub_questions") and not emitted_plan:
@@ -729,6 +745,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                             await _persist(record_event(
                                 settings.database_url, request_id, "critic", "end",
                                 payload=json.dumps({"iteration": iteration, "is_sufficient": critique.get("is_sufficient", False)}),
+                                started_at=started_iso,
                             ))
                             # Every critic iteration is durable (3.8) — Replay
                             # shows the back-and-forth, not only the outcome.

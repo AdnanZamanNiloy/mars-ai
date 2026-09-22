@@ -1058,25 +1058,32 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
 
         intent_enabled = bool(getattr(llm.settings, "intent_enabled", True))
 
-        async def _classify() -> Dict[str, Any]:
+        async def _classify_and_route() -> tuple[Dict[str, Any], Dict[str, Any]]:
+            # Router after classifier (it reads the ambiguity signal), but
+            # BOTH overlap the grounding search: the old shape awaited
+            # route_query after the gather, adding one serial LLM round-trip
+            # to every run's critical path before the planner.
             if intent_enabled:
-                return (await classify_intent(llm, state["query"])).to_dict()
-            return heuristic_intent(state["query"]).to_dict()
+                intent_dict = (await classify_intent(llm, state["query"])).to_dict()
+            else:
+                intent_dict = heuristic_intent(state["query"]).to_dict()
+            # Query router (R2): decide direct-vs-research. R2 only records
+            # the decision on state so the route event and trace can surface
+            # it — the graph still always researches. Any failure is
+            # swallowed by route_query itself, which fails safe to "research".
+            route_decision = await route_query(
+                llm, state["query"], intent=intent_dict
+            )
+            return intent_dict, route_decision.to_dict()
 
-        context_snippets, intent_dict = await asyncio.gather(_context_search(), _classify())
-
-        # Query router (R2): once intent is known (the router reads the
-        # ambiguity signal), decide direct-vs-research. R2 only records the
-        # decision on state so the route event and trace can surface it —
-        # the graph still always researches. Any failure is swallowed by
-        # route_query itself, which fails safe to "research".
-        route_decision = await route_query(
-            llm, state["query"], intent=intent_dict
+        context_snippets, (intent_dict, route_dict) = await asyncio.gather(
+            _context_search(), _classify_and_route()
         )
+
         return {
             "intent": intent_dict,
             "context_snippets": context_snippets,
-            "route": route_decision.to_dict(),
+            "route": route_dict,
         }
 
     async def direct_answer_node(state: ResearchState) -> Dict[str, Any]:

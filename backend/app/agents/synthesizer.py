@@ -64,6 +64,7 @@ still returns the report as a plain string, and `synthesize()` still returns
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
@@ -1850,9 +1851,10 @@ async def _synthesize_sectioned(
     if exec_body:
         section_bodies.append(f"## Executive Summary\n\n{exec_body}")
 
-    for (section, _), section_cited in zip(groups, facts_by_section):
-        if not section_cited:
-            continue
+    async def _write_section(section, section_cited: List[Dict[str, Any]]) -> str | None:
+        """One section writer call. Returns the body, or None to abandon
+        the section-wise path (the caller falls back to single-pass — the
+        documented degradation, AGENTS 4.7)."""
         prompt = (
             f"Main query: {query}\n\n"
             f"{section_length_hint}\n\n"
@@ -1897,9 +1899,27 @@ async def _synthesize_sectioned(
                 "[Synthesizer] section '%s' empty; abandoning section-wise path", section.title
             )
             return None
-        body = _strip_duplicate_section_heading(body, section.title)
-        written_sections += 1
-        section_bodies.append(f"## {section.title}\n\n{body}")
+        return _strip_duplicate_section_heading(body, section.title)
+
+    # Sections write CONCURRENTLY (AGENTS 4.6): the writes are independent
+    # I/O and MAX_PARALLEL_LLM still bounds actual provider concurrency.
+    # gather preserves submission order, so assembled section order matches
+    # the outline regardless of completion order; any failed/empty section
+    # abandons the whole path exactly as the serial loop did.
+    jobs = [
+        (section, section_cited)
+        for (section, _), section_cited in zip(groups, facts_by_section)
+        if section_cited
+    ]
+    if jobs:
+        bodies = await asyncio.gather(
+            *(_write_section(section, section_cited) for section, section_cited in jobs)
+        )
+        for (section, _), body in zip(jobs, bodies):
+            if body is None:
+                return None
+            written_sections += 1
+            section_bodies.append(f"## {section.title}\n\n{body}")
 
     if written_sections < 2:
         return None

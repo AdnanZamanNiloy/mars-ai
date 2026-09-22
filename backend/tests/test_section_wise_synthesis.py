@@ -103,8 +103,10 @@ def test_section_wise_degrades_to_single_pass_on_failure():
     # is the single-pass retry's output, not a half-assembled draft.
     assert "SINGLE-PASS answer" in result.answer
     assert "Section body number" not in result.answer
-    # Section 1 (ok) + section 2 (fail) + single-pass retry = 3 calls.
-    assert llm.calls == 3
+    # Sections now write concurrently (latency fix): exec summary + ALL
+    # issued section calls (gather runs them even when one fails) + the
+    # single-pass retry. Serial-abandon semantics (no partial report) hold.
+    assert llm.calls >= 4  # 1 exec + >=2 sections + 1 single-pass retry
 
 
 def test_section_wise_disabled_is_single_pass():

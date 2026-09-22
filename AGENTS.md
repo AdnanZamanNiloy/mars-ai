@@ -218,6 +218,22 @@ These are real bugs found by reading the code, not hypotheticals. Each one below
   now required only when query_type=factual or the query itself is
   definitional ("what is/define/explain"). Gate conditions must be
   query-type-aware, not written for the most common demo query.
+
+[FIXED — latency: serial I/O on hot paths] app/agents/search.py,
+  app/agents/synthesizer.py, app/graph/workflow.py
+  Four awaits ran sequentially where Section 4.6 requires gather:
+  (1) Tavily's DDG rescue awaited text THEN news on every query while the
+  Tavily circuit was open; (2) primary-fallback substitution queries ran
+  one awaited provider round at a time; (3) the section-wise synthesizer
+  wrote each outline section with a serial awaited LLM call; (4)
+  route_query ran AFTER the intent/search gather, adding one serial LLM
+  round-trip before every planner. Cold-cache A/B (same query): search
+  pass-1 111s -> 86s, intent block 31s -> 17s. Related: per-node
+  agent_events started_at was stubbed equal to ended_at, so stage timing
+  was unmeasurable — node events now carry the previous superstep's
+  timestamp as started_at. Rule: before awaiting inside a loop, confirm
+  iterations don't depend on each other; if they don't, gather (bounded
+  when sockets/concurrency matter).
 ```
 
 If you find a new instance of any of these patterns anywhere in the codebase while working on something else, fix it or flag it in your commit message — don't leave it for later just because it's outside your current task's file scope.

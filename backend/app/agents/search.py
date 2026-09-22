@@ -1268,10 +1268,14 @@ class SearchClient:
         if max_fallbacks <= 0:
             return
 
-        issued = 0
+        # Phase 1 — plan (sync): select up to max_fallbacks blocked results
+        # and build their substitution queries. No I/O, same selection rules
+        # as the old interleaved loop (the ranked slice was always taken up
+        # front, so appending during processing never fed back into it).
+        planned: List[tuple] = []
         acquired_urls = {canonical_url(r.url) for r in ranked}
         for result in ranked[: max(1, int(getattr(self.settings, "search_fetch_top_n", 3) or 3))]:
-            if issued >= max_fallbacks:
+            if len(planned) >= max_fallbacks:
                 break
             host = _domain_of(result.url)
             if host not in blocked:
@@ -1290,13 +1294,27 @@ class SearchClient:
             fallback_query = (fallback_query or "").strip()
             if not fallback_query:
                 continue
-            issued += 1
-            try:
-                batches = await self._providers_for(fallback_query, result.search_type or "general")
-            except Exception as exc:
+            planned.append((result, fallback_query))
+        if not planned:
+            return
+
+        # Phase 2 — fetch concurrently: each substitution query is an
+        # independent provider round; running them serially doubled the
+        # wall time of an already-degraded retrieval path (live baseline).
+        batches_list = await asyncio.gather(
+            *(
+                self._providers_for(fallback_query, result.search_type or "general")
+                for result, fallback_query in planned
+            ),
+            return_exceptions=True,
+        )
+
+        # Phase 3 — merge in plan order (deterministic dedup/scoring order).
+        for (result, fallback_query), batches in zip(planned, batches_list):
+            if isinstance(batches, BaseException):
                 logger.warning(
                     "[Search] primary fallback query failed (%s): %s",
-                    type(exc).__name__, exc, exc_info=exc,
+                    type(batches).__name__, batches,
                 )
                 self.health.record_fallback_query(0)
                 continue
@@ -1328,11 +1346,10 @@ class SearchClient:
             )
         # Re-rank so substituted primary hits compete on the existing score,
         # not on insertion position. Pure function of the same scorer.
-        if issued:
-            ranked.sort(key=lambda r: r.reliability_score, reverse=True)
-            await self._attach_fallback_content(
-                ranked, acquired_urls, client=client, max_attempts=max_attempts
-            )
+        ranked.sort(key=lambda r: r.reliability_score, reverse=True)
+        await self._attach_fallback_content(
+            ranked, acquired_urls, client=client, max_attempts=max_attempts
+        )
 
     async def _attach_fallback_content(
         self,
@@ -1452,9 +1469,7 @@ class SearchClient:
 
         async def _fallback() -> List[SearchResult]:
             self._count("tavily", "fail")
-            results = await self._ddg_text(query)
-            results.extend(await self._ddg_news(query))
-            return results
+            return await self._ddg_rescue(query)
 
         return await call_protected(
             _call,
@@ -1491,6 +1506,20 @@ class SearchClient:
             breaker=get_breaker(f"ddg_{kind}", failure_threshold=4, cooldown=45.0),
             fallback=_empty,
         )
+
+    async def _ddg_rescue(self, query) -> List[SearchResult]:
+        """Tavily's free fallback: DDG text + DDG news run CONCURRENTLY.
+
+        Latency (live run 0bfd5f9e): with Tavily's circuit open every
+        contract query paid text-then-news sequentially (~2-7s each) on top
+        of the provider gather — the two calls are independent, so gather
+        halves the rescue cost on the search hot path.
+        """
+        text_results, news_results = await asyncio.gather(
+            self._ddg_text(query), self._ddg_news(query)
+        )
+        text_results.extend(news_results)
+        return text_results
 
     async def _ddg_text(self, query) -> List[SearchResult]:
         rows = await self._ddg_run(str(query), "text", 8)
