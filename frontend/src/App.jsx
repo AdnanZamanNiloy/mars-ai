@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchSession, fetchTrace, listSessions, resumeResearch, startResearch } from "./api";
-import { MODE_META, loadActiveSessionId, loadKnowledge, loadMissions, newSessionId, parseReport, removeKnowledgeItem, removeMission, saveActiveSessionId, saveKnowledgeItem, shouldAutoScroll, truncateFromMessage, updateMission, upsertMission } from "./lib";
+import { MODE_META, applyTraceEntry, loadActiveSessionId, loadKnowledge, loadMissions, newSessionId, parseReport, removeKnowledgeItem, removeMission, saveActiveSessionId, saveKnowledgeItem, shouldAutoScroll, truncateFromMessage, updateMission, upsertMission } from "./lib";
 import Sidebar from "./components/Sidebar";
 import Composer from "./components/Composer";
 import { ErrorCard, MarsMessageShell, ThinkingSteps, TypingRow, UserMessage } from "./components/Thread";
@@ -298,7 +298,6 @@ export default function App() {
   const [mode, setMode] = useState("standard");
   const [running, setRunning] = useState(false);
   const [selectedFinding, setSelectedFinding] = useState(null);
-  const [traceLog, setTraceLog] = useState([]);
   const [intelCollapsed, setIntelCollapsed] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [replaying, setReplaying] = useState(false);
@@ -383,8 +382,8 @@ export default function App() {
           if (prev.length > 0) return prev; // user already started typing
           return restored;
         });
-        const latestSteps = restored[restored.length - 1]?.steps || [];
-        if (latestSteps.length > 0) setTraceLog(latestSteps);
+        // Restored replay cards carry their own steps (built above); nothing
+        // is seeded into a shared log — there is no shared log anymore.
       } catch {
         /* no persisted history — start fresh */
       }
@@ -466,18 +465,17 @@ export default function App() {
     );
   }, []);
 
-  const pushTrace = useCallback((entry) => {
-    setTraceLog((prev) => {
-      if (entry.key) {
-        const idx = prev.findIndex((t) => t.key === entry.key);
-        if (idx !== -1) {
-          const next = [...prev];
-          next[idx] = { ...next[idx], ...entry };
-          return next;
-        }
-      }
-      return [...prev.slice(-60), { at: new Date().toISOString(), kind: "active", ...entry }];
-    });
+  /* Append one pipeline-trace step to the message that OWNS this run.
+   * Scoped by tempId: each run card reads only its own message.steps, so a
+   * new message never touches a previous message's trace and vice versa.
+   * (The old App-level traceLog was one array shared by every card — a new
+   * message's events mutated what all previous cards displayed.) */
+  const pushTrace = useCallback((tempId, entry) => {
+    setMessages((prev) => prev.map((m) =>
+      m.kind === "run" && m.run?.tempId === tempId
+        ? { ...m, steps: applyTraceEntry(m.steps, entry) }
+        : m
+    ));
   }, []);
 
   const handleEvent = useCallback((tempId, evt) => {
@@ -509,7 +507,7 @@ export default function App() {
             });
           }
         }
-        if (evt.message) pushTrace({ text: evt.message, kind: "active" });
+        if (evt.message) pushTrace(tempId, { text: evt.message, kind: "active" });
         break;
       case "intent":
         patchRun(tempId, {
@@ -519,7 +517,7 @@ export default function App() {
             action: evt.recommended_action, origin: evt.origin,
           },
         });
-        pushTrace({
+        pushTrace(tempId, {
           text: `Understood: ${evt.domain || "?"}${evt.ambiguity ? " — ambiguous, will disambiguate" : ""}`,
           kind: "done",
         });
@@ -532,7 +530,7 @@ export default function App() {
             origin: evt.origin || "", signals: evt.signals && typeof evt.signals === "object" ? evt.signals : {},
           },
         });
-        pushTrace({
+        pushTrace(tempId, {
           text: evt.path === "direct"
             ? "Router: answerable directly — answering from general knowledge"
             : evt.path === "conversation"
@@ -551,7 +549,7 @@ export default function App() {
             kind: evt.kind || "",
           },
         });
-        pushTrace({
+        pushTrace(tempId, {
           text: evt.kind
             ? "Conversational reply"
             : "Answered directly (no sources consulted)",
@@ -564,11 +562,11 @@ export default function App() {
           orchestration: evt.orchestration || {},
           waves: Array.isArray(evt.waves) ? evt.waves : [],
         });
-        pushTrace({ text: `Strategy created (${(evt.items || []).length} agents)`, kind: "done" });
+        pushTrace(tempId, { text: `Strategy created (${(evt.items || []).length} agents)`, kind: "done" });
         break;
       case "search_progress":
         if (typeof evt.snippets === "number") patchRun(tempId, { snippets: evt.snippets });
-        pushTrace({ key: "search", text: `Evidence gathered (${evt.snippets ?? 0} sources)`, kind: "active" });
+        pushTrace(tempId, { key: "search", text: `Evidence gathered (${evt.snippets ?? 0} sources)`, kind: "active" });
         break;
       case "critic":
         if (evt.iteration) {
@@ -582,7 +580,7 @@ export default function App() {
                 } }
               : m
           ));
-          pushTrace({ text: `Critic pass ${evt.iteration}: ${evt.reason || "reviewed"}`, kind: "done" });
+          pushTrace(tempId, { text: `Critic pass ${evt.iteration}: ${evt.reason || "reviewed"}`, kind: "done" });
         }
         break;
       case "findings":
@@ -606,12 +604,12 @@ export default function App() {
             return { ...m, run: { ...m.run, findings,
               verifiedCount: findings.filter((f) => f.verified === true).length } };
           }));
-          pushTrace({ key: "findings", text: "Claims extracted", kind: "active" });
+          pushTrace(tempId, { key: "findings", text: "Claims extracted", kind: "active" });
         }
         break;
       case "decisions":
         if (Array.isArray(evt.items)) patchRun(tempId, { decisions: evt.items });
-        pushTrace({ text: `${(evt.items || []).length} options evaluated`, kind: "done" });
+        pushTrace(tempId, { text: `${(evt.items || []).length} options evaluated`, kind: "done" });
         break;
       case "final_report":
         setMessages((prev) => prev.map((m) => {
@@ -647,8 +645,8 @@ export default function App() {
           }
           return { ...m, run };
         }));
-        pushTrace({ key: "findings", text: "Claims extracted", kind: "done" });
-        pushTrace({ text: "Final report delivered", kind: "done" });
+        pushTrace(tempId, { key: "findings", text: "Claims extracted", kind: "done" });
+        pushTrace(tempId, { text: "Final report delivered", kind: "done" });
         // The finished answer can be much taller than the stream snapshot;
         // settle at the bottom so the full response is visible.
         if (autoScrollRef.current) {
@@ -667,7 +665,7 @@ export default function App() {
           }
           return { ...m, run };
         }));
-        pushTrace({ text: message.slice(0, 90), kind: "warn" });
+        pushTrace(tempId, { text: message.slice(0, 90), kind: "warn" });
         break;
       }
       default:
@@ -689,7 +687,7 @@ export default function App() {
         findings: [], verifiedCount: 0, degraded: [],
         degradedReasons: {}, providerDegraded: false, providerKinds: [],
       });
-      pushTrace({ text: `Resuming run ${resumeRun.runId.slice(0, 8)} from checkpoint`, kind: "active" });
+      pushTrace(tempId, { text: `Resuming run ${resumeRun.runId.slice(0, 8)} from checkpoint`, kind: "active" });
     } else {
       const run = blankRun(queryText, mode);
       tempId = run.tempId;
@@ -700,9 +698,10 @@ export default function App() {
       setMessages((prev) => [
         ...prev,
         { id: nid(), kind: "user", text: queryText, at },
-        { id: nid(), kind: "run", run, at },
+        // steps: [] — this message's pipeline trace starts empty and only
+        // THIS run's events (pushTrace(tempId, …)) ever land here.
+        { id: nid(), kind: "run", run, at, steps: [] },
       ]);
-      setTraceLog([]);
       setSelectedFinding(null);
       // Sending re-engages following and pins to the true bottom once the
       // new turn + run card have rendered, so the message and the full
@@ -733,7 +732,7 @@ export default function App() {
           }
           return { ...m, run };
         }));
-        pushTrace({ text: "Research stopped by user", kind: "warn" });
+        pushTrace(tempId, { text: "Research stopped by user", kind: "warn" });
       } else {
         handleEvent(tempId, { type: "error", message: err instanceof Error ? err.message : "Unknown stream error" });
       }
@@ -768,7 +767,6 @@ export default function App() {
     setMessages((prev) => truncateFromMessage(prev, messageId));
     setEditingMessageId(null);
     setComposer("");
-    setTraceLog([]);
     setSelectedFinding(null);
     // launch() appends the fresh user + run pair and reuses the session id.
     setTimeout(() => launch(v), 0);
@@ -804,7 +802,6 @@ export default function App() {
     });
     // "New Chat" is the ONLY action that mints a fresh session id.
     setActiveSession(newSessionId());
-    setTraceLog([]);
     setSelectedFinding(null);
     setComposer("");
     setRunning(false);
@@ -834,12 +831,8 @@ export default function App() {
         });
       }
       setMessages(restored);
-      // Show the latest run's real pipeline steps in the panel; fall back to
-      // a single notice only when the trace genuinely recorded no events.
-      const latestSteps = restored[restored.length - 1]?.steps || [];
-      setTraceLog(latestSteps.length > 0
-        ? latestSteps
-        : [{ at: new Date().toISOString(), kind: "done", text: "Trace loaded — no node events recorded" }]);
+      // Each restored card already carries its own pipeline steps (built in
+      // buildReplayMessages); there is no shared log to seed or reset.
       setSelectedFinding(null);
       setIntelCollapsed(false);
       go("workspace");
@@ -1036,7 +1029,6 @@ export default function App() {
                   onResume={resumeRun}
                   onRegenerate={submitQuery}
                   onAbort={abortRun}
-                  steps={traceLog}
                   editingMessageId={editingMessageId}
                   onEditMessage={handleEditMessage}
                 />)
@@ -1093,11 +1085,12 @@ export default function App() {
   );
 }
 
-function ThreadMessage({ message, running, onResume, onRegenerate, onAbort, steps, editingMessageId, onEditMessage }) {
-  // A restored replay carries its OWN pipeline steps (from its trace), so a
-  // multi-question chat shows each run's real steps instead of the global
-  // log's most-recent run duplicated across every card.
-  const stepList = message.kind === "replay" ? (message.steps || []) : steps;
+function ThreadMessage({ message, running, onResume, onRegenerate, onAbort, editingMessageId, onEditMessage }) {
+  // Steps live ON the message: live runs stream into message.steps via
+  // pushTrace(tempId, …), restored replays carry their persisted trail.
+  // Every card renders only its own trace — never a shared/global log, so
+  // a new message can't rewrite (or accumulate into) previous cards'.
+  const stepList = message.steps || [];
   if (message.kind === "user") {
     const isEditing = editingMessageId === message.id;
     return (

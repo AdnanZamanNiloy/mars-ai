@@ -127,6 +127,28 @@ export function shouldAutoScroll({ scrollHeight, scrollTop, clientHeight }, thre
   return distance < threshold;
 }
 
+/* Pipeline-trace steps for ONE message. Returns a NEW array every time and
+ * never mutates the input, so two messages can never share step state —
+ * each card's trace is built only from events pushed for that message.
+ * A `key` upserts in place (live counters like "Evidence gathered");
+ * anything else appends with a timestamp. Bounded so a long run's trace
+ * cannot grow without limit. Pure so isolation is unit-testable. */
+export const TRACE_STEP_CAP = 61;
+
+export function applyTraceEntry(steps, entry) {
+  const prev = Array.isArray(steps) ? steps : [];
+  if (entry && entry.key) {
+    const idx = prev.findIndex((t) => t.key === entry.key);
+    if (idx !== -1) {
+      const next = [...prev];
+      next[idx] = { ...next[idx], ...entry };
+      return next;
+    }
+  }
+  const stamped = { at: new Date().toISOString(), kind: "active", ...entry };
+  return [...prev.slice(-(TRACE_STEP_CAP - 1)), stamped];
+}
+
 /* The active chat's stable session id. One chat = one id, reused for every
  * follow-up question; only "New Chat" mints a fresh one. Kept in its own key
  * so an interrupted write to the session list can't lose the active chat. */
