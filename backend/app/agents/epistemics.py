@@ -7,7 +7,7 @@ line between a citation machine and a research system.
 Four upgrades live here.
 
 1. FALSE CONTRADICTIONS ARE SUPPRESSED BEFORE THEY POISON THE REPORT.
-   `detect_contradictions` pairs "revenue was $2bn" with "revenue was $3bn"
+   `find_contradictions` pairs "revenue was $2bn" with "revenue was $3bn"
    and reports a conflict, and the synthesizer dutifully prints "sources
    disagree; the range is $2-3bn". If the first is 2022 and the second 2024
    that is not a disagreement, it is growth — and reporting it as a range is

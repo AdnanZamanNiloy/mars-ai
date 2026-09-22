@@ -103,8 +103,8 @@ _W_VERIFIED = 0.15
 # genuinely more relevant claim from elsewhere.
 _W_OWN = 0.10
 
-# Grade -> 0-1 quality. Mirrors evidence_grade.evidence_quality_score's weights
-# so a "good" claim means the same thing here as in the confidence engine.
+# Grade -> 0-1 quality weights (A=1.0, B=0.75, C=0.4, D=0.1), so a "good"
+# claim means the same thing here as in the rest of the evidence pipeline.
 _GRADE_VALUE: Dict[str, float] = {"A": 1.0, "B": 0.75, "C": 0.4, "D": 0.1}
 
 _AXIS_LABELS: Dict[str, str] = {
@@ -468,44 +468,3 @@ def select_section_facts(
         impact_reserve=impact_reserve,
         reserved_ids=reserved_ids,
     )
-
-
-def select_context_for_outline(
-    outline: Any,
-    facts: Sequence[Dict[str, Any]] | None = None,
-    *,
-    max_facts: int = DEFAULT_MAX_FACTS,
-    impact_reserve: int = DEFAULT_IMPACT_RESERVE,
-) -> List[Tuple[Any, List[Dict[str, Any]]]]:
-    """Pair each outline section with its ranked facts.
-
-    Drop-in replacement for `outline.group_facts_by_section` when the caller
-    wants per-section ranking instead of raw axis grouping. When `facts` is
-    given it is used as the shared candidate pool for every section (each
-    section's own axis group is reserved a slot); otherwise each section's own
-    `facts` are used (the axis-grouped default).
-    """
-    pairs: List[Tuple[Any, List[Dict[str, Any]]]] = []
-    for section in getattr(outline, "sections", []) or []:
-        own = list(getattr(section, "facts", []) or [])
-        if facts is not None:
-            own_ids = {id(f) for f in own}
-            candidates = own + [
-                f for f in facts if isinstance(f, dict) and id(f) not in own_ids
-            ]
-            reserved = {id(f) for f in own}
-        else:
-            candidates = own
-            reserved = None
-        if not candidates:
-            pairs.append((section, []))
-            continue
-        selected = select_section_facts(
-            section,
-            candidates,
-            max_facts=max_facts,
-            impact_reserve=impact_reserve,
-            reserved_ids=reserved,
-        )
-        pairs.append((section, selected))
-    return pairs

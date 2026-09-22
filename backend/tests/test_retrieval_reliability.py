@@ -340,15 +340,6 @@ async def test_failed_url_not_fetched_twice(monkeypatch):
     assert client.health.snapshot()["fetch_attempts"] == 1
 
 
-async def test_failed_fetch_log_is_run_scoped(monkeypatch):
-    client = SearchClient(_fetch_only_settings())
-    client.failed_fetches.mark("https://deadsite.com/a", "forbidden")
-    client.reset_run()
-    assert client.failed_fetches.seen("https://deadsite.com/a") is False
-    assert client.domain_registry.cooling_domains() == []
-    assert client.health.snapshot()["fetch_attempts"] == 0
-
-
 # ---------------------------------------------------------------------------
 # Fallback to an alternate authoritative source
 # ---------------------------------------------------------------------------

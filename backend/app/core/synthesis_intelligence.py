@@ -52,10 +52,6 @@ What it does
    between sentences.
 5. STRUCTURE PRESERVATION — headings, section order and the required
    sections are never touched; an empty section is never produced.
-
-The module also exposes `analyze_report` so the same claim-key machinery can
-MEASURE redundancy (the benchmark's redundancy score) instead of only
-repairing it.
 """
 from __future__ import annotations
 
@@ -166,36 +162,6 @@ MOVES: Tuple[str, ...] = (
     "comparison",
     "strategic",
 )
-
-# Phrases that mark each move in text. A move is verifiable: `reasoning_moves`
-# detects it, and the deterministic post-condition is that the chosen move is
-# actually present in the refined sentence. `_DIMENSIONS` above still maps onto
-# the expansion vocabulary, so attaching a move neither weakens nor re-labels
-# the existing expansion detection.
-_MOVE_MARKERS: Dict[str, "re.Pattern[str]"] = {
-    "mechanism": _MECHANISM_RE,
-    "causal": re.compile(
-        r"(?i)\b(caused|the cause|because|driven by|arose from|stems from|"
-        r"origint|root cause|triggered|explains why|as a result of|gave rise|"
-        r"follows? from|did not appear by chance)\b"
-    ),
-    "tradeoff": re.compile(
-        r"(?i)\b(trade-?offs?|at the cost of|at the expense of|gives? up|"
-        r"in exchange|the price of|must be weighed|buys? .{0,20}at|"
-        r"offset by|no free lunch|costs? (?:reliability|flexibility|"
-        r"dispatchability|speed))\b"
-    ),
-    "comparison": _COMPARISON_RE,
-    "uncertainty": _UNCERTAINTY_RE,
-    "strategic": re.compile(
-        r"(?i)\b(changes? the role|shifts? the (?:role|balance|decision)|"
-        r"for a (?:policymaker|planner|decision|grid|government)|"
-        r"the strategic|what it means for|decides? whether|commits? the|"
-        r"the decision (?:hinges|turns)|tilts? the choice|"
-        r"the planning question|long-run (?:strategic|decision))\b"
-    ),
-    "implication": _IMPLICATION_RE,
-}
 
 # Transitions that open a REFINEMENT sentence, keyed by MOVE. Each names the
 # relationship to the earlier use so the section reads as a continuation
@@ -668,21 +634,6 @@ _MOVE_RULES: Tuple[Tuple[str, str], ...] = (
     ("authoritative", "implication"),
     ("default", "implication"),
 )
-
-
-def reasoning_moves(text: str) -> Set[str]:
-    """Which adaptive reasoning moves a sentence carries.
-
-    This is the move-level sibling of `analytical_dimensions`: it recognizes
-    all seven moves (the expansion detector deliberately keeps its narrower
-    vocabulary so attaching a move never re-labels an expansion). Used to
-    verify that a refinement actually expresses the move the signals chose.
-    """
-    found: Set[str] = set()
-    for name, pattern in _MOVE_MARKERS.items():
-        if pattern.search(text or ""):
-            found.add(name)
-    return found
 
 
 def _is_comparative(sentence: str, sig: Dict[str, object]) -> bool:
@@ -1371,43 +1322,3 @@ def _top_repeats(ledger: ClaimLedger, limit: int = 8) -> List[Dict[str, object]]
         }
         for u in repeated[:limit]
     ]
-
-
-def analyze_report(answer: str) -> SynthesisIntelligenceReport:
-    """Measure redundancy in a finished report without changing it.
-
-    Uses the same claim-key + similarity machinery as the compressor, so the
-    benchmark's redundancy score and the shipped report's behaviour cannot
-    drift apart. Machine appendices are excluded — they are measured state,
-    not writer prose.
-    """
-    from app.agents.sources import strip_machine_sections
-
-    body = strip_machine_sections(answer or "")
-    sections = split_report_sections(body)
-    ledger = ClaimLedger()
-    section_count = 0
-    for heading, lines in sections:
-        if not heading or not any(_is_sentence_unit(l) for l in lines):
-            continue
-        section_count += 1
-        for _, sentence in _iter_units(lines):
-            key = claim_key(sentence)
-            prior = ledger._find_prior(sentence)
-            if prior is None:
-                if key:
-                    ledger._uses[key] = ClaimUse(key=key, text=sentence, section=heading)
-                ledger._texts.append(sentence)
-            else:
-                prior.occurrences += 1
-                prior.dimensions |= analytical_dimensions(sentence)
-                ledger._texts.append(sentence)
-    return SynthesisIntelligenceReport(
-        total_sentences=len(ledger._texts),
-        unique_claims=ledger.unique_claims,
-        repeated_claims=ledger.repeated_claims,
-        removed_restatements=0,
-        allowed_expansions=0,
-        sections=section_count,
-        top_repeats=_top_repeats(ledger),
-    )

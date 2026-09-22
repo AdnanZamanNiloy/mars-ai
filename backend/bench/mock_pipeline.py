@@ -519,7 +519,7 @@ class GoldenFakeLLM(FakeLLM):
 
         Executive Summary and Key Findings carry the prose; the remaining
         mandatory sections are added by the production synthesizer's
-        `ensure_required_sections` from measured state if absent. Every
+        `_add_required_sections` from measured state if absent. Every
         marker here resolves to a real legend entry, so the citation
         invariants the golden set checks hold by construction."""
         findings = numbered

@@ -39,7 +39,7 @@ A cap only fires when it *lowers* the score — it can never inflate a weak pool
 
 ## 2. Most "contradictions" were not contradictions
 
-`detect_contradictions` compares magnitude and topic similarity, so it fires
+`find_contradictions` compares magnitude and topic similarity, so it fires
 on `"revenue was $2bn"` vs `"revenue was $3bn"`. If those are 2022 and 2024
 that is growth, and the synthesizer was printing *"sources disagree; the range
 is $2–3bn"* — a factual error the pipeline invented on its own.

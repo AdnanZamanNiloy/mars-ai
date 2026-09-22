@@ -225,10 +225,6 @@ class RouteDecision:
     origin: str = "heuristic"              # llm | heuristic
     answer_sketch: str = ""
 
-    @property
-    def is_direct(self) -> bool:
-        return self.path == DIRECT
-
     def to_dict(self) -> Dict[str, Any]:
         return {
             "path": self.path,

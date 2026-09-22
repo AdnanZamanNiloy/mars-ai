@@ -21,7 +21,6 @@ def test_canonical_url_strips_tracking_and_normalizes():
         "https://example.com/Path?b=2"
     assert sources.canonical_url("https://example.com/a//b/") == "https://example.com/a/b"
     assert sources.canonical_url("https://example.com/news/amp") == "https://example.com/news"
-    assert sources.same_document("https://example.com/x?utm_campaign=a&fbclid=z", "http://www.example.com/x")
 
 
 def test_classify_tiers_and_primacy():

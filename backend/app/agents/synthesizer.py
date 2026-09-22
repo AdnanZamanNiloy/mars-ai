@@ -75,7 +75,7 @@ from app.core.degradation import (
 )
 from app.core.llm import AllProvidersFailedError, LLMClient, PromptTooLargeError
 from app.core.logging import get_logger
-from app.core.usage import run_seconds_remaining
+from app.core.usage import run_seconds_remaining, set_stage_hint
 from app.core.schemas import SynthesizerAnswerModel
 
 from app.agents.contradiction import numeric_ranges, summarize_contradictions
@@ -175,9 +175,6 @@ class ReportProfile:
     full_appendix: bool = False
     max_findings: int = 6
     writer_sections: Tuple[str, ...] = ()
-
-    def wants(self, canonical: str) -> bool:
-        return canonical in self.required or canonical in self.conditional
 
 
 # Sections the WRITER is asked to produce. Everything else is machine-appended
@@ -941,6 +938,7 @@ async def synthesize(
             '{"answer": "<final synthesized report with [n] citations>"}'
         )
         try:
+            set_stage_hint("synthesizer")
             payload = await llm.generate_json(
                 SYNTHESIZER_SYSTEM_PROMPT,
                 user_prompt,
@@ -1828,6 +1826,7 @@ async def _synthesize_sectioned(
             '{"answer": "<Executive Summary prose with [n] citations>"}'
         )
         try:
+            set_stage_hint("synthesizer")
             exec_payload = await llm.generate_json(
                 SYNTHESIZER_SYSTEM_PROMPT,
                 exec_prompt,
@@ -1879,6 +1878,7 @@ async def _synthesize_sectioned(
             '{"answer": "<section markdown with [n] citations>"}'
         )
         try:
+            set_stage_hint("synthesizer")
             payload = await llm.generate_json(
                 SYNTHESIZER_SYSTEM_PROMPT,
                 prompt,
@@ -2395,34 +2395,6 @@ def _add_required_sections(
     if not blocks:
         return answer, added_keys
     return answer.rstrip() + "\n\n" + "\n\n".join(blocks), added_keys
-
-
-def ensure_required_sections(
-    answer: str,
-    *,
-    ctx: Dict[str, Any],
-    usable_facts: Sequence[Dict[str, Any]],
-    contradictions: Sequence[Dict[str, Any]],
-    cited_facts: Sequence[Dict[str, Any]] = (),
-    profile: ReportProfile | str | None = None,
-) -> str:
-    """Guarantee the profile's mandatory sections are present, adding any missing.
-
-    Deterministic and total. A missing section is appended from measured state
-    (never invented), so the writer cannot omit limitations or counterarguments
-    and ship a report that hides them. Existing, differently titled sections
-    that mean the same thing satisfy the requirement and are left untouched.
-    """
-    resolved = _resolve_profile(profile, ctx or {}, len(usable_facts))
-    updated, _ = _add_required_sections(
-        answer,
-        ctx=ctx,
-        usable_facts=usable_facts,
-        contradictions=contradictions,
-        cited_facts=cited_facts,
-        profile=resolved,
-    )
-    return updated
 
 
 def _has_reasoning_section(answer: str) -> bool:
@@ -3574,10 +3546,6 @@ def _section_title(sub_question: str) -> str:
         return ""
     title = _shorten_heading(text)
     return title[0].upper() + title[1:] if title else ""
-
-
-def _append_source_legend(answer: str, numbered: List[Dict[str, Any]]) -> str:
-    return f"{answer.rstrip()}\n\n" + _legend_block(numbered)
 
 
 def _legend_block(numbered: Sequence[Dict[str, Any]]) -> str:

@@ -184,7 +184,6 @@ def test_to_dict_shape():
     assert set(d.to_dict()) == {
         "path", "reason", "confidence", "signals", "origin", "answer_sketch"
     }
-    assert d.is_direct is True
 
 
 # ---------------------------------------------------------------------------

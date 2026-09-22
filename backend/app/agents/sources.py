@@ -266,11 +266,6 @@ def canonical_url(url: str) -> str:
     return urlunparse(("https", host, path, "", urlencode(query_pairs), ""))
 
 
-def same_document(url_a: str, url_b: str) -> bool:
-    a, b = canonical_url(url_a), canonical_url(url_b)
-    return bool(a) and a == b
-
-
 def _matches(domain: str, registry: Iterable[str]) -> bool:
     for entry in registry:
         entry = entry.lower().strip()

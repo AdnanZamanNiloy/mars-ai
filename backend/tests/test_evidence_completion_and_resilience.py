@@ -13,7 +13,7 @@ import asyncio
 
 from app.agents.synthesizer import (
     REQUIRED_SECTIONS,
-    ensure_required_sections,
+    _add_required_sections,
     select_profile,
     synthesize,
 )
@@ -102,9 +102,10 @@ def test_section_wise_report_contains_required_sections():
 
 def test_writer_omitting_limitations_gets_it_added():
     answer = "## Executive Summary\n\nA direct answer [1]."
-    filled = ensure_required_sections(
-        answer, ctx={"evidence_distribution": {"A": 2, "B": 1, "C": 1, "D": 0}},
-        usable_facts=_facts(), contradictions=[],
+    ctx = {"evidence_distribution": {"A": 2, "B": 1, "C": 1, "D": 0}}
+    filled, _ = _add_required_sections(
+        answer, ctx=ctx, usable_facts=_facts(), contradictions=[],
+        profile=select_profile(ctx, fact_count=len(_facts())),
     )
     # Required for the resolved profile, always present.
     assert "## Key Findings" in filled
@@ -129,8 +130,9 @@ def test_existing_aliases_satisfy_the_requirement():
         "## Key Figures\n\n- 40% [1].\n\n"
         "## Auditable Source Ledger\n\n- https://x (retrieved 2026-01-01).\n"
     )
-    filled = ensure_required_sections(
+    filled, _ = _add_required_sections(
         answer, ctx={}, usable_facts=[], contradictions=[],
+        profile=select_profile({}, fact_count=0),
     )
     # Every required heading is recognized via an alias: nothing appended.
     assert filled == answer

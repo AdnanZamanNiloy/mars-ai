@@ -10,7 +10,6 @@ from app.core.semantic import (
     rank_by_similarity,
     similarity,
     similarity_matrix,
-    top_match,
 )
 
 IDENTICAL = ("Solar capacity grew 40% in 2024", "Solar capacity grew 40% in 2024")
@@ -90,15 +89,6 @@ def test_cross_similarity_matches_pair_within_tolerance():
     a, b = PARAPHRASE
     m = cross_similarity([a], [b])
     assert abs(float(m[0, 0]) - pair_similarity(a, b)) < 0.02
-
-
-def test_top_match_finds_best():
-    query = NEAR_DUP[0]
-    candidates = [UNRELATED[1], NEAR_DUP[1], PARAPHRASE[0]]
-    idx, score = top_match(query, candidates)
-    assert idx == 1
-    assert score >= 0.85
-
 
 def test_rank_preserves_order():
     scores = rank_by_similarity(NEAR_DUP[0], [UNRELATED[1], NEAR_DUP[1]])

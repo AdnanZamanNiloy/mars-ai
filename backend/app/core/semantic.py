@@ -559,15 +559,6 @@ def _l2_rows(mat: np.ndarray) -> np.ndarray:
     return mat / norms
 
 
-def top_match(query: str, candidates: Sequence[str]) -> Tuple[int, float]:
-    """Index + hybrid score of the candidate most similar to query."""
-    if not candidates:
-        return -1, 0.0
-    scores = cross_similarity([query], list(candidates))[0]
-    best = int(np.argmax(scores))
-    return best, float(scores[best])
-
-
 def rank_by_similarity(query: str, candidates: Sequence[str]) -> List[float]:
     """Hybrid scores of query vs each candidate, order preserved."""
     if not candidates:

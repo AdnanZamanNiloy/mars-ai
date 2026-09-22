@@ -221,7 +221,7 @@ def test_unresolved_genuine_conflict_still_penalizes_confidence():
 def test_unresolved_conflict_reaches_synthesis_counterarguments():
     """An unresolved conflict must appear in the report's Counterarguments
     section (not silently dropped)."""
-    from app.agents.synthesizer import ensure_required_sections
+    from app.agents.synthesizer import _add_required_sections, select_profile
 
     facts = [
         {"claim": "The trial reported a mortality reduction of 15% versus placebo",
@@ -231,11 +231,13 @@ def test_unresolved_conflict_reaches_synthesis_counterarguments():
     ]
     resolved = resolve_contradictions(find_contradictions(facts))
     assert unresolved_contradictions(resolved)
-    report = ensure_required_sections(
+    ctx = {"contradictions": resolved}
+    report, _ = _add_required_sections(
         "## Executive Summary\n\nA short draft.",
-        ctx={"contradictions": resolved},
+        ctx=ctx,
         usable_facts=facts,
         contradictions=resolved,
+        profile=select_profile(ctx, fact_count=len(facts)),
     )
     counter = report.lower()
     assert "counterarguments" in counter

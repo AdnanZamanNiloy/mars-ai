@@ -6,7 +6,7 @@ planner→search→summarize pass) or finalize — based on evidence signals
 novel-query availability, budget headroom, iteration ceiling) rather than
 iteration count alone.
 
-v2 (production upgrade) merges the Feature-11 DepthController's stopping
+v2 (production upgrade) merges the Feature-11 dynamic-depth stopping
 policy into this stateless module so the live graph benefits without a
 per-mission object:
 
@@ -26,7 +26,7 @@ per-mission object:
 `decide(state)` is called by workflow.route_after_critic and returns
 "expand" | "finalize". `stop_reason(state)` recomputes the same signals
 deterministically at report time so limitations can name the stop cause.
-`last_decision` exposes the full check dict for the trace/UI.
+`decide_with_checks(state)` returns the decision plus the full check dict.
 """
 from __future__ import annotations
 
@@ -770,36 +770,6 @@ def hard_wall_reached(state: Dict[str, Any], settings: Settings | None = None) -
     """
     checks = evaluate(state, settings)
     return bool(checks["budget_stop"] or checks["ceiling_reached"])
-
-
-def last_decision(state: Dict[str, Any], settings: Settings | None = None) -> Dict[str, Any]:
-    """The checks behind a decision for `state` (trace/UI/benchmarks).
-
-    Pure and stateless: re-evaluates rather than reading a global, so it is
-    safe under concurrent runs and cannot return another run's checks.
-    """
-    return decide_with_checks(state, settings)[1]
-
-
-def explain(state: Dict[str, Any], settings: Settings | None = None) -> Dict[str, Any]:
-    """The decision AND its concrete reason, for the trace/UI.
-
-    Returns a small, JSON-friendly dict: the verdict, why it was reached, and
-    the evidence triggers behind it (high-impact uncorroborated claim count,
-    unresolved severe contradictions, thin dimensions, uncovered axes). Pure
-    and side-effect-free so a trace can call it after the fact.
-    """
-    decision, checks = decide_with_checks(state, settings)
-    return {
-        "decision": decision,
-        "reason": checks.get("decision_reason", ""),
-        "triggers": list(checks.get("decision_reasons", []) or []),
-        "high_impact_uncorroborated": int(checks.get("high_impact_uncorroborated_count", 0) or 0),
-        "severe_contradictions": int(checks.get("severe_contradictions", 0) or 0),
-        "thin_dimensions": list(checks.get("thin_dimensions", []) or []),
-        "uncovered_axes": list(checks.get("uncovered_axes", []) or []),
-    }
-
 
 
 def stop_reason(state: Dict[str, Any], settings: Settings | None = None) -> str | None:

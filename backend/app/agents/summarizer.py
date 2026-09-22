@@ -34,7 +34,7 @@ import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from app.core.cache import cache_key, get_cache
-from app.core.usage import run_seconds_remaining
+from app.core.usage import run_seconds_remaining, set_stage_hint
 from app.core.degradation import (
     EVIDENCE_WEAK,
     PROVIDER_HARD,
@@ -496,6 +496,7 @@ async def summarizer_agent(
                 "Ignore weak, promotional, or opinion-blog sources."
             )
             try:
+                set_stage_hint("summarizer")
                 payload = await llm.generate_json(
                     system_prompt,
                     user_prompt,
@@ -586,6 +587,7 @@ async def summarizer_agent(
                 "exactly. Do not add any other top-level keys."
             )
             try:
+                set_stage_hint("summarizer")
                 payload = await llm.generate_json(
                     system_prompt,
                     strict_prompt,

@@ -41,7 +41,7 @@ def test_budget_exhaustion_forces_finalize():
         usage = start_run_usage("t-1", _settings(max_llm_calls=1))
         usage.budget.llm_calls = 60  # simulate spend past ceiling
         assert depth_controller.decide(state, _settings()) == "finalize"
-        checks = depth_controller.last_decision(state, _settings())
+        checks = depth_controller.decide_with_checks(state, _settings())[1]
         assert checks["budget_stop"] is True
     finally:
         clear_run_usage()
@@ -61,7 +61,7 @@ def test_no_budget_outside_run():
     # No ledger active: budget checks inert, decision unchanged.
     state = _state()
     assert depth_controller.decide(state, _settings()) in ("expand", "finalize")
-    checks = depth_controller.last_decision(state, _settings())
+    checks = depth_controller.decide_with_checks(state, _settings())[1]
     assert checks["budget"]["active"] is False
     assert checks["budget_stop"] is False
 
@@ -74,7 +74,7 @@ def test_no_novel_queries_stops():
         {"url": "https://c.com/z", "sub_question": "compare transformer efficiency against recurrent models"},
     ])
     assert depth_controller.decide(state, _settings()) == "finalize"
-    checks = depth_controller.last_decision(state, _settings())
+    checks = depth_controller.decide_with_checks(state, _settings())[1]
     assert checks["no_novel_queries"] is True
 
 
@@ -138,9 +138,9 @@ def test_checks_are_per_call_not_global():
         {"url": "https://c.com/z", "sub_question": "compare transformer efficiency against recurrent models"},
     ])  # no novel queries
     state_b = _state()  # novel query pending
-    checks_a = depth_controller.last_decision(state_a, _settings())
-    checks_b = depth_controller.last_decision(state_b, _settings())
+    checks_a = depth_controller.decide_with_checks(state_a, _settings())[1]
+    checks_b = depth_controller.decide_with_checks(state_b, _settings())[1]
     assert checks_a["no_novel_queries"] is True
     assert checks_b["no_novel_queries"] is False
     # Re-reading A after B still returns A's result.
-    assert depth_controller.last_decision(state_a, _settings())["no_novel_queries"] is True
+    assert depth_controller.decide_with_checks(state_a, _settings())[1]["no_novel_queries"] is True

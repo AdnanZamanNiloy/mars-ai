@@ -9,7 +9,6 @@ from app.agents.outline import (
     AnswerOutline,
     build_outline,
     group_facts_by_section,
-    outline_dimensions,
     render_outline,
 )
 
@@ -40,7 +39,7 @@ def test_broad_query_produces_multi_dimension_outline():
     """A broad query must produce an outline covering multiple dimensions —
     not a single narrow thesis section."""
     outline = build_outline("What is the current trend of AI?", _facts(), _sub_questions())
-    dims = outline_dimensions(outline)
+    dims = [s.axis for s in outline.sections]
     assert len(dims) >= 3, dims
     assert outline.broad is True
     assert set(dims) >= {"definition", "evidence", "criticism", "outlook"}
@@ -52,7 +51,7 @@ def test_broad_query_produces_multi_dimension_outline():
 
 def test_outline_sections_are_ordered_survey_first():
     outline = build_outline("compare AI vs ML", _facts(), _sub_questions())
-    dims = outline_dimensions(outline)
+    dims = [s.axis for s in outline.sections]
     # definition/history must precede evidence/criticism/outlook.
     assert dims.index("definition") < dims.index("evidence")
     assert dims.index("definition") < dims.index("criticism")
@@ -166,7 +165,7 @@ def test_dynamic_dimension_axes_get_readable_section_titles():
          "coverage_goal": "quantify firming"},
     ]
     outline = build_outline("Compare solar vs nuclear for baseload", facts, sub_questions)
-    dims = outline_dimensions(outline)
+    dims = [s.axis for s in outline.sections]
     assert "grid_firming_requirements" in dims
     rendered = render_outline(outline)
     assert "grid_firming_requirements" not in rendered  # no slug leak
@@ -239,4 +238,4 @@ def test_empty_axis_sections_dropped_when_others_have_evidence():
     outline = build_outline("Compare solar vs nuclear", facts, sub_questions)
     # The cost axis has no facts, so it must not become a heading bullet.
     assert all(s.facts for s in outline.sections)
-    assert "cost" not in outline_dimensions(outline)
+    assert "cost" not in [s.axis for s in outline.sections]

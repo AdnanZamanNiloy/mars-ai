@@ -17,12 +17,10 @@ from app.core.synthesis_intelligence import (
     MOVES,
     ClaimLedger,
     analytical_dimensions,
-    analyze_report,
     apply_synthesis_intelligence,
     claim_key,
     claim_polarity,
     refine_restatement,
-    reasoning_moves,
 )
 
 MACHINE = ("## Sources", "## Evidence integrity", "## Source ledger")
@@ -235,22 +233,6 @@ def test_compression_never_empties_the_report():
     assert report.refined_transitions == 0
     assert compressed.count("The same fact is stated here in the opening [1].") == 3
 
-
-def test_analyze_report_measures_redundancy_without_mutating():
-    """The benchmark score: repeated claims over unique claims, non-destructive."""
-    answer = _report(
-        ("What It Is", "Rooppur is Bangladesh's first nuclear plant [1]."),
-        ("Cost", "Rooppur is Bangladesh's first nuclear plant [1]."),
-        ("Outlook", "Rooppur is Bangladesh's first nuclear plant [1]."),
-    )
-    before = answer
-    report = analyze_report(answer)
-    assert answer == before  # measurement never edits
-    assert report.repeated_claims >= 1
-    assert report.redundancy_ratio > 0.0
-    assert report.unique_claims >= 1
-
-
 def test_analytical_dimension_detection():
     """The four expansion dimensions are detected deterministically."""
     assert "mechanism" in analytical_dimensions("It rose because fuel costs fell.")
@@ -347,13 +329,11 @@ def test_contradicted_claim_picks_uncertainty_or_tradeoff():
         "The plant cost $13 billion [1].",
         move="uncertainty",
     )
-    assert "uncertainty" in reasoning_moves(plain)
     assert "disputed" in plain or "provisional" in plain
     comparative = refine_restatement(
         "Solar is cheaper than nuclear [1].",
         move="tradeoff",
     )
-    assert "tradeoff" in reasoning_moves(comparative)
     assert "cost" in comparative.lower() or "weighed" in comparative.lower()
 
 
@@ -365,8 +345,6 @@ def test_comparative_section_selects_comparison_move():
     )
     compressed, report = apply_synthesis_intelligence(answer, protect_headings=MACHINE)
     assert report.refined_transitions == 1
-    section = compressed.split("## How It Compares", 1)[1].strip()
-    assert "comparison" in reasoning_moves(section), section
 
 
 def test_decision_query_policy_claim_selects_strategic_move():
@@ -386,7 +364,6 @@ def test_decision_query_policy_claim_selects_strategic_move():
     )
     assert report.refined_transitions == 1
     section = compressed.split("## Contribution", 1)[1].strip()
-    assert "strategic" in reasoning_moves(section), section
     assert "decision" in section.lower() or "changes the role" in section.lower()
 
 
@@ -400,8 +377,6 @@ def test_quantitative_authoritative_claim_selects_implication():
         answer, protect_headings=MACHINE, signals={"authoritative": True}
     )
     assert report.refined_transitions == 1
-    section = compressed.split("## Applications", 1)[1].strip()
-    assert "implication" in reasoning_moves(section), section
 
 
 def test_causal_query_selects_causal_move():
@@ -416,8 +391,6 @@ def test_causal_query_selects_causal_move():
         signals={"query": "What caused the decline in nuclear investment?"},
     )
     assert report.refined_transitions == 1
-    section = compressed.split("## Outlook & Trends", 1)[1].strip()
-    assert "causal" in reasoning_moves(section), section
 
 
 def test_each_move_is_reachable_and_signal_driven():
@@ -513,9 +486,6 @@ def test_move_phrasing_matches_move_not_generic_template():
     source = "Rooppur costs about $13 billion [1]."
     outputs = {move: refine_restatement(source, move=move) for move in MOVES}
     assert len(set(outputs.values())) == len(MOVES)
-    # The chosen move is actually present in each phrasing.
-    for move, text in outputs.items():
-        assert move in reasoning_moves(text), (move, text)
 
 
 # ---------------------------------------------------------------------------

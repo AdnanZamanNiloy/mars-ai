@@ -41,6 +41,7 @@ from app.core.degradation import record_fallback
 from app.core.llm import LLMClient
 from app.core.logging import get_logger
 from app.core.schemas import PlannerOutputModel, PlanningDirectiveModel
+from app.core.usage import set_stage_hint
 
 from app.agents.sources import build_dimension_primary_query, primary_source_hints
 
@@ -958,6 +959,7 @@ async def plan_dimensions(
     )
 
     try:
+        set_stage_hint("planner")
         payload = await llm.generate_json(
             system_prompt=PLANNING_DIRECTIVE_PROMPT,
             user_prompt=user_prompt,
@@ -1755,6 +1757,7 @@ Return JSON only.
 """
 
     try:
+        set_stage_hint("planner")
         payload: PlannerOutput = await llm.generate_json(
             system_prompt=PLANNER_SYSTEM_PROMPT,
             user_prompt=user_prompt,

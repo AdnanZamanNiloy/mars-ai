@@ -454,7 +454,7 @@ def _grade_records(facts: List[Dict[str, Any]], contradictions: List[Dict[str, A
             return None
         # grade_facts already emitted serialized records; score them directly
         # (EvidenceRecord reconstruction from partial dicts is fragile).
-        weights = {  # same scale as evidence_grade.evidence_quality_score
+        weights = {  # grade weights: A=1.0, B=0.75, C=0.4, D=0.1
             "A": 1.0, "B": 0.75, "C": 0.4, "D": 0.1,
         }
         return round(sum(weights.get(str(r.get("grade", "D")), 0.1) for r in records) / len(records), 3)

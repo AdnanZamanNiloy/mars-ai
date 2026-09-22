@@ -3,8 +3,6 @@
 import asyncio
 
 from app.agents.synthesizer import (
-    _append_source_legend,
-    _assign_numbers,
     _drop_invalid_markers,
     synthesizer_agent,
 )
@@ -67,14 +65,6 @@ def test_fallback_appends_legend():
     answer = asyncio.run(synthesizer_agent(ExplodingLLM(), "What is RAG?", facts))
     assert "## Sources" in answer
     assert "en.wikipedia.org" in answer
-
-
-def test_legend_capped_at_top_ten():
-    facts = [_fact(i, f"host-{i}.org") for i in range(12)]
-    numbered, _ = _assign_numbers(facts[:10])
-    legend = _append_source_legend("Answer [1].", numbered)
-    assert legend.count("\n[") == 10
-
 
 def test_validate_citations_edge_cases():
     assert _drop_invalid_markers("a [1] b [0] c [3]", 2) == "a [1] b  c "

@@ -22,7 +22,7 @@ Hardware:   target host has 8GB RAM. Concurrency and memory footprint
 Entrypoint:      main.py (FastAPI app, lifespan init)
 Agents:          app/agents/*.py (planner, search, summarizer, critic,
                  synthesizer, verifier, evidence_utils, contradiction
-                 adapter, citation_check, budget, redteam — one file per
+                 helpers, citation_check, budget, redteam — one file per
                  pipeline stage or shared utility)
 Orchestration:   app/graph/workflow.py (LangGraph StateGraph; wave-ordered
                  summarization with prerequisite context)

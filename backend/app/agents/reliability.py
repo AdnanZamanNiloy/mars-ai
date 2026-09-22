@@ -23,7 +23,7 @@ import asyncio
 import random
 import time
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, Iterable, Optional, Sequence, Tuple, TypeVar
+from typing import Any, Awaitable, Callable, Dict, Optional, Sequence, Tuple, TypeVar
 
 from app.core.logging import get_logger
 
@@ -336,8 +336,3 @@ async def gather_bounded(
 
     await asyncio.gather(*(_run(i, f) for i, f in enumerate(factories)))
     return results
-
-
-def ok_results(results: Iterable[Any]) -> list:
-    """Drop exception placeholders from a `gather_bounded` result list."""
-    return [r for r in results if not isinstance(r, BaseException)]

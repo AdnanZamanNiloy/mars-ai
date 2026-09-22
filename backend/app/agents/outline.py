@@ -361,15 +361,6 @@ def build_outline(
     return outline
 
 
-def outline_dimensions(outline: AnswerOutline) -> List[str]:
-    """The distinct axes the outline will write sections for, in order."""
-    seen: List[str] = []
-    for section in outline.sections:
-        if section.axis and section.axis not in seen:
-            seen.append(section.axis)
-    return seen
-
-
 def render_outline(outline: AnswerOutline) -> str:
     """Render the outline for the writer prompt: section order + fact budget.
 

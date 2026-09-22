@@ -38,6 +38,7 @@ from app.core.degradation import record_fallback
 from app.core.llm import LLMClient, clamp_confidence
 from app.core.logging import get_logger
 from app.core.schemas import CriticVerdictModel
+from app.core.usage import set_stage_hint
 
 from app.agents.confidence import ConfidenceReport, SUFFICIENCY_THRESHOLD
 from app.agents.contradiction import contradiction_followups, summarize_contradictions
@@ -238,6 +239,7 @@ async def critic_agent(
         payload = {}
     else:
         try:
+            set_stage_hint("critic")
             payload = await llm.generate_json(
                 CRITIC_SYSTEM_PROMPT,
                 user_prompt,

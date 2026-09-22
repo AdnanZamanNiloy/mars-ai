@@ -86,17 +86,3 @@ def test_backward_compatible_keys_present():
     for key in ("topic_similarity", "claim_a", "source_a", "value_a",
                 "claim_b", "source_b", "value_b", "note"):
         assert key in c, f"missing legacy key {key}"
-
-
-def test_adapter_preserves_kind_and_severity():
-    from app.agents.contradiction import detect_contradictions
-
-    facts = [
-        {"claim": "The new model outperforms the baseline on all benchmarks",
-         "source": "https://a.com/x", "confidence": 0.9},
-        {"claim": "The new model does not outperform the baseline on all benchmarks",
-         "source": "https://b.com/y", "confidence": 0.9},
-    ]
-    v3 = detect_contradictions(facts)
-    assert v3 and v3[0]["kind"] == "polarity"
-    assert v3[0]["severity"] >= 0.5

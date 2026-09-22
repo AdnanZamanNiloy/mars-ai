@@ -187,8 +187,8 @@ def test_unresolved_contradiction_finalizes_when_nothing_novel_left():
         critique={"is_sufficient": False, "improved_queries": [], "reason": "conflict"},
     )
     assert depth_controller.decide(state, _settings()) == "finalize"
-    reason = depth_controller.explain(state, _settings())["reason"]
-    assert "nothing novel" in reason.lower()
+    _, checks = depth_controller.decide_with_checks(state, _settings())
+    assert "nothing novel" in checks["decision_reason"].lower()
 
 
 # ---------------------------------------------------------------------------
@@ -331,15 +331,15 @@ def test_hard_wall_does_not_hide_outstanding_gaps():
 # 6. Explainability
 # ---------------------------------------------------------------------------
 
-def test_explain_reports_concrete_triggers():
+def test_decision_checks_report_concrete_triggers():
     state = _state_with_uncorroborated_high_impact(
         contradictions=SEVERE_UNRESOLVED,
     )
-    explained = depth_controller.explain(state, _settings())
-    assert explained["decision"] == "expand"
-    assert explained["high_impact_uncorroborated"] == 1
-    assert explained["severe_contradictions"] == 1
-    joined = "; ".join(explained["triggers"])
+    decision, checks = depth_controller.decide_with_checks(state, _settings())
+    assert decision == "expand"
+    assert checks["high_impact_uncorroborated_count"] == 1
+    assert checks["severe_contradictions"] == 1
+    joined = "; ".join(checks["decision_reasons"])
     assert "high-impact claim" in joined
     assert "severe contradiction" in joined
 
@@ -349,7 +349,7 @@ def test_decision_reason_is_stable_and_empty_when_sufficient():
     checks = depth_controller.evaluate(state, _settings())
     assert checks["decision_reasons"] == []
     assert checks["decision_reason"] == "evidence sufficient"
-    assert depth_controller.explain(state, _settings())["decision"] == "finalize"
+    assert depth_controller.decide(state, _settings()) == "finalize"
 
 
 def test_reasons_are_ordered_and_singular_plural_correct():
@@ -406,12 +406,13 @@ def test_thin_dimension_grading_failure_is_neutral(monkeypatch):
 def test_checks_are_per_call_not_global():
     gap_state = _state_with_uncorroborated_high_impact()
     clean_state = _state()
-    gap_checks = depth_controller.explain(gap_state, _settings())
-    clean_checks = depth_controller.explain(clean_state, _settings())
-    assert gap_checks["high_impact_uncorroborated"] == 1
-    assert clean_checks["high_impact_uncorroborated"] == 0
+    gap_checks = depth_controller.decide_with_checks(gap_state, _settings())[1]
+    clean_checks = depth_controller.decide_with_checks(clean_state, _settings())[1]
+    assert gap_checks["high_impact_uncorroborated_count"] == 1
+    assert clean_checks["high_impact_uncorroborated_count"] == 0
     # Re-reading after the other call still returns the first state's answer.
-    assert depth_controller.explain(gap_state, _settings())["high_impact_uncorroborated"] == 1
+    again = depth_controller.decide_with_checks(gap_state, _settings())[1]
+    assert again["high_impact_uncorroborated_count"] == 1
 
 
 # ---------------------------------------------------------------------------

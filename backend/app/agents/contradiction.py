@@ -1,31 +1,15 @@
-"""Contradiction engine (vision Feature 09) — v3 API surface.
+"""Contradiction resolution helpers (vision Feature 09).
 
-One detector, one name. The live detector is
-`app.core.contradictions.find_contradictions` — the numeric-band scan the host
-workflow runs. This module no longer carries a second detector.
-`detect_contradictions` here is a thin adapter over the live engine that keeps
-the v3 result shape (kind/severity dicts, the `Contradiction` record, and the
-`summarize_contradictions` / `numeric_ranges` / `contradiction_followups`
-helpers the critic, synthesizer and red-team already consume) so the deferred
-mission port imports a single name.
-
-The live detector reports numeric, polarity and temporal conflicts; this
-adapter passes all three through in the v3 result shape.
+Detection lives in `app.core.contradictions.find_contradictions` — the live
+engine the host workflow runs (numeric, polarity and temporal conflicts).
+This module keeps the deterministic helpers the critic, synthesizer and
+red-team consume: aggregate summaries, reportable numeric ranges, and
+follow-up search queries for the biggest unresolved conflicts.
 """
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Set
-
-# Two claims must be about the same thing before their difference means
-# anything. The live engine enforces its own similarity band
-# (SIMILARITY_LOW/HIGH in app.core.contradictions).
-
-# Relative divergence at which two numbers stop being rounding variants.
-# Applied by this adapter as a post-filter on live-engine findings, whose own
-# threshold is lower.
-NUMERIC_DIVERGENCE = 0.20
+from typing import Any, Dict, List, Sequence, Set
 
 # Above this, a numeric gap is not a nuance but a range that must be reported
 # as a range.
@@ -47,128 +31,6 @@ _STOP = {
 
 def _content_tokens(text: str) -> Set[str]:
     return {t for t in re.findall(r"[a-z][a-z0-9\-]{2,}", (text or "").lower()) if t not in _STOP}
-
-
-@dataclass
-class Contradiction:
-    """One detected conflict.
-
-    Field names `claim_a/claim_b/source_a/source_b` are kept exactly as the
-    critic and synthesizer already consume them; everything else is additive.
-    """
-
-    claim_a: str
-    claim_b: str
-    source_a: str
-    source_b: str
-    kind: str                     # numeric | polarity | temporal
-    severity: float               # 0-1
-    detail: str
-    values: Dict[str, Any] = field(default_factory=dict)
-    intra_source: bool = False
-    sub_question_a: str = ""
-    sub_question_b: str = ""
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "claim_a": self.claim_a,
-            "claim_b": self.claim_b,
-            "source_a": self.source_a,
-            "source_b": self.source_b,
-            "kind": self.kind,
-            "severity": round(self.severity, 3),
-            "detail": self.detail,
-            "values": self.values,
-            "intra_source": self.intra_source,
-            "sub_question_a": self.sub_question_a,
-            "sub_question_b": self.sub_question_b,
-        }
-
-
-def detect_contradictions(
-    facts: Sequence[Dict[str, Any]],
-    *,
-    divergence: float = NUMERIC_DIVERGENCE,
-    limit: int = 25,
-) -> List[Dict[str, Any]]:
-    """Find conflicts across the evidence pool by delegating to the live
-    engine (`app.core.contradictions.find_contradictions`), reshaped into the
-    v3 dict form. Pure, deterministic, no LLM.
-
-    `divergence` post-filters the live engine's findings (its own threshold
-    is lower); the live engine's similarity band and finding cap stand.
-    """
-    from app.core.contradictions import find_contradictions
-
-    found: List[Contradiction] = []
-    for raw in find_contradictions([f for f in (facts or []) if isinstance(f, dict)]):
-        kind = str(raw.get("kind", "numeric") or "numeric")
-        severity = float(raw.get("severity", 0.0) or 0.0)
-        raw_values = dict(raw.get("values") or {})
-        if kind == "numeric":
-            pair = _report_pair(raw, divergence)
-            if pair is None:
-                continue
-            rel = pair["relative_divergence"]
-            severity = max(severity, min(1.0, 0.35 + rel))
-            values = {
-                "unit": str(raw_values.get("unit", "dimensionless") or "dimensionless"),
-                "value_a": pair["value_a"],
-                "value_b": pair["value_b"],
-                "relative_divergence": round(rel, 4),
-                "topic_similarity": float(raw.get("topic_similarity", 0.0)),
-            }
-            detail = str(raw.get("note", ""))
-        else:
-            values = {
-                **raw_values,
-                "topic_similarity": float(raw.get("topic_similarity", 0.0)),
-            }
-            detail = str(raw.get("note", ""))
-        found.append(
-            Contradiction(
-                claim_a=str(raw.get("claim_a", "")),
-                claim_b=str(raw.get("claim_b", "")),
-                source_a=str(raw.get("source_a", "") or ""),
-                source_b=str(raw.get("source_b", "") or ""),
-                kind=kind,
-                severity=severity,
-                detail=detail,
-                values=values,
-                # The live engine already skips same-source pairs.
-                intra_source=False,
-            )
-        )
-
-    return _finalize(found, limit)
-
-
-def _report_pair(raw: Dict[str, Any], divergence: float) -> Optional[Dict[str, Any]]:
-    """The value pair to report for a live-engine finding.
-
-    Claims often carry incidental numbers (years, counts) alongside the
-    disputed measure, and the largest raw divergence is usually one of those,
-    not the real conflict. The tightest pair that still passes `divergence`
-    is the most conservative genuine conflict; incidental numbers are
-    reported only when nothing better qualifies.
-    """
-    best: Optional[Dict[str, Any]] = None
-    for va in raw.get("value_a") or []:
-        for vb in raw.get("value_b") or []:
-            bigger = max(abs(va), abs(vb))
-            if bigger == 0:
-                continue
-            rel = abs(va - vb) / bigger
-            if rel < divergence:
-                continue
-            if best is None or rel < best["relative_divergence"]:
-                best = {"value_a": va, "value_b": vb, "relative_divergence": rel}
-    return best
-
-
-def _finalize(found: List[Contradiction], limit: int) -> List[Dict[str, Any]]:
-    found.sort(key=lambda c: (c.intra_source, -c.severity))
-    return [c.to_dict() for c in found[: max(1, limit)]]
 
 
 # ---------------------------------------------------------------------------

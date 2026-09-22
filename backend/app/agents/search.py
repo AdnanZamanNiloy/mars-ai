@@ -903,18 +903,6 @@ class SearchClient:
         )
         self.health = RetrievalHealth()
 
-    def reset_run(self) -> None:
-        """Clear all run-scoped retrieval memory before a new research run.
-
-        This is the explicit cleanup path AGENTS.md 4.3 requires: without it,
-        cooldowns and failed-URL memory from one run would suppress retrieval
-        in the next. Cheap and idempotent.
-        """
-        self.domain_registry.reset()
-        self.failed_fetches.reset()
-        self.health.reset()
-        self.provider_stats = {}
-
     # -- public API --------------------------------------------------------
 
     async def run_search(

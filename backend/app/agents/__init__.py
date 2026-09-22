@@ -15,8 +15,8 @@ guarded by `tests/test_agents_facade.py::test_every_lazy_export_resolves`.
     SearchClient, contract_queries, ...          — multi-provider search
     summarizer_agent, verifier helpers           — extraction + verification
     critic_agent, redteam_agent                  — judgement + adversarial
-    detect_contradictions, compute_confidence    — conflicts + scoring
-    DepthController, StopDecision               — dynamic depth
+    summarize_contradictions, compute_confidence — conflicts + scoring
+    coverage_gaps                                — dynamic depth
     ResearchBudget, retry/breaker helpers        — cost + reliability
 
 Executive decision (`app.core.decision`), scenarios (`app.core.scenarios`),
@@ -51,20 +51,16 @@ _LAZY: dict[str, str] = {
     "summarizer_agent": "app.agents.summarizer",
     "specialist_system_prompt": "app.agents.summarizer",
     "verify_facts": "app.agents.verifier",
-    "verification_summary": "app.agents.verifier",
     # judgement / adversarial
     "critic_agent": "app.agents.critic",
     "redteam_agent": "app.agents.redteam",
     "RedTeamReport": "app.agents.redteam",
     # conflicts / scoring
-    "detect_contradictions": "app.agents.contradiction",
     "summarize_contradictions": "app.agents.contradiction",
     "contradiction_followups": "app.agents.contradiction",
     "compute_confidence": "app.agents.confidence",
     "ConfidenceReport": "app.agents.confidence",
     # depth control
-    "DepthController": "app.agents.stopping",
-    "StopDecision": "app.agents.stopping",
     "coverage_gaps": "app.agents.stopping",
     # budget / reliability
     "ResearchBudget": "app.agents.budget",
@@ -73,7 +69,6 @@ _LAZY: dict[str, str] = {
     "retry_async": "app.agents.reliability",
     "CircuitBreaker": "app.agents.reliability",
     "gather_bounded": "app.agents.reliability",
-    "ok_results": "app.agents.reliability",
     # epistemics: conflict adjudication, claim standards, coverage balance
     "assess_epistemics": "app.agents.epistemics",
     "EpistemicReport": "app.agents.epistemics",

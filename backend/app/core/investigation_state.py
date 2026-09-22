@@ -24,8 +24,6 @@ This module is the missing memory. It is run-scoped and additive:
   * claims whose attempt budget is spent and that are STILL single-source are
     marked exhausted and become an acknowledged limitation instead of being
     silently re-chased;
-  * un-attempted gaps are ordered ahead of already-attempted ones, so scarce
-    expansion budget goes where it has not yet been spent.
 
 The state is a plain dict threaded through LangGraph state (`investigation_state`)
 — there is NO module-level mutable store, so concurrent runs cannot see each
@@ -33,13 +31,12 @@ other's state and there is no cleanup path to forget (AGENTS.md 4.3). Every
 function is pure, deterministic and total: a grading/lookup failure is logged
 and degrades to a neutral result, never raises.
 
-The depth controller may read `investigation_summary` as an ADDITIONAL signal.
 This module deliberately does not change any stopping policy — it only exposes
 the investigation state the policy can consume.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
 from app.core.logging import get_logger
 
@@ -254,70 +251,6 @@ def _needs_corroboration_map(facts: Sequence[Any]) -> Optional[Dict[str, bool]]:
     except Exception as exc:  # grading must never break the loop
         logger.warning("investigation_grading_failed", error=str(exc), exc_info=exc)
         return None
-
-
-def open_targets(
-    state: Any,
-    targets: Sequence[Any],
-    *,
-    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Split ranked targets into (actionable, excluded).
-
-    `actionable` are the targets a new pass should spend budget on: claims that
-    are NOT exhausted and NOT corroborated. Un-attempted (`open`) claims are
-    ordered ahead of already-attempted ones and within each group the incoming
-    (impact) order is preserved — so a fresh gap is funded before re-funding a
-    gap that has already had a shot. `excluded` are the exhausted/corroborated
-    targets, returned so callers can surface exhausted ones as limitations.
-
-    Total: bounded, deterministic, and empty-safe.
-    """
-    out = sanitize_investigation_state(state, max_attempts=max_attempts)
-    actionable: List[Dict[str, Any]] = []
-    excluded: List[Dict[str, Any]] = []
-    for target in targets or []:
-        if not isinstance(target, dict):
-            continue
-        claim = str(target.get("claim", "") or "").strip()
-        if not claim:
-            continue
-        key = investigation_key(claim)
-        entry = out.get(key)
-        if entry is None or entry["status"] == STATUS_OPEN:
-            actionable.append({"target": target, "_rank": 0})
-            continue
-        if entry["status"] == STATUS_CORROBORATED:
-            excluded.append(target)
-            continue
-        if entry["status"] == STATUS_EXHAUSTED:
-            excluded.append(target)
-            continue
-        # ATTEMPTED with budget left: fundable, but after un-attempted gaps.
-        actionable.append({"target": target, "_rank": 1})
-    actionable.sort(key=lambda item: item["_rank"])  # stable: ties keep input order
-    return [item["target"] for item in actionable], excluded
-
-
-def investigation_summary(
-    state: Any, *, max_attempts: int = DEFAULT_MAX_ATTEMPTS
-) -> Dict[str, int]:
-    """Counts of open / attempted / exhausted / corroborated claims.
-
-    The structured signal the depth controller can read (as an ADDITIONAL
-    input only — no policy change lives here). Total: empty/invalid state
-    yields all-zero counts.
-    """
-    out = sanitize_investigation_state(state, max_attempts=max_attempts)
-    summary = {
-        STATUS_OPEN: 0,
-        STATUS_ATTEMPTED: 0,
-        STATUS_EXHAUSTED: 0,
-        STATUS_CORROBORATED: 0,
-    }
-    for entry in out.values():
-        summary[entry["status"]] = summary.get(entry["status"], 0) + 1
-    return summary
 
 
 def exhausted_limitations(

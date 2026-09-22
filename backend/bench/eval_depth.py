@@ -61,7 +61,6 @@ def evaluate_scenario(scenario: Dict[str, Any], settings: Any) -> Dict[str, Any]
     evidence_gaps = _evidence_gaps_remain(state)
     decision, checks = depth_controller.decide_with_checks(state, settings)
     reason = str(checks.get("decision_reason", "") or "")
-    explained = depth_controller.explain(state, settings)
 
     tokens_present = {
         token: token.lower() in reason.lower()
@@ -98,10 +97,10 @@ def evaluate_scenario(scenario: Dict[str, Any], settings: Any) -> Dict[str, Any]
         "limitations_ok": limitations_ok,
         "hard_wall_reached": hard_wall,
         "evidence_gaps_remain": evidence_gaps,
-        "triggers": explained.get("triggers", []),
-        "high_impact_uncorroborated": explained.get("high_impact_uncorroborated", 0),
-        "severe_contradictions": explained.get("severe_contradictions", 0),
-        "thin_dimensions": explained.get("thin_dimensions", []),
+        "triggers": list(checks.get("decision_reasons", []) or []),
+        "high_impact_uncorroborated": int(checks.get("high_impact_uncorroborated_count", 0) or 0),
+        "severe_contradictions": int(checks.get("severe_contradictions", 0) or 0),
+        "thin_dimensions": list(checks.get("thin_dimensions", []) or []),
         "passed": passed,
     }
 

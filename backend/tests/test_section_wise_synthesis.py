@@ -263,11 +263,11 @@ def test_compression_never_merges_claims_with_distinct_numbers():
 def test_required_sections_added_before_length_trim_keeps_band():
     """Regression: mandatory sections and the appendix were appended AFTER the
     deterministic trim, so every deep report overshot the 1500-word band
-    (live: 2274-2750 words). The ordering must be ensure_required_sections →
+    (live: 2274-2750 words). The ordering must be _add_required_sections →
     trim, and the required headings must survive the trim."""
     from app.agents.answer_quality import length_band
     from app.agents.synthesizer import (
-        _count_words, _trim_to_budget, ensure_required_sections,
+        _add_required_sections, _count_words, _trim_to_budget, select_profile,
     )
 
     para = " ".join(["word"] * 200)
@@ -279,11 +279,13 @@ def test_required_sections_added_before_length_trim_keeps_band():
     _, hi = length_band("deep")
 
     # Reproduce the pipeline order: add required sections, then trim.
-    body = ensure_required_sections(
+    ctx = {"evidence_distribution": {"A": 1, "B": 1, "C": 1, "D": 0}}
+    body, _ = _add_required_sections(
         writer_draft,
-        ctx={"evidence_distribution": {"A": 1, "B": 1, "C": 1, "D": 0}},
+        ctx=ctx,
         usable_facts=_facts(),
         contradictions=[],
+        profile=select_profile(ctx, fact_count=len(_facts())),
     )
     assert _count_words(body) > hi
     trimmed = _trim_to_budget(body, hi)

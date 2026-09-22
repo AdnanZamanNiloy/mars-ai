@@ -1,12 +1,10 @@
 """Evidence grading (Step 1): claim-level evidence quality, independent
-corroboration, numeric-support flagging, contradiction demotion, and the
-pool-quality score. Pure and deterministic — no LLM, no network."""
+corroboration, numeric-support flagging and contradiction demotion. Pure
+and deterministic — no LLM, no network."""
 from app.core.evidence_grade import (
     GRADE_A, GRADE_C, GRADE_D,
     coverage_gaps_from_records,
-    evidence_quality_score,
     grade_claim,
-    grade_distribution,
     grade_facts,
     independent_corroboration,
     registrable_domain,
@@ -98,24 +96,6 @@ def test_quantitative_claim_with_explicit_number_detected():
     r = grade_claim({"claim": "Revenue reached $1.2B", "source": "https://gov.uk/x", "verified": True})
     assert r.has_numbers is True
 
-
-# --- pool quality: few strong beats many weak --------------------------------
-
-def test_quality_score_favours_strong_pool_over_weak():
-    strong = grade_claim({
-        "claim": "Adoption grew 42% in 2024",
-        "source": "https://www.gov.uk/report",
-        "verified": True,
-        "corroborating_sources": ["https://www.gov.uk/report", "https://who.int/data"],
-    })
-    weak = grade_claim({"claim": "unverified thing", "source": ""})
-    assert evidence_quality_score([strong, strong]) > evidence_quality_score([weak] * 10)
-
-
-def test_empty_pool_scores_zero():
-    assert evidence_quality_score([]) == 0.0
-
-
 # --- annotations are additive and non-mutating -------------------------------
 
 def test_grade_facts_adds_fields_without_mutating_original():
@@ -124,20 +104,6 @@ def test_grade_facts_adds_fields_without_mutating_original():
     assert out[0]["evidence_grade"] == GRADE_A or out[0]["evidence_grade"] in (GRADE_A, "B", "C")
     assert "evidence" in out[0]
     assert "evidence_grade" not in original  # original untouched
-
-
-def test_grade_distribution_counts_every_grade():
-    r_a = grade_claim({
-        "claim": "grew 42%",
-        "source": "https://gov.uk/a",
-        "verified": True,
-        "corroborating_sources": ["https://gov.uk/a", "https://who.int/b"],
-    })
-    r_d = grade_claim({"claim": "x", "source": ""})
-    dist = grade_distribution([r_a, r_d])
-    assert dist[GRADE_A] == 1
-    assert dist[GRADE_D] == 1
-
 
 def test_coverage_gaps_names_missing_corroboration():
     r = grade_claim({

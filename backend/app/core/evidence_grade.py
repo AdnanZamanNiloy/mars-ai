@@ -643,28 +643,6 @@ def grade_facts(
     return out
 
 
-def grade_distribution(records: Sequence[EvidenceRecord]) -> Dict[str, int]:
-    dist = {GRADE_A: 0, GRADE_B: 0, GRADE_C: 0, GRADE_D: 0}
-    for r in records or ():
-        dist[r.grade] = dist.get(r.grade, 0) + 1
-    return dist
-
-
-def evidence_quality_score(records: Sequence[EvidenceRecord]) -> float:
-    """0-1 signal: share of the pool that is at least B, weighted by grade.
-
-    A pool of three A-grade claims outscores a pool of thirty D-grade claims
-    — which is the entire thesis of evidence-driven research. Empty pool = 0.
-    """
-    records = list(records or ())
-    if not records:
-        return 0.0
-    total = 0.0
-    for r in records:
-        total += {GRADE_A: 1.0, GRADE_B: 0.75, GRADE_C: 0.4, GRADE_D: 0.1}.get(r.grade, 0.1)
-    return round(total / len(records), 3)
-
-
 def coverage_gaps_from_records(records: Sequence[EvidenceRecord]) -> List[str]:
     """Human-readable evidence deficiencies, for the critic/report.
 

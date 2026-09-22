@@ -14,7 +14,6 @@ Deterministic — no LLM, no network.
 from app.agents.outline import OutlineSection, build_outline
 from app.core.section_context import (
     DEFAULT_MAX_FACTS,
-    select_context_for_outline,
     select_section_facts,
 )
 from app.core.semantic import rank_by_similarity
@@ -222,32 +221,6 @@ def test_deterministic_fallback_returns_facts_on_empty_and_small_pools():
     ]
     picked = select_section_facts(section, small, max_facts=DEFAULT_MAX_FACTS)
     assert [f["claim"] for f in picked] == [f["claim"] for f in small]
-
-
-def test_select_context_for_outline_pairs_every_section():
-    facts = [
-        {
-            "claim": "Artificial intelligence simulates human intelligence in machines.",
-            "axis": "definition",
-            "source": "https://a.example/x",
-            "verified": True,
-            "sub_question": "AI definition",
-        },
-        {
-            "claim": "Global AI spending reached 200 billion dollars in 2025.",
-            "axis": "evidence",
-            "source": "https://b.example/y",
-            "verified": True,
-            "sub_question": "AI market data",
-        },
-    ]
-    outline = build_outline("What is the current trend of AI?", facts)
-    pairs = select_context_for_outline(outline)
-    assert len(pairs) == len(outline.sections)
-    for section, selected in pairs:
-        assert isinstance(section, OutlineSection)
-        assert isinstance(selected, list)
-
 
 def test_global_pool_candidates_recover_off_axis_relevant_fact():
     """A fact whose AXIS is wrong for a section but whose CONTENT is relevant
