@@ -155,8 +155,6 @@ DIMENSION_TO_SPECIALIST: Dict[str, str] = {
 
 _ENTITY_SPLIT_RE = re.compile(r",|\band\b|\bor\b|\bvs\.?\b|\bversus\b|/")
 
-QUERY_TYPES = ("factual", "comparative", "analytical", "exploratory")
-
 
 # ---------------------------------------------------------------------------
 # Complexity

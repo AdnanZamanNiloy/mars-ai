@@ -200,7 +200,6 @@ def build_outline(
     sub_questions: Sequence[Any] = (),
     *,
     intent: Dict[str, Any] | None = None,
-    min_sections: int = 2,
 ) -> AnswerOutline:
     """Deterministically derive the answer's section outline.
 

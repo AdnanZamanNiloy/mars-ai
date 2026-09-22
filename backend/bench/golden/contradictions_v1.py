@@ -96,8 +96,3 @@ def load_cases() -> List[Dict[str, Any]]:
             "invalid contradiction fixture set:\n  " + "\n  ".join(errors)
         )
     return data["cases"]
-
-
-def expected_labels() -> Dict[str, str]:
-    """id -> expected label, for quick lookups in tests/evaluator."""
-    return {c["id"]: c["expected_label"] for c in load_cases()}

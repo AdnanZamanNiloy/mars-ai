@@ -26,11 +26,6 @@ from typing import Any, Dict, List, Sequence, Set
 from app.agents.confidence import SUFFICIENCY_THRESHOLD, ConfidenceReport
 from app.agents.evidence_utils import canonical_url, extract_domain
 
-# A pass must clear at least one of these to have earned its cost.
-MIN_NEW_VERIFIED = 1
-MIN_NEW_DOMAINS = 1
-MIN_CONFIDENCE_GAIN = 0.02
-
 # Composite gain below this counts as a stall; two consecutive stalls stop.
 STALL_GAIN = 0.08
 

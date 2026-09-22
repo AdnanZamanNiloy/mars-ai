@@ -20,9 +20,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set
 
 # Two claims must be about the same thing before their difference means
 # anything. The live engine enforces its own similarity band
-# (SIMILARITY_LOW/HIGH in app.core.contradictions); this constant remains the
-# documented v3 default for the `subject_similarity` kwarg.
-SUBJECT_SIMILARITY = 0.34
+# (SIMILARITY_LOW/HIGH in app.core.contradictions).
 
 # Relative divergence at which two numbers stop being rounding variants.
 # Applied by this adapter as a post-filter on live-engine findings, whose own
@@ -90,9 +88,7 @@ class Contradiction:
 def detect_contradictions(
     facts: Sequence[Dict[str, Any]],
     *,
-    subject_similarity: float = SUBJECT_SIMILARITY,
     divergence: float = NUMERIC_DIVERGENCE,
-    max_pairs: int = 20_000,
     limit: int = 25,
 ) -> List[Dict[str, Any]]:
     """Find conflicts across the evidence pool by delegating to the live
@@ -100,9 +96,7 @@ def detect_contradictions(
     v3 dict form. Pure, deterministic, no LLM.
 
     `divergence` post-filters the live engine's findings (its own threshold
-    is lower). `subject_similarity` and `max_pairs` are accepted for
-    call-site compatibility; the live engine's similarity band and finding
-    cap stand until the mission port revisits them.
+    is lower); the live engine's similarity band and finding cap stand.
     """
     from app.core.contradictions import find_contradictions
 

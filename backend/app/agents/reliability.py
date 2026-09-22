@@ -1,4 +1,4 @@
-"""Fault tolerance primitives: retries, circuit breakers, bulkheads, timeouts.
+"""Fault tolerance primitives: retries, circuit breakers, timeouts.
 
 The pipeline's failure modes are all remote-call failure modes: a provider
 rate-limits, a page hangs, a JSON body comes back truncated. Before this
@@ -13,8 +13,6 @@ Three things live here, in dependency order:
   CircuitBreaker  stops calling a provider that is definitively down, so a
                   dead provider costs one timeout per cooldown instead of
                   one timeout per sub-question per pass
-  Bulkhead        named concurrency ceilings, so one slow stage cannot consume
-                  every slot on an 8GB host
 
 No third-party dependencies, no global state that survives a process, and
 every knob has a default that is safe on a laptop.
@@ -269,16 +267,6 @@ def get_breaker(
     return breaker
 
 
-def breaker_snapshot() -> Dict[str, Dict[str, Any]]:
-    return {name: b.snapshot() for name, b in _BREAKERS.items()}
-
-
-def reset_breakers() -> None:
-    """Test hook: breakers are process-global by design (a provider is down
-    for the whole process, not per request)."""
-    _BREAKERS.clear()
-
-
 async def call_protected(
     fn: Callable[[], Awaitable[T]],
     *,
@@ -317,53 +305,6 @@ async def call_protected(
         raise
     await breaker.record_success()
     return result
-
-
-# ---------------------------------------------------------------------------
-# Bulkheads
-# ---------------------------------------------------------------------------
-
-class Bulkhead:
-    """Named concurrency ceiling.
-
-    Separate pools per resource kind so a burst of page fetches cannot starve
-    LLM calls (or vice versa) on a memory-constrained host. `asyncio.Semaphore`
-    is created lazily so a Bulkhead can be constructed outside a running loop.
-    """
-
-    def __init__(self, name: str, limit: int) -> None:
-        self.name = name
-        self.limit = max(1, int(limit))
-        self._sem: Optional[asyncio.Semaphore] = None
-        self._in_flight = 0
-        self._peak = 0
-
-    def _semaphore(self) -> asyncio.Semaphore:
-        if self._sem is None:
-            self._sem = asyncio.Semaphore(self.limit)
-        return self._sem
-
-    async def __aenter__(self) -> "Bulkhead":
-        await self._semaphore().acquire()
-        self._in_flight += 1
-        self._peak = max(self._peak, self._in_flight)
-        return self
-
-    async def __aexit__(self, *exc: Any) -> None:
-        self._in_flight -= 1
-        self._semaphore().release()
-
-    async def run(self, fn: Callable[[], Awaitable[T]]) -> T:
-        async with self:
-            return await fn()
-
-    def snapshot(self) -> Dict[str, Any]:
-        return {
-            "name": self.name,
-            "limit": self.limit,
-            "in_flight": self._in_flight,
-            "peak": self._peak,
-        }
 
 
 async def gather_bounded(

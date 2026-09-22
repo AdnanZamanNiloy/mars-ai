@@ -67,10 +67,6 @@ class ReportDocument:
     verified_count: int = 0
     sources: List[ReportSource] = field(default_factory=list)
 
-    @property
-    def has_body(self) -> bool:
-        return bool(self.body_markdown and self.body_markdown.strip())
-
 
 def is_supported_format(fmt: str) -> bool:
     return str(fmt or "").lower() in _SUPPORTED_FORMATS

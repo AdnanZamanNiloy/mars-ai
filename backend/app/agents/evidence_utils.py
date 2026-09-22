@@ -46,7 +46,6 @@ from app.agents.sources import (
     LOW_TRUST_DOMAINS,
     authority_score,
     canonical_url,
-    classify_source,
     evidence_freshness,
     extract_domain as _extract_domain,
     is_primary_source,
@@ -63,14 +62,6 @@ LOW_QUALITY_DOMAINS: Set[str] = {
     "csdn.net", "medium.com", "blogspot.com", "substack.com",
     "wordpress.com", "youtube.com", "youtu.be", "tiktok.com",
     "pinterest.com", "whatfix.com",
-}
-
-HIGH_AUTHORITY_DOMAINS: Set[str] = {
-    "stanford.edu", "plato.stanford.edu", "iep.utm.edu", "britannica.com",
-    "routledge.com", "nature.com", "science.org", "arxiv.org",
-    "huggingface.co", "paperswithcode.com", "github.com", "openml.org",
-    "mlcommons.org", "who.int", "oecd.org", "worldbank.org", "imf.org",
-    "un.org",
 }
 
 
@@ -98,10 +89,6 @@ def is_high_quality_domain(
 def source_reliability_score(url: str) -> float:
     """0.0-1.0 authority for a URL (0.0 = never cite). Registry-backed."""
     return authority_score(url)
-
-
-def source_profile(url: str) -> Dict[str, Any]:
-    return classify_source(url).to_dict()
 
 
 # ---------------------------------------------------------------------------
@@ -422,14 +409,6 @@ def claim_polarity(text: str) -> int:
     if negated:
         return -1 if direction >= 0 else 1
     return direction
-
-
-def polarity_conflict(a: str, b: str, min_similarity: float = 0.45) -> bool:
-    """True when two claims talk about the same thing with opposite polarity."""
-    pa, pb = claim_polarity(a), claim_polarity(b)
-    if pa == 0 or pb == 0 or pa == pb:
-        return False
-    return _semantic_similarity(a, b) >= min_similarity
 
 
 # ---------------------------------------------------------------------------

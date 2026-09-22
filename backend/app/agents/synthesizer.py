@@ -2461,12 +2461,6 @@ def _add_reasoning_structure(answer: str, *, ctx: Dict[str, Any]) -> Tuple[str, 
     return answer.rstrip() + "\n\n## Reasoning\n\n" + rendered, {"reasoning"}
 
 
-def ensure_reasoning_structure(answer: str, *, ctx: Dict[str, Any]) -> str:
-    """Backward-compatible wrapper around `_add_reasoning_structure`."""
-    updated, _ = _add_reasoning_structure(answer, ctx=ctx)
-    return updated
-
-
 # ---------------------------------------------------------------------------
 # Citation numbering: bind every fact to the number the model must cite
 # ---------------------------------------------------------------------------

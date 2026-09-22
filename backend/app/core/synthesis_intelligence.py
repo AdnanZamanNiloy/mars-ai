@@ -789,7 +789,6 @@ MAX_APPENDED_WORDS = 38
 def refine_restatement(
     sentence: str,
     *,
-    prior_section: str = "",
     dimension: str = "implication",
     move: str = "",
     seed: str = "",
@@ -1054,10 +1053,6 @@ def _fuzzy_restatement(candidate: str, prior: str) -> bool:
     return containment >= ANCHOR_OVERLAP_MIN
 
 
-def _plural_keys(texts: Sequence[str]) -> Set[str]:
-    return {claim_key(t) for t in texts if claim_key(t)}
-
-
 class ClaimLedger:
     """Tracks claim keys across sections and decides what may be re-used.
 
@@ -1155,7 +1150,6 @@ class ClaimLedger:
         move = _choose_move(sentence, signals)
         refined = refine_restatement(
             sentence,
-            prior_section=prior.section,
             move=move,
             seed=key or sentence,
         )

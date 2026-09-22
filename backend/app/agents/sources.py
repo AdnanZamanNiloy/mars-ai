@@ -43,17 +43,6 @@ TIER_MEDIA = "media"              # journalism
 TIER_SECONDARY = "secondary"      # aggregators, general web
 TIER_LOW = "low"                  # UGC, SEO farms, social
 
-TIER_ORDER: Tuple[str, ...] = (
-    TIER_OFFICIAL,
-    TIER_PEER_REVIEWED,
-    TIER_PREPRINT,
-    TIER_REFERENCE,
-    TIER_INDUSTRY,
-    TIER_MEDIA,
-    TIER_SECONDARY,
-    TIER_LOW,
-)
-
 # Authority ceilings per tier. Deliberately aligned with the legacy scale
 # so downstream thresholds (0.55 keep, 0.60 strong, 0.62 facts) still mean
 # what they meant before this module existed.
@@ -198,10 +187,6 @@ class SourceProfile:
     authority: float
     is_primary: bool
     reasons: Tuple[str, ...] = ()
-
-    @property
-    def is_usable(self) -> bool:
-        return self.authority > 0.0
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -384,18 +369,6 @@ def primary_source_share(urls: Iterable[str]) -> float:
     if not seen:
         return 0.0
     return sum(1 for v in seen.values() if v) / len(seen)
-
-
-def tier_distribution(urls: Iterable[str]) -> Dict[str, int]:
-    counts: Dict[str, int] = {}
-    seen: Set[str] = set()
-    for url in urls or []:
-        key = canonical_url(url)
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        counts[classify_source(url).tier] = counts.get(classify_source(url).tier, 0) + 1
-    return counts
 
 
 # ---------------------------------------------------------------------------

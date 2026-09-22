@@ -251,14 +251,6 @@ class IntentReport:
     forced_both: bool = False
 
     @property
-    def dominant_sense(self) -> Optional[SenseCandidate]:
-        return self.senses[0] if self.senses else None
-
-    @property
-    def secondary_sense(self) -> Optional[SenseCandidate]:
-        return self.senses[1] if len(self.senses) > 1 else None
-
-    @property
     def recommended_action(self) -> str:
         """research_both (answer structures both senses) vs research_dominant
         (answer disambiguates in one paragraph, then goes deep on the likely

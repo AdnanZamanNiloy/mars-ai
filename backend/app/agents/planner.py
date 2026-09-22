@@ -240,11 +240,6 @@ def normalize_domain(domain: str) -> str:
     return d if d in VALID_DOMAINS else "general"
 
 
-def normalize_axis(axis: str) -> str:
-    a = normalize_text(axis).replace(" ", "_")
-    return a if a in VALID_AXES else "general"
-
-
 # Ordered (label-fragment, canonical-axis) aliases. Common wordings for the
 # canonical retrieval categories are recognized so a model-chosen dimension
 # ("head-to-head comparison") still maps onto the retrieval/section machinery,

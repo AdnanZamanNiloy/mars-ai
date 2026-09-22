@@ -58,7 +58,7 @@ def _verified_supporting_claims(
     return supporting
 
 
-def _contradiction_penalty(option_label: str, contradictions: List[Dict[str, Any]]) -> int:
+def _contradiction_penalty(contradictions: List[Dict[str, Any]]) -> int:
     # MVP: each UNRESOLVED contradiction raises the risk of every substantive
     # option equally (we can't yet attribute a contradiction to one option).
     # Fix C: resolved conflicts (period/scope/metric) are explained spreads,
@@ -103,7 +103,7 @@ def build_decision_layer(
         label = chr(ord("A") + idx)
         supporting = _verified_supporting_claims(axis, state)
         support_score = len(supporting)
-        risk = _contradiction_penalty(label, contradictions)
+        risk = _contradiction_penalty(contradictions)
         top_claim = supporting[0]["claim"] if supporting else ""
         options.append({
             "option_label": label,

@@ -145,15 +145,6 @@ def _weighted_overlap(claim_terms: Sequence[str], source_text: str) -> float:
     return (hit / total) if total else 0.0
 
 
-def _overlap_ratio(claim_terms: List[str], source_text: str) -> float:
-    """Kept for compatibility with callers/tests that used the unweighted form."""
-    if not claim_terms:
-        return 0.0
-    source_tokens = set(_tokens(source_text))
-    hits = sum(1 for term in claim_terms if term in source_tokens)
-    return hits / len(claim_terms)
-
-
 def _lookup_text(source: str, sources: Dict[str, str]) -> str:
     return sources.get(source) or sources.get(canonical_url(source)) or ""
 

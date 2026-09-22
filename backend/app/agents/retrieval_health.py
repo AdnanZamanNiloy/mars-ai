@@ -204,16 +204,6 @@ class DomainRegistry:
         now = self._clock()
         return [d for d, s in self._states.items() if s.is_cooling(now)]
 
-    def prune(self) -> None:
-        """Drop expired cooldown entries so a long process stays bounded."""
-        now = self._clock()
-        stale = [
-            d for d, s in self._states.items()
-            if not s.is_cooling(now) and s.failures == 0
-        ]
-        for d in stale:
-            self._states.pop(d, None)
-
     def reset(self) -> None:
         self._states.clear()
 
@@ -350,13 +340,6 @@ class RetrievalHealth:
             self.fallback_acquisitions += 1
 
     # -- derived -----------------------------------------------------------
-
-    @property
-    def failure_total(self) -> int:
-        return (
-            self.status_forbidden + self.status_rate_limited + self.fetch_timeouts
-            + self.status_server_error + self.connection_errors + self.other_failures
-        )
 
     def snapshot(self) -> Dict[str, object]:
         attempts = self.fetch_attempts

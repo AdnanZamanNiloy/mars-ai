@@ -138,11 +138,6 @@ class ClaimType:
     EVALUATIVE = "evaluative"
     ATTRIBUTIVE = "attributive"
 
-    ALL = (
-        DEFINITIONAL, DESCRIPTIVE, STATISTICAL, CAUSAL,
-        PREDICTIVE, EVALUATIVE, ATTRIBUTIVE,
-    )
-
 
 # Ordered: the first pattern that matches wins, because a sentence can carry
 # several signals and the strongest burden of proof should govern. A predictive

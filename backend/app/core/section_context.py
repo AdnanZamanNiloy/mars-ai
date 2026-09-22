@@ -50,7 +50,6 @@ want thematic compression run `_compress_to_themes` AFTER selection.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from app.agents.evidence_utils import extract_numbers
@@ -118,16 +117,6 @@ _AXIS_LABELS: Dict[str, str] = {
     "history": "history background origin timeline",
     "outlook": "outlook future trends forecast projection",
 }
-
-
-@dataclass
-class SectionContextStats:
-    """What the selector did for one section, for logging/observability."""
-
-    section: str
-    candidates: int = 0
-    selected: int = 0
-    used_fallback: bool = False
 
 
 def _section_query_text(section: Any) -> str:

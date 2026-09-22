@@ -195,22 +195,6 @@ class ReasoningMap:
     unknown: List[str] = field(default_factory=list)
     implications: List[Implication] = field(default_factory=list)
 
-    # --- accessors (small, stable surface) ---------------------------------
-    def established_claims(self) -> List[str]:
-        return list(self.established)
-
-    def inferred_claims(self) -> List[str]:
-        return list(self.inferred)
-
-    def unknown_gaps(self) -> List[str]:
-        return list(self.unknown)
-
-    def competing_explanations(self) -> List[CompetingExplanation]:
-        return list(self.competing)
-
-    def decision_implications(self) -> List[Implication]:
-        return list(self.implications)
-
     @property
     def is_empty(self) -> bool:
         return not (

@@ -423,9 +423,3 @@ def _temporal_for(facts: Sequence[Dict[str, Any]], query: str) -> Any:
         return temporal_profile(facts, query_type=query_type)
     except Exception:  # noqa: BLE001
         return None
-
-
-def confidence_delta(before: Optional[ConfidenceReport], after: ConfidenceReport) -> float:
-    if before is None:
-        return after.overall
-    return round(after.overall - before.overall, 4)

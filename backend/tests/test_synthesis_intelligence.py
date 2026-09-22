@@ -84,7 +84,6 @@ def test_refinement_produces_transition_without_llm():
     """The deterministic path must yield a usable transition with no LLM."""
     refined = refine_restatement(
         "The project costs about $13 billion [1].",
-        prior_section="What It Is",
         dimension="implication",
     )
     assert refined.endswith(".")
@@ -538,7 +537,7 @@ _NO_TOPIC_SENTENCE = "The transformer removes recurrence from the sequence model
 def test_prose_restatement_without_topic_move_is_byte_for_byte_unchanged():
     """No topic-specific clause matches this claim, so nothing is appended."""
     assert refine_restatement(
-        _NO_TOPIC_SENTENCE, prior_section="What It Is", dimension="implication"
+        _NO_TOPIC_SENTENCE, dimension="implication"
     ) == _NO_TOPIC_SENTENCE
 
 
@@ -716,7 +715,6 @@ def test_already_refined_sentence_is_not_refined_twice():
 
     refined = refine_restatement(
         "Rooppur costs about US$13 billion [3].",
-        prior_section="What It Is",
         move="implication",
     )
     assert _is_refinable_sentence(refined) is False

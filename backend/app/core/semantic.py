@@ -327,37 +327,6 @@ def pair_similarity(a: str, b: str) -> float:
 # Batch scoring (dedup, contradiction banding, citation support)
 # ---------------------------------------------------------------------------
 
-def _sparse_matrix(texts: Sequence[str]) -> Tuple[List[Dict[int, float]], Dict[str, int]]:
-    """L2-normalized sparse TF-IDF rows + term->column index."""
-    index: Dict[str, int] = {}
-    rows: List[Dict[int, float]] = []
-    for text in texts:
-        weighted = dict(_tokens_cached((text or "").strip().lower()))
-        if not weighted:
-            rows.append({})
-            continue
-        row: Dict[int, float] = {}
-        for tok, w in weighted.items():
-            col = index.get(tok)
-            if col is None:
-                col = len(index)
-                index[tok] = col
-            row[col] = row.get(col, 0.0) + w
-        norm = sum(w * w for w in row.values()) ** 0.5
-        if norm > 1e-12:
-            row = {c: w / norm for c, w in row.items()}
-        rows.append(row)
-    return rows, index
-
-
-def _rows_to_dense(rows: List[Dict[int, float]], width: int) -> np.ndarray:
-    mat = np.zeros((len(rows), width), dtype=np.float32)
-    for i, row in enumerate(rows):
-        for col, w in row.items():
-            mat[i, col] = w
-    return mat
-
-
 def _batch_signals(texts: Sequence[str]) -> Dict[str, np.ndarray] | None:
     """Vectorized cheap-signal block for a batch of texts.
 
@@ -588,12 +557,6 @@ def _l2_rows(mat: np.ndarray) -> np.ndarray:
     norms = np.linalg.norm(mat, axis=1, keepdims=True)
     norms[norms < 1e-12] = 1.0
     return mat / norms
-
-
-def _pad_cols(mat: np.ndarray, width: int) -> np.ndarray:
-    if mat.shape[1] >= width:
-        return mat
-    return np.hstack([mat, np.zeros((mat.shape[0], width - mat.shape[1]), dtype=mat.dtype)])
 
 
 def top_match(query: str, candidates: Sequence[str]) -> Tuple[int, float]:

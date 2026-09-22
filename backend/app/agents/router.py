@@ -229,10 +229,6 @@ class RouteDecision:
     def is_direct(self) -> bool:
         return self.path == DIRECT
 
-    @property
-    def is_conversation(self) -> bool:
-        return self.path == CONVERSATION
-
     def to_dict(self) -> Dict[str, Any]:
         return {
             "path": self.path,
