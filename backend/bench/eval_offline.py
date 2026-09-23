@@ -332,6 +332,23 @@ def evaluate_query_run(query: Dict[str, Any], final: Dict[str, Any],
     required_sections = list(query.get("required_sections") or [])
     missing_sections = _required_sections_present(report or answer, required_sections)
     sections_present = len(required_sections) - len(missing_sections)
+    # Structural adaptability: does the answer's detected shape match the
+    # question family? This replaces heading compliance as the structural
+    # signal — a differently-shaped answer scores well if it fits the question.
+    from bench.eval_answer_quality import detect_shape, _PROCESS_NOISE_RE
+    category_shapes = {
+        "factual_explanation": {"concise", "thematic", "mechanism_chain"},
+        "current_trend": {"thematic", "concise"},
+        "comparison": {"criterion_comparison"},
+        "decision_policy": {"options", "thematic"},
+        "ambiguous_term": {"disambiguation", "thematic", "concise"},
+        "causal": {"mechanism_chain", "thematic"},
+        "quantitative": {"thematic", "concise", "mechanism_chain"},
+    }
+    detected_shape = detect_shape(answer)
+    expected_shapes = category_shapes.get(query.get("category"), set())
+    adaptive = detected_shape in expected_shapes if expected_shapes else True
+    process_noise = len(_PROCESS_NOISE_RE.findall(answer or ""))
     relevance = score_answer_relevance(query["query"], answer)
     q_eval = evaluate_answer(
         query["query"],
@@ -354,13 +371,16 @@ def evaluate_query_run(query: Dict[str, Any], final: Dict[str, Any],
     query_type_ok = query_type == query.get("query_type_required")
 
     # -- minimums --
+    # NOTE: the historical `sections` minimum (5 named headings) was an answer-
+    # format requirement, not a research-quality one, and it contradicted the
+    # adaptive-synthesis contract. Structural shape is scored separately
+    # (`adaptive`) and is never a hard gate on a named heading list.
     minimums = query.get("minimums") or {}
     min_checks = {
         "verified_claims": verified_claims >= int(minimums.get("verified_claims", 0)),
         "corroborated_claims": corroborated >= int(minimums.get("corroborated_claims", 0)),
         "distinct_domains": len(domains) >= int(minimums.get("distinct_domains", 0)),
         "primary_share": primary_share >= float(minimums.get("primary_share", 0.0)),
-        "sections": sections_present >= int(minimums.get("sections", 0)),
     }
     citation_invariants = query.get("citation_invariants") or {}
     invariant_checks = {
@@ -399,6 +419,10 @@ def evaluate_query_run(query: Dict[str, Any], final: Dict[str, Any],
         "missing_sections": missing_sections,
         "sections_present": sections_present,
         "section_presence_rate": _safe_ratio(sections_present, len(required_sections), 1.0),
+        # Informational (not gated): structural adaptability + process noise.
+        "detected_shape": detected_shape,
+        "structural_adaptive": adaptive,
+        "process_noise": process_noise,
         "citation": citations,
         "evidence": {
             "grade_distribution": grade_dist,
@@ -524,6 +548,12 @@ def aggregate(per_query: List[Dict[str, Any]]) -> Dict[str, Any]:
         ),
         "forbidden_clean_rate": mean(lambda r: 1.0 if r["forbidden_ok"] else 0.0),
         "section_presence_rate": mean(lambda r: float(r["section_presence_rate"])),
+        "structural_adaptability_rate": mean(
+            lambda r: 1.0 if r.get("structural_adaptive") else 0.0
+        ),
+        "process_clean_rate": mean(
+            lambda r: 1.0 if float(r.get("process_noise", 0)) == 0 else 0.0
+        ),
         "citation_resolution_rate": mean(lambda r: float(r["citation"]["resolution_rate"])),
         "verified_claims_mean": mean(lambda r: float(r["evidence"]["verified_claims"])),
         "corroborated_claims_mean": mean(lambda r: float(r["evidence"]["corroborated_claims"])),

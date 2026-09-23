@@ -55,8 +55,12 @@ def test_golden_malformed_query_set_is_rejected():
 def test_golden_thresholds_load_and_validate():
     queries = load_queries(GOLDEN)
     thresholds = load_thresholds(THRESHOLDS, queries)
-    assert thresholds["version"] == "v1"
+    assert thresholds["version"] == "v2"
     assert thresholds["aggregate"]
+    # The rework removed heading compliance as a gate: structural shape is
+    # informational, process cleanliness is the gated invariant.
+    assert "section_presence_rate" not in thresholds["aggregate"]
+    assert thresholds["aggregate"]["process_clean_rate"] == 1.0
     assert set(thresholds["per_category"]) == {
         "factual_explanation", "current_trend", "comparison", "decision_policy",
         "ambiguous_term", "causal", "quantitative",
