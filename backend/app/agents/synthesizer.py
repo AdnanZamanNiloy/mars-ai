@@ -82,9 +82,12 @@ from app.core.schemas import SynthesizerAnswerModel
 from app.agents.contradiction import numeric_ranges, summarize_contradictions
 from app.agents.epistemics import EpistemicReport, assess_epistemics
 from app.agents.outline import (
+    AnswerBlueprint,
     AnswerOutline,
+    build_blueprint,
     build_outline,
     group_facts_by_section,
+    render_blueprint,
     render_outline,
 )
 from app.core.section_context import build_section_candidate_pool, select_section_facts
@@ -869,17 +872,22 @@ async def synthesize(
     """
     usable_facts = dedupe_semantic_facts(filter_facts_by_domain(facts))
     ctx = context or {}
+    # The caller's dict, captured before any rebinding of `ctx`, so machine-
+    # owned provenance can be written back where the caller can see it.
+    caller_ctx = ctx
     resolved_profile = _resolve_profile(profile, ctx, len(usable_facts))
 
     if not usable_facts:
         concept = _normalize_query_concept(query)
+        if isinstance(ctx, dict):
+            ctx["synthesis_machine_notes"] = []
+        _mirror_machine_notes(ctx, caller_ctx)
         return SynthesisResult(
             answer=(
-                f"## Executive Summary\n\n"
                 f"No reliable evidence could be retrieved for {concept}, so this "
                 "question cannot be answered from research at this time. The "
-                "search returned no sources that survived verification — that is "
-                "a finding about the available evidence, not about the subject.\n\n"
+                "sources returned did not survive verification — that is a finding "
+                "about the available evidence, not about the subject.\n\n"
                 "A narrower question, a specific named source or document, or a "
                 "different phrasing of the key terms is the most likely way to "
                 "get a usable answer."
@@ -900,6 +908,7 @@ async def synthesize(
         ctx.get("epistemics"), EpistemicReport
     ) else assess_epistemics(query, usable_facts, contradictions)
     contradictions = _apply_adjudication(contradictions, epistemics)
+    # `ctx` is rebound to a copy below; `caller_ctx` holds the caller's dict.
     ctx = {**ctx, "epistemics": epistemics}
 
     # Options may arrive as explicit kwargs (tests, direct callers) or inside
@@ -928,6 +937,23 @@ async def synthesize(
     mode = str(ctx.get("mode", "standard") or "standard")
     length_hint = _length_hint(mode, ctx)
     intent = ctx.get("intent") or {}
+
+    # Adaptive answer blueprint: the presentation strategy for THIS question,
+    # derived from intent + the evidence actually in hand. It replaces a fixed
+    # heading list with a strategy the writer applies. For the audit profile the
+    # fixed contract still governs, so the blueprint's strategy guidance is
+    # suppressed there (the audit format is the point of that profile).
+    blueprint = build_blueprint(
+        query,
+        usable_facts,
+        ctx.get("sub_questions") or [],
+        intent=intent,
+        outline=outline,
+        mode=mode,
+        contradictions=ctx.get("contradictions") or [],
+    )
+    blueprint_block = render_blueprint(blueprint)
+    ctx["blueprint"] = blueprint.to_dict()
 
     ambiguity_block = _render_ambiguity_block(intent)
     if ambiguity_block:
@@ -978,8 +1004,10 @@ async def synthesize(
             quality_contract,
             temporal,
             independence,
+            blueprint=blueprint,
         )
         if sectioned is not None:
+            _mirror_machine_notes(ctx, caller_ctx)
             return sectioned
         logger.warning("[Synthesizer] section-wise path failed; falling back to single pass")
 
@@ -1012,13 +1040,20 @@ async def synthesize(
                 has_figures=_has_numeric_facts(cited_facts),
             )
             + "\n\n"
-            + render_outline(outline)
             + (
-                "Angles to cover (one section each, in this order):\n"
-                + "\n".join(f"- {a}" for a in angles)
+                f"PRESENTATION STRATEGY:\n{blueprint_block}\n\n"
+                if blueprint_block else ""
+            )
+            + (
+                # The outline is supporting material for coverage, not a
+                # mandated heading list. Angles are dimensions to cover, not
+                # one-section-each.
+                "Evidence-grounded dimensions the research covers (weave in the "
+                "relevant ones; do not force one section per item):\n"
+                + "\n".join(f"- {s.title}" for s in outline.sections if s.title and s.title != "Answer")
                 + "\n\n"
-                if angles
-                else ""
+                if outline.sections and outline.sections[0].title != "Answer"
+                else render_outline(outline)
             )
             + _REASONING_DEPTH_BLOCK
             + "Evidence — each line begins with the citation number you MUST use for\n"
@@ -1086,11 +1121,13 @@ async def synthesize(
     answer = str(payload.get("answer", "")).strip() if isinstance(payload, dict) else ""
     if not answer:
         record_fallback("synthesizer", reason=EVIDENCE_WEAK)
-        return _deterministic_report(
+        result = _deterministic_report(
             query, usable_facts, top_facts, ctx, angles, resolved_profile
         )
+        _mirror_machine_notes(ctx, caller_ctx)
+        return result
 
-    return _finalize(
+    result = _finalize(
         answer,
         query=query,
         ctx=ctx,
@@ -1104,6 +1141,22 @@ async def synthesize(
         temporal=temporal,
         independence=independence,
     )
+    _mirror_machine_notes(ctx, caller_ctx)
+    return result
+
+
+def _mirror_machine_notes(ctx: Dict[str, Any], caller_ctx: Dict[str, Any]) -> None:
+    """Copy machine-owned provenance onto the caller's context dict.
+
+    `synthesize` rebinds `ctx` to a copy, so the write-back inside `_finalize`
+    and `_deterministic_report` would be invisible to the caller. This mirrors
+    it to the dict the caller actually owns (the workflow, or a test).
+    """
+    if caller_ctx is ctx:
+        return
+    notes = ctx.get("synthesis_machine_notes")
+    if notes is not None:
+        caller_ctx["synthesis_machine_notes"] = list(notes)
 
 
 def _resolve_profile(
@@ -1848,6 +1901,7 @@ async def _synthesize_sectioned(
     quality_contract: str = "",
     temporal: TemporalProfile | None = None,
     independence: IndependenceReport | None = None,
+    blueprint: AnswerBlueprint | None = None,
 ) -> SynthesisResult | None:
     """Write each outline section as its own call, then assemble.
 
@@ -1934,6 +1988,10 @@ async def _synthesize_sectioned(
             f"{length_hint}\n\n"
             + (f"{guidance}\n\n" if guidance else "")
             + (f"{quality_contract}\n\n" if quality_contract else "")
+            + (
+                f"PRESENTATION STRATEGY:\n{render_blueprint(blueprint)}\n\n"
+                if blueprint is not None else ""
+            )
             + "Write ONLY the Executive Summary of a larger report. 4-6 sentences "
             "maximum, in your own words. The FIRST sentence must answer the main "
             "query directly in plain language — not describe what the report "
@@ -1984,7 +2042,11 @@ async def _synthesize_sectioned(
             f"{section_length_hint}\n\n"
             + (f"{guidance}\n\n" if guidance else "")
             + (f"{quality_contract}\n\n" if quality_contract else "")
-            + f"You are writing ONE section of a larger report, the section titled "
+            + (
+                f"PRESENTATION STRATEGY:\n{render_blueprint(blueprint)}\n\n"
+                if blueprint is not None else ""
+            )
+            + f"You are writing ONE section of a larger answer, the section titled "
             f"\"{section.title}\" (dimension: {section.axis}).\n"
             + (f"Section goal: {section.coverage_goal}\n" if section.coverage_goal else "")
             + "Write 2-3 tight paragraphs of synthesis for THIS section only. "
@@ -3179,6 +3241,8 @@ def _deterministic_report(
         if len(groups) >= 6 and all(len(v) >= 3 for v in groups.values()):
             break
     if not groups:
+        if isinstance(ctx, dict):
+            ctx["synthesis_machine_notes"] = []
         return SynthesisResult(
             answer=f"No reliable evidence was retrieved for {_normalize_query_concept(query)}.",
             used_fallback=True,
@@ -3225,43 +3289,30 @@ def _deterministic_report(
         title = _section_title(key) or "Findings"
         sections.append(f"## {title}\n\n" + "\n".join(bullets))
 
+    # Lead with the answer. The extractive path states what the evidence shows
+    # in prose; process provenance and counts are NOT put in the answer (they
+    # live in the audit layer). Uncertainty is expressed naturally.
     thin_note = (
-        "Evidence is thin — fewer than three verified facts support this report, "
-        "so treat every finding below as provisional. "
+        "The evidence here is thin — treat the following as provisional. "
         if gap_stats["verified"] < 3
         else ""
     )
-    degraded_note = (
-        f" Pipeline stages on deterministic fallback: {', '.join(gap_stats['degraded'])}."
-        if gap_stats["degraded"]
-        else ""
-    )
-    ambiguity_note = (
-        f" The evidence spans {len(groups)} distinct angles of this query, each in "
-        "its own section below."
-        if len(groups) >= 3
-        else ""
-    )
-
-    # Answer first, even here. The headline claim IS the short answer; the
-    # accounting follows it instead of replacing it.
     headline_text = _with_citation(headline).strip() if headline is not None else ""
-    summary_parts = ["## Executive Summary", ""]
+    opening_parts: List[str] = []
     if headline_text:
-        summary_parts.append(f"Short answer: {headline_text}")
-        summary_parts.append("")
-    summary_parts.append(
-        f"{thin_note}This is an extractive digest of the verified evidence for "
-        f"\u201c{_normalize_query_concept(query)}\u201d, assembled without a model "
-        f"writing pass.{ambiguity_note}"
+        opening_parts.append(headline_text)
+    opening_parts.append(
+        f"{thin_note}The summary below reflects the verified sources retrieved "
+        f"for \u201c{_normalize_query_concept(query)}\u201d."
     )
-    summary_parts.append("")
-    summary_parts.append(
-        f"Confidence: {_confidence_statement(ctx, gap_stats['verified'])} — "
-        f"{gap_stats['verified']} verified facts across {n_sources} sources.{degraded_note}"
-    )
-    sections.insert(0, "\n".join(summary_parts))
-    sections.append(_gaps_section(gap_stats))
+    sections.insert(0, "\n\n".join(opening_parts))
+
+    # A short natural uncertainty/caveat close, without pipeline mechanics.
+    if gap_stats["contradictions"]:
+        sections.append(
+            "Sources disagree on some points; where figures conflict they are "
+            "reported as a range rather than a single value."
+        )
 
     # The extractive path knows exactly which source each claim came from, so it
     # cites perfectly — claims were rendered with an identity token; now that
@@ -3273,6 +3324,13 @@ def _deterministic_report(
     answer = re.sub(r"\s*\[\[c\d+\]\]", "", answer)
     answer = _reorder_sections(answer)
     cited = [dict(fact, citation=index) for fact, index in pairs]
+    gap_stats["confidence_line"] = (
+        f"Confidence: {_confidence_statement(ctx, gap_stats['verified'])} — "
+        f"{gap_stats['verified']} verified facts across {n_sources} sources."
+    )
+    notes = [_gaps_section(gap_stats).strip()]
+    if isinstance(ctx, dict):
+        ctx["synthesis_machine_notes"] = list(notes)
     return SynthesisResult(
         answer=answer,
         sources=numbered,
@@ -3281,6 +3339,7 @@ def _deterministic_report(
         angles=list(angles),
         profile=profile.name,
         word_count=_count_words(answer),
+        machine_notes=notes,
     )
 
 
@@ -3356,13 +3415,15 @@ def _confidence_statement(ctx: Dict[str, Any], verified_count: int) -> str:
 
 
 def _gaps_section(stats: Dict[str, Any]) -> str:
-    """Evidence & Confidence plus Limitations for the extractive path."""
+    """Measured evidence accounting for the extractive path's AUDIT layer."""
     lines = [
         "## Evidence & Confidence",
         "",
         f"Well-supported: {stats['verified']} verified facts feed this report; "
         "every claim above traces to a cited source.",
     ]
+    if stats.get("confidence_line"):
+        lines.append(stats["confidence_line"])
     if stats["unverified_excluded"]:
         lines.append(
             f"Uncertain: {stats['unverified_excluded']} collected claims failed "

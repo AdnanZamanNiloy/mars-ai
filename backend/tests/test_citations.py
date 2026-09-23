@@ -530,7 +530,10 @@ def test_llm_prompt_carries_angles_and_evidence():
          "source": "https://f.com/6", "confidence": 0.87, "sub_question": "angle two"},
     ]
     answer = asyncio.run(synthesizer_agent(FakeLLM(), "What is transformer?", facts))
-    assert "Angles to cover" in seen["user"]
+    # The writer prompt carries the researched dimensions (not a mandated
+    # heading list) and the adaptive presentation strategy.
+    assert "Evidence-grounded dimensions" in seen["user"]
+    assert "PRESENTATION STRATEGY" in seen["user"]
     assert "angle one" in seen["user"] and "angle two" in seen["user"]
     # The reasoning-depth contract is injected into the writing prompt (section
     # and single-pass alike), not duplicated into the top-level system prompt.
@@ -597,18 +600,23 @@ def test_fallback_full_decision_shape():
         "verified_count": 4,
     }
     answer = asyncio.run(synthesizer_agent(ExplodingLLM(), "What is transformer?", facts, context))
-    assert "## Executive Summary" in answer
-    # The headline finding leads the summary as the short answer; the
-    # remaining claims follow as grouped bullets under their angle.
-    assert "Short answer: Electrical transformers step voltage" in answer.split("## Angle one")[0]
+    # Adaptive fallback: no mandated report skeleton. The answer leads with the
+    # headline claim; remaining claims follow as grouped bullets under their
+    # angle headings (which emerge from the evidence).
+    assert "## Executive Summary" not in answer
+    assert answer.strip().startswith("Electrical transformers step voltage")
     assert "## Angle one" in answer and "## Angle two" in answer
-    assert "## Evidence & Confidence" in answer
-    assert "## Limitations" in answer
-    assert "Confidence: Medium (0.60)" in answer
-    assert "planner" in answer.split("## Evidence & Confidence")[1]
-    assert "1 source conflict" in answer
-    assert "Uncertain: 2 collected claims" in answer
-    assert "Evidence is thin" not in answer
+    # Pipeline accounting and confidence live in the audit layer, not the answer.
+    notes = "\n".join(context.get("synthesis_machine_notes") or [])
+    assert "## Evidence & Confidence" in notes
+    assert "## Limitations" in notes
+    assert "planner" in notes
+    assert "1 source conflict" in notes
+    assert "Uncertain: 2 collected claims" in notes
+    assert "Confidence: Medium (0.60)" in notes
+    # The answer must not leak process provenance.
+    assert "Pipeline stages on deterministic" not in answer
+    assert "Confidence: Medium (0.60)" not in answer
     legend = answer.split("## Sources")[1]
     assert "a.com" in legend and "d.com" in legend
 
@@ -630,19 +638,19 @@ def test_fallback_key_findings_are_bullets_with_score_and_ambiguity():
         {"claim": "Market size for transformers grows steadily year over year",
          "source": "https://c.com/3", "confidence": 0.9, "sub_question": "angle three"},
     ]
+    context = {"confidence": 0.8}
     answer = asyncio.run(synthesizer_agent(
-        ExplodingLLM(), "What is transformer?", facts, {"confidence": 0.8}))
-    exec_block = answer.split("## Executive Summary")[1].split("## ")[0]
-    assert "Short answer: Electrical transformers step voltage" in exec_block, \
-        "the single highest-confidence claim headlines the summary"
-    assert "distinct angles" in answer
-    assert "Confidence: High (0.80)" in answer
-    # the headline claim must not repeat inside its section
+        ExplodingLLM(), "What is transformer?", facts, context))
+    # The highest-confidence claim headlines the answer; it must not repeat.
+    assert answer.strip().startswith("Electrical transformers step voltage")
     assert answer.count("Electrical transformers step voltage") == 1
+    # Numeric confidence and angle accounting are audit material.
+    notes = "\n".join(context.get("synthesis_machine_notes") or [])
+    assert "Confidence: High (0.80)" in notes
 
 
 def test_thin_evidence_disclaimer():
-    """Fewer than 3 verified facts: say so up front, rate Low."""
+    """Fewer than 3 verified facts: say so in the answer, in natural words."""
     from app.agents.synthesizer import synthesizer_agent
 
     class ExplodingLLM:
@@ -651,11 +659,13 @@ def test_thin_evidence_disclaimer():
 
     facts = [{"claim": "Electrical transformers step voltage between alternating circuits",
               "source": "https://a.com/1", "confidence": 0.9, "verified": True}]
+    context = {"total_facts": 1, "verified_count": 1}
     answer = asyncio.run(synthesizer_agent(
-        ExplodingLLM(), "What is transformer?", facts,
-        {"total_facts": 1, "verified_count": 1}))
-    assert "Evidence is thin" in answer
-    assert "Confidence: Low" in answer
+        ExplodingLLM(), "What is transformer?", facts, context))
+    assert "provisional" in answer.lower()
+    # The numeric confidence rating is audit material, not answer prose.
+    notes = "\n".join(context.get("synthesis_machine_notes") or [])
+    assert "Confidence: Low" in notes
 
 
 def test_render_context_block_carries_conflicts():

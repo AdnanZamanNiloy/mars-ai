@@ -384,6 +384,197 @@ def render_outline(outline: AnswerOutline) -> str:
     return "\n".join(lines) + "\n\n"
 
 
+# ---------------------------------------------------------------------------
+# Adaptive answer blueprint — the presentation strategy for THIS question
+# ---------------------------------------------------------------------------
+
+# Task families that imply a presentation strategy, not a heading list. The
+# strategy tells the writer HOW to organise the answer (comparison by criterion,
+# mechanism chain, ordered steps, options + trade-offs, thematic synthesis …).
+# It never dictates headings.
+_BLUEPRINT_STRATEGIES: Dict[str, str] = {
+    "comparison": (
+        "Organise by CRITERION, not by item: compare the options on one "
+        "dimension at a time, then close with a verdict that says which option "
+        "wins for which use case."
+    ),
+    "howto": (
+        "Present prerequisites, then numbered steps in execution order, one "
+        "action each. Name the failure mode for any step that commonly fails."
+    ),
+    "causal": (
+        "Lead with the mechanism the evidence supports (X drives Y because Z), "
+        "then the competing explanations and what evidence would separate them."
+    ),
+    "decision": (
+        "Lay out the realistic options with their trade-offs, give a "
+        "recommendation conditioned on the reader's situation, and state what "
+        "would change it."
+    ),
+    "forecast": (
+        "State the current measured level and its as-of date first; label every "
+        "projection as a projection with its assumptions, and give a range."
+    ),
+    "timeline": (
+        "Order by date, attach a date to every event, and end on the current "
+        "state with its as-of date."
+    ),
+    "status": (
+        "Open with the current state and the date of the evidence; flag "
+        "anything that may have changed since."
+    ),
+    "list": (
+        "Give the enumeration as the primary content, one self-contained cited "
+        "item per bullet, ordered by the ranking the reader would use."
+    ),
+    "definition": (
+        "Open with a one-sentence plain-language definition, then how it works "
+        "and where it matters; at most one marked analogy."
+    ),
+    "entity": (
+        "Establish identity first (which entity exactly), then the facts asked "
+        "for; separate similarly-named entities before anything else."
+    ),
+    "broad_research": (
+        "Organise around the dominant themes the evidence actually supports — "
+        "two to four of them — with each theme explaining what changed, the "
+        "concrete evidence, and why it matters."
+    ),
+}
+
+
+@dataclass
+class AnswerBlueprint:
+    """The evidence-driven plan for HOW to communicate this answer.
+
+    This is the adaptive layer between the evidence state and the writer. It
+    does not prescribe headings; it decides the presentation strategy, the
+    central question, the dominant themes, and whether the answer should be
+    short or deep — from the detected intent and the evidence actually in hand.
+    """
+
+    query: str
+    strategy: str = "general"
+    framework: str = ""
+    central_question: str = ""
+    themes: List[str] = field(default_factory=list)
+    depth: str = "standard"
+    comparison: bool = False
+    contested: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "strategy": self.strategy,
+            "framework": self.framework,
+            "central_question": self.central_question,
+            "themes": list(self.themes),
+            "depth": self.depth,
+            "comparison": self.comparison,
+            "contested": self.contested,
+        }
+
+
+def _blueprint_key(query: str, intent: Dict[str, Any], outline: AnswerOutline) -> str:
+    """The task family for this question: intent first, then shape patterns."""
+    declared = str(intent.get("query_type", "") or "").strip().lower()
+    alias = {
+        "factual": "status", "how_to": "howto", "procedural": "howto",
+        "chronology": "timeline", "evaluative": "decision",
+        "strategic": "decision", "person": "entity", "organisation": "entity",
+        "organization": "entity", "exploratory": "broad_research",
+        "analytical": "broad_research",
+    }.get(declared, declared)
+    if alias in _BLUEPRINT_STRATEGIES:
+        return alias
+    # Deterministic shape detection from the query text itself.
+    text = (query or "").strip()
+    patterns = (
+        ("comparison", r"\b(vs\.?|versus|compare[ds]?|comparison|better than|difference between|which (?:is|one))\b"),
+        ("howto", r"\b(how (?:do|to|can) |steps? to|guide to|set ?up|install|configure|tutorial)\b"),
+        ("causal", r"\b(why|what caused|cause[ds]? of|reason[s]? (?:for|why)|leads? to)\b"),
+        ("decision", r"\b(should (?:i|we|they)|worth it|is it worth|recommend|choose between|invest in)\b"),
+        ("forecast", r"\b(will |forecast|projection|predicted|by 20\d\d|outlook|future of|expected to)\b"),
+        ("timeline", r"\b(timeline|history of|when did|chronolog|over time|evolution of)\b"),
+        ("status", r"\b(current(?:ly)?|right now|as of|latest|today|still |up to date)\b"),
+        ("list", r"\b(list of|top \d+|examples? of|what are the|types of|kinds of)\b"),
+        ("definition", r"^\s*(what (?:is|are|does)|define|meaning of|explain )\b"),
+    )
+    for name, pattern in patterns:
+        if re.search(pattern, text, re.IGNORECASE):
+            return name
+    return "broad_research" if outline.broad else "general"
+
+
+def build_blueprint(
+    query: str,
+    facts: Sequence[Dict[str, Any]] = (),
+    sub_questions: Sequence[Any] = (),
+    *,
+    intent: Dict[str, Any] | None = None,
+    outline: AnswerOutline | None = None,
+    mode: str = "standard",
+    contradictions: Sequence[Dict[str, Any]] = (),
+) -> AnswerBlueprint:
+    """Derive the adaptive presentation blueprint from question + evidence.
+
+    Deterministic and LLM-free (AGENTS 4.7): when intent is unavailable the
+    query's own shape and the evidence distribution decide the strategy, so a
+    degraded run still gets an adaptive answer rather than a fixed template.
+    """
+    intent = intent or {}
+    outline = outline or build_outline(query, facts, sub_questions, intent=intent)
+    key = _blueprint_key(query, intent, outline)
+    strategy = _BLUEPRINT_STRATEGIES.get(key, "")
+
+    # Dominant themes: the outline's section titles are the dimensions the
+    # evidence actually supports — the emergent thematic structure.
+    themes = [s.title for s in outline.sections if s.title and s.title != "Answer"][:5]
+
+    level = str(intent.get("explanation_level", "") or "").lower()
+    deep = str(mode or "standard").lower().startswith(("deep", "executive")) or outline.broad
+    depth = "concise" if (level == "basic" or key in ("definition", "status")) else (
+        "deep" if deep else "standard"
+    )
+
+    return AnswerBlueprint(
+        query=query,
+        strategy=key,
+        framework=strategy,
+        central_question=(sub_questions[0].get("question", "") if sub_questions and isinstance(sub_questions[0], dict) else "") or query,
+        themes=themes,
+        depth=depth,
+        comparison=key == "comparison",
+        contested=bool(contradictions),
+    )
+
+
+def render_blueprint(blueprint: AnswerBlueprint) -> str:
+    """Render the blueprint as writer guidance. Never a heading list."""
+    lines: List[str] = []
+    if blueprint.framework:
+        lines.append(blueprint.framework)
+    if blueprint.themes and blueprint.strategy == "broad_research":
+        lines.append(
+            "The dominant themes the evidence supports, in a sensible order — "
+            "use those that carry real findings and drop the rest: "
+            + "; ".join(blueprint.themes)
+            + "."
+        )
+    if blueprint.depth == "concise":
+        lines.append("Keep this answer concise; the question does not need a long report.")
+    elif blueprint.depth == "deep":
+        lines.append(
+            "Go deeper: mechanisms, concrete numbers with context, and explicit "
+            "treatment of conflicting evidence — depth of reasoning, not more headings."
+        )
+    if blueprint.contested:
+        lines.append(
+            "Sources disagree on some points: present the disagreement where it "
+            "belongs in the flow rather than smoothing it into a single claim."
+        )
+    return "\n".join(lines)
+
+
 def group_facts_by_section(
     outline: AnswerOutline,
 ) -> List[tuple[OutlineSection, List[Dict[str, Any]]]]:

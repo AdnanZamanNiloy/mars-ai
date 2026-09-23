@@ -181,7 +181,7 @@ def test_reasoning_depth_contract_reaches_every_writer_prompt():
                    {"intent": {}, "sub_questions": _sub_questions()},
                    outline=outline, section_wise=True, compress_context=False)
     )
-    section_prompts = [p for p in prompts if "ONE section of a larger report" in p]
+    section_prompts = [p for p in prompts if "ONE section of a larger answer" in p]
     assert section_prompts, "no section-writing prompt captured"
     assert all("REASONING DEPTH" in p for p in section_prompts)
 
