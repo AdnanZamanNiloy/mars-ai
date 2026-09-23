@@ -865,9 +865,11 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                     report=report,
                     confidence=confidence,
                 ))
-                # Canonical per-run report row (3.8).
+                # Canonical per-run report row (3.8). The audit/trace document
+                # is persisted separately from the primary answer.
                 await _persist(save_final_report(
                     settings.database_url, request_id, report, confidence,
+                    audit_markdown=str(last_snapshot.get("final_audit", "") or ""),
                 ))
                 await _persist(save_citations(settings.database_url, request_id, report))
                 # Degradation flag: which agents fell back to deterministic
@@ -881,6 +883,7 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                     ))
                 support = last_snapshot.get("answer_support", {}) or {}
                 yield event_line("final_report", report=report, confidence=confidence, degraded=degraded,
+                                 audit=str(final_state.get("final_audit", "") or ""),
                                  degraded_reasons=degradation["reasons"],
                                  provider_degraded=degradation["provider_degraded"],
                                  provider_kinds=degradation["provider_kinds"],
@@ -1095,7 +1098,8 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
                 settings.database_url, request_id, last_snapshot.get("facts", []),
             ))
             if report:
-                await _persist_report(settings.database_url, request_id, str(state.get("query", "")), report, confidence)
+                await _persist_report(settings.database_url, request_id, str(state.get("query", "")), report, confidence,
+                                      audit=str(final_state.get("final_audit", "") or ""))
                 await _persist(save_citations(settings.database_url, request_id, report))
                 degraded = take_fallbacks()
                 degradation = degradation_summary()
@@ -1106,6 +1110,7 @@ async def resume_research(run_id: str, request: Request) -> StreamingResponse:
                     ))
                 support = last_snapshot.get("answer_support", {}) or {}
                 yield event_line("final_report", report=report, confidence=confidence, degraded=degraded,
+                                 audit=str(final_state.get("final_audit", "") or ""),
                                  degraded_reasons=degradation["reasons"],
                                  provider_degraded=degradation["provider_degraded"],
                                  provider_kinds=degradation["provider_kinds"],
@@ -1148,9 +1153,11 @@ async def _persist_complete(db: str, run_id: str, status: str, confidence: float
         logger.warning("persistence_failed", error=str(exc), exc_info=exc)
 
 
-async def _persist_report(db: str, run_id: str, query: str, report: str, confidence: float) -> None:
+async def _persist_report(
+    db: str, run_id: str, query: str, report: str, confidence: float, audit: str = ""
+) -> None:
     try:
         await save_report(db, query, report, confidence)  # legacy table kept in sync
-        await save_final_report(db, run_id, report, confidence)  # canonical
+        await save_final_report(db, run_id, report, confidence, audit_markdown=audit)  # canonical
     except Exception as exc:
         logger.warning("persistence_failed", error=str(exc), exc_info=exc)

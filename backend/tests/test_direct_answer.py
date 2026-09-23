@@ -206,8 +206,10 @@ async def test_direct_refusal_falls_through_to_research(monkeypatch):
     final, captured = await _run_graph("direct", None, monkeypatch)
     assert captured["planner_called"] is True
     assert final.get("direct_answer", "") == ""
-    # Research report shape, not the direct one.
-    assert "# Final Answer" in final["final_report"]
+    # Researched answer, not the direct one: the synthesizer's prose ships (and
+    # the direct-answer path stays empty).
+    assert final["final_report"] == final["synthesized_answer"]
+    assert final["final_report"].strip()
 
 
 async def test_research_route_never_calls_direct_answer(monkeypatch):

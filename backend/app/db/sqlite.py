@@ -112,7 +112,6 @@ CREATE TABLE IF NOT EXISTS final_reports (
     confidence REAL,
     generated_at TEXT NOT NULL
 );
-
 CREATE TABLE IF NOT EXISTS contradictions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id TEXT NOT NULL REFERENCES research_runs(id),
@@ -288,6 +287,15 @@ async def init_db(database_path: str) -> None:
             await db.execute("ALTER TABLE claims ADD COLUMN agent TEXT NOT NULL DEFAULT ''")
         if "challenged" not in claim_names:
             await db.execute("ALTER TABLE claims ADD COLUMN challenged INTEGER NOT NULL DEFAULT 0")
+        # Separate audit/trace document (additive, idempotent). The primary
+        # answer no longer carries pipeline metadata, so the audit is persisted
+        # alongside it for replay and export.
+        report_cols = await db.execute("PRAGMA table_info(final_reports)")
+        report_names = {r[1] for r in await report_cols.fetchall()}
+        if "audit_markdown" not in report_names:
+            await db.execute(
+                "ALTER TABLE final_reports ADD COLUMN audit_markdown TEXT NOT NULL DEFAULT ''"
+            )
         # Provider model label (additive, idempotent). `model` is the id sent to
         # the provider API; `model_name` is the human label shown in the UI.
         # Gated on PRAGMA (not on SCHEMA_VERSION) so a database written by any
@@ -417,7 +425,7 @@ async def get_session(database_path: str, session_id: str) -> dict | None:
         )
         runs = [dict(r) for r in await run_cur.fetchall()]
         final_cur = await db.execute(
-            "SELECT run_id, report_markdown, confidence, generated_at FROM final_reports "
+            "SELECT run_id, report_markdown, audit_markdown, confidence, generated_at FROM final_reports "
             "WHERE run_id IN (SELECT id FROM research_runs WHERE session_id = ?)",
             (session_id,),
         )
@@ -441,6 +449,7 @@ async def get_session(database_path: str, session_id: str) -> dict | None:
             "confidence": run["confidence"],
             "created_at": run["completed_at"] or run["created_at"],
             "report": report.get("report_markdown") if report else "",
+            "audit": report.get("audit_markdown") if report else "",
             "query": run["query"] or "",
         })
     session["messages"] = messages
@@ -779,14 +788,23 @@ async def save_citations(database_path: str, run_id: str, report_markdown: str) 
     return count
 
 
-async def save_final_report(database_path: str, run_id: str, report_markdown: str, confidence: float) -> None:
+async def save_final_report(
+    database_path: str,
+    run_id: str,
+    report_markdown: str,
+    confidence: float,
+    audit_markdown: str = "",
+) -> None:
     """Canonical report row keyed by run_id (research_reports stays for
-    backward compatibility)."""
+    backward compatibility). `audit_markdown` is the separate audit/trace
+    document; it is additive and defaults to empty so existing callers and
+    pre-migration rows keep working."""
     async with _connect(database_path) as db:
         await db.execute(
-            "INSERT OR REPLACE INTO final_reports (run_id, report_markdown, confidence, generated_at) "
-            "VALUES (?, ?, ?, ?)",
-            (run_id, report_markdown, float(confidence), _now()),
+            "INSERT OR REPLACE INTO final_reports "
+            "(run_id, report_markdown, confidence, audit_markdown, generated_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (run_id, report_markdown, float(confidence), audit_markdown or "", _now()),
         )
         await db.commit()
 
@@ -998,7 +1016,7 @@ async def get_run_trace(database_path: str, run_id: str) -> dict | None:
             (run_id,),
         )
         cur = await db.execute(
-            "SELECT report_markdown, confidence, generated_at FROM final_reports WHERE run_id = ?",
+            "SELECT report_markdown, audit_markdown, confidence, generated_at FROM final_reports WHERE run_id = ?",
             (run_id,),
         )
         final_report_row = await cur.fetchone()

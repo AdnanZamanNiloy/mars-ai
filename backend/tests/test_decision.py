@@ -79,7 +79,7 @@ def test_comparative_with_single_axis_produces_no_options():
     assert build_decision_layer(state) == []
 
 
-def test_factual_report_has_no_decision_layer_section():
+def test_factual_report_has_no_decision_layer_in_answer_or_audit():
     import app.graph.workflow as wf
 
     state = {
@@ -92,19 +92,27 @@ def test_factual_report_has_no_decision_layer_section():
         "critique": {"is_sufficient": True},
     }
     report = wf.build_markdown_report(state)
-    assert "# Decision Layer" not in report
-    assert "# Final Answer" in report
+    # The primary answer is the synthesizer's text, verbatim — no injected
+    # report skeleton, and so no decision layer.
+    assert report == "answer"
+    audit = wf.build_answer_audit(state)
+    assert "Decision layer" not in audit
 
 
-def test_report_contains_decision_layer_section_separate_from_findings():
+def test_decision_layer_lives_in_audit_not_in_the_answer():
+    """Evidence/judgment separation is now structural: the answer carries the
+    synthesized prose only, and the strategic options are rendered in the
+    separate audit document (never in the answer body)."""
     import app.graph.workflow as wf
 
     state = _comparative_state()
     state["synthesized_answer"] = "answer"
     state["critique"] = {"is_sufficient": True}
     report = wf.build_markdown_report(state)
-    assert "# Decision Layer" in report
-    assert "# Supporting Evidence" in report
-    # Findings must come BEFORE the recommendation — evidence/judgment separation.
-    assert report.index("# Supporting Evidence") < report.index("# Decision Layer")
-    assert "(RECOMMENDED)" in report
+    audit = wf.build_answer_audit(state)
+    # The answer is untouched: no Decision Layer, no injected headings.
+    assert "# Decision Layer" not in report
+    assert report == "answer"
+    # The audit carries the options and their recommendation.
+    assert "Decision layer" in audit
+    assert "(RECOMMENDED)" in audit

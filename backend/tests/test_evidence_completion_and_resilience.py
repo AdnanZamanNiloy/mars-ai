@@ -76,28 +76,37 @@ class _MinimalWriter:
         return {"answer": "A short synthesized section body citing a claim [1]."}
 
 
-def test_every_synthesized_report_contains_required_sections():
+def test_adaptive_report_does_not_force_a_universal_skeleton():
+    """A broad question no longer ships the historical fixed section list: the
+    answer is the writer's prose, while the measured provenance is preserved in
+    the audit payload (`machine_notes`)."""
     ctx = {"intent": {}, "sub_questions": _sub_questions()}
     profile = select_profile(ctx, fact_count=len(_facts()))
+    assert profile.name != "audit"
     result = asyncio.run(
         synthesize(_MinimalWriter(), "What is the current trend of AI?", _facts(),
                    ctx, compress_context=False)
     )
-    for title in profile.required:
-        assert f"## {title}" in result.answer, f"missing required section: {title}"
+    # No machine-owned report skeleton is injected into the primary answer.
+    assert "## Evidence & Confidence" not in result.answer
+    assert "## Limitations & Unknowns" not in result.answer
+    assert "## Auditable Source Ledger" not in result.answer
+    # The measured provenance is retained for auditability, not discarded.
+    assert result.machine_notes
 
 
-def test_section_wise_report_contains_required_sections():
+def test_section_wise_adaptive_report_keeps_provenance_in_audit():
     ctx = {"intent": {}, "sub_questions": _sub_questions()}
     profile = select_profile(ctx, fact_count=len(_facts()))
+    assert profile.name != "audit"
     outline = build_outline("What is the current trend of AI?", _facts(), _sub_questions())
     assert outline.broad
     result = asyncio.run(
         synthesize(_MinimalWriter(), "What is the current trend of AI?", _facts(),
                    ctx, outline=outline, section_wise=True, compress_context=False)
     )
-    for title in profile.required:
-        assert f"## {title}" in result.answer, f"missing required section: {title}"
+    assert "## Evidence & Confidence" not in result.answer
+    assert result.machine_notes
 
 
 def test_writer_omitting_limitations_gets_it_added():

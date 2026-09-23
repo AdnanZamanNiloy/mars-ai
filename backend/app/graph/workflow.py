@@ -42,6 +42,11 @@ class ResearchState(TypedDict, total=False):
     iteration: int
     max_iterations: int
     final_report: str
+    # Audit/trace layer (evidence ledger, contradictions, decisions, quality,
+    # confidence, provenance) rendered separately from the primary answer so the
+    # answer stays free of pipeline mechanics. Empty for direct/conversation
+    # answers, which have no researched evidence to audit.
+    final_audit: str
     synthesized_answer: str
     confidence: float
     orchestration: Dict[str, Any]
@@ -170,10 +175,19 @@ class SynthesizerUpdate(TypedDict):
     # state so the existing final_report event can surface it.
     outline: Dict[str, Any]
     section_wise: bool
+    # Machine-owned synthesis provenance (measured evidence accounting,
+    # integrity notes) the synthesizer deliberately kept OUT of the answer.
+    # Rendered by build_answer_audit, never by the primary answer.
+    synthesis_machine_notes: List[str]
 
 
-class FinalizeUpdate(TypedDict):
+class FinalizeUpdate(TypedDict, total=False):
     final_report: str
+    # Audit/trace layer, kept structurally separate from the primary answer:
+    # evidence ledger, contradictions, decision options, quality, confidence and
+    # research provenance. The primary answer must never carry process noise;
+    # this is where it lives instead. See build_answer_audit.
+    final_audit: str
     decision_options: List[Dict[str, Any]]
 
 
@@ -299,7 +313,9 @@ def build_initial_state(
         "iteration": 0,
         "max_iterations": effective_max_iterations,
         "final_report": "",
+        "final_audit": "",
         "synthesized_answer": "",
+        "synthesis_machine_notes": [],
         "confidence": 0.0,
         "orchestration": {
             "complexity_score": plan.complexity.score,
@@ -890,72 +906,114 @@ def build_markdown_report(
     state: ResearchState,
     decision_options: List[Dict[str, Any]] | None = None,
 ) -> str:
+    """Return the PRIMARY ANSWER exactly as the synthesizer wrote it.
+
+    This function used to wrap the synthesized answer in a universal report
+    skeleton (`# Final Answer` → `# Supporting Evidence` → `# Contradictions` →
+    `# Decision Layer` → `# Answer Quality` → `# Limitations` → `# Confidence
+    Score`) for EVERY research run. That made the delivered answer read like a
+    filled-in form regardless of question type, and it re-injected process
+    metadata (quality score, confidence float, pipeline caveats) that the
+    synthesizer's own prompt forbids in the body.
+
+    The structure now emerges from the question and the evidence in the
+    synthesizer; this function does not add headings. All of the disclosure
+    content that used to live here is rendered by `build_answer_audit` into the
+    separate audit layer, so nothing is lost and nothing leaks.
+    """
+    synthesized = str(state.get("synthesized_answer", "")).strip()
+    if synthesized:
+        return synthesized
+    # Empty synthesis: a short, honest fallback — never a report skeleton with
+    # placeholder sections. `build_answer_audit` still carries the measured
+    # reason and the evidence, so the failure stays auditable.
+    return (
+        "A confident synthesis could not be generated from the available "
+        "evidence. See the research audit for what was collected."
+    )
+
+
+def build_answer_audit(
+    state: ResearchState,
+    decision_options: List[Dict[str, Any]] | None = None,
+) -> str:
+    """Render the machine-owned audit/trace layer for a research run.
+
+    Everything here is metadata about the RESEARCH, not part of the answer:
+    evidence ledger, source conflicts, strategic options, the five-axis quality
+    score, overall confidence and its caveats, and research provenance. It is
+    emitted as a separate markdown document (the `final_audit` field) so a
+    consumer that wants the primary answer only is never shown pipeline
+    mechanics, and one that wants full traceability gets all of it.
+
+    Nothing is hidden that was disclosed before — it moved, it did not vanish.
+    """
     facts = _prepare_supporting_evidence(state.get("facts", []))
     critique = state.get("critique", {})
     confidence = float(state.get("confidence", 0.0))
-    synthesized = str(state.get("synthesized_answer", "")).strip()
+    quality = state.get("quality") or {}
+    if decision_options is None:
+        decision_options = build_decision_layer(state)
 
-    evidence_lines = [
-        f"- {item.get('claim', '').strip()} ({item.get('source', '').strip()})"
-        for item in facts[:10]
-        if item.get("claim") and item.get("source")
-    ]
-    if not evidence_lines:
-        evidence_lines = ["- No robust findings were extracted from available high-quality sources."]
+    q = quality if isinstance(quality, dict) else {}
 
-    final_answer = synthesized or "A confident synthesis could not be generated from the available evidence."
+    # Compact five-axis summary. The per-axis numbers are audit material; the
+    # answer itself expresses uncertainty in words.
+    quality_line = ""
+    if q.get("overall") is not None:
+        quality_line = (
+            f"Accuracy {q.get('accuracy', 0)}/100 · Relevance {q.get('relevance', 0)}/100 · "
+            f"Evidence {q.get('evidence', 0)}/100 · Clarity {q.get('clarity', 0)}/100 · "
+            f"Reasoning {q.get('reasoning', 0)}/100 — overall {q.get('overall', 0)}/100 "
+            + ("(passed the quality gate)." if q.get("passed") else "(BELOW THRESHOLD).")
+        )
 
-    is_sufficient = bool(critique.get("is_sufficient", False))
-    critique_reason = str(critique.get("reason", "Limited evidence quality or coverage."))
-    limitations: List[str] = []
-    if not is_sufficient:
-        limitations.append(critique_reason)
-    limitations.extend(
+    lines: List[str] = ["# Audit & Trace", ""]
+    lines.extend(
         [
-            "Free-tier APIs may rate limit or return shallow snippets.",
-            "No paywalled or private databases were accessed.",
+            "## Research confidence",
+            f"{confidence:.2f}",
+            "Estimated from evidence quality and critic assessment, not formal "
+            "verification.",
+            "",
         ]
     )
+    if quality_line:
+        lines.extend(["## Answer quality (measured)", quality_line, ""])
 
-    improved_queries = critique.get("improved_queries", [])
-    if not is_sufficient and isinstance(improved_queries, list):
-        for item in improved_queries[:2]:
-            if isinstance(item, str) and item.strip():
-                limitations.append(f"Potential follow-up search: {item.strip()}")
-
-    # Dynamic Research Depth (2.8): name an early stop on marginal gain.
+    # Research provenance: measured evidence accounting, conflicts, caveats.
+    is_sufficient = bool(critique.get("is_sufficient", False))
+    critique_reason = str(critique.get("reason", "")).strip()
+    notes: List[str] = []
+    if not is_sufficient and critique_reason:
+        notes.append(critique_reason)
     early_stop_note = depth_controller.stop_reason(state)
     if early_stop_note:
-        limitations.append(early_stop_note)
-
-    # Citation validation v2: dead or partially-unsupported cited sources.
+        notes.append(early_stop_note)
     try:
         from app.agents.citation_check import citation_health_note
 
         health_note = citation_health_note(state.get("citation_health"))
         if health_note:
-            limitations.append(health_note)
+            notes.append(health_note)
     except Exception as exc:
         logger.warning("citation_health_note_failed", error=str(exc), exc_info=exc)
+    notes.append(
+        "Free-tier and public APIs were used; no paywalled or private databases "
+        "were accessed."
+    )
+    if notes:
+        lines.extend(["## Research notes", *[f"- {n}" for n in notes], ""])
 
-    limitations = [
-        *limitations,
-        "Confidence is estimated from evidence quality and critic assessment, not formal verification.",
+    # Supporting evidence ledger (measured, with source).
+    evidence_lines = [
+        f"- {item.get('claim', '').strip()} ({item.get('source', '').strip()})"
+        for item in facts[:10]
+        if item.get("claim") and item.get("source")
     ]
+    if evidence_lines:
+        lines.extend(["## Evidence ledger", *evidence_lines, ""])
 
-    lines = [
-        "# Final Answer",
-        final_answer,
-        "",
-        "# Supporting Evidence",
-        *evidence_lines,
-        "",
-    ]
-
-    # Contradiction Engine (3.2): surface source conflicts explicitly. Fix C:
-    # a resolved conflict (period/scope/metric difference) is recorded with its
-    # explanation so the report is honest about the spread, while only
-    # unresolved conflicts read as open disagreements.
     contradictions = state.get("contradictions", [])
     if contradictions:
         contradiction_lines = []
@@ -967,54 +1025,31 @@ def build_markdown_report(
                 f"  conflicts with \"{c.get('claim_b', '')[:140]}\" ({c.get('source_b', '')})"
             )
             if c.get("resolved"):
-                contradiction_lines.append(
-                    f"  RESOLVED: {c.get('resolution', '')}"
-                )
-        lines.extend(["# Contradictions", *contradiction_lines, ""])
+                contradiction_lines.append(f"  RESOLVED: {c.get('resolution', '')}")
+        lines.extend(["## Source conflicts", *contradiction_lines, ""])
 
-    # Decision Intelligence Layer (3.5, Feature 18): options → recommendation
-    # → rationale, structurally SEPARATE from the findings above. Factual
-    # queries produce no options — no section rather than a placeholder.
-    if decision_options is None:
-        decision_options = build_decision_layer(state)
     if decision_options:
         decision_lines = []
         for o in decision_options:
             marker = " (RECOMMENDED)" if o.get("is_recommended") else ""
-            decision_lines.append(f"- Option {o.get('option_label', '?')}{marker}: {o.get('description', '')}")
+            decision_lines.append(
+                f"- Option {o.get('option_label', '?')}{marker}: {o.get('description', '')}"
+            )
             if o.get("rationale"):
                 decision_lines.append(f"  Rationale: {o['rationale']}")
             if o.get("risk_note"):
                 decision_lines.append(f"  Risk: {o['risk_note']}")
-        lines.extend(["# Decision Layer", *decision_lines, ""])
+        lines.extend(["## Decision layer", *decision_lines, ""])
 
-    # Answer Quality (final editor): the measured five-axis score of THIS
-    # report, appended from state so the disclosure cannot be skipped.
-    quality = state.get("quality") or {}
-    if isinstance(quality, dict) and quality.get("overall") is not None:
-        quality_lines = [
-            f"Accuracy {quality.get('accuracy', 0)}/100 · "
-            f"Relevance {quality.get('relevance', 0)}/100 · "
-            f"Evidence {quality.get('evidence', 0)}/100 · "
-            f"Clarity {quality.get('clarity', 0)}/100 · "
-            f"Reasoning {quality.get('reasoning', 0)}/100",
-            f"Overall: {quality.get('overall', 0)}/100 — "
-            + ("passed the quality gate." if quality.get("passed")
-               else "BELOW THRESHOLD — treat with additional caution."),
-        ]
-        if not quality.get("passed") and quality.get("failures"):
-            quality_lines.append("Gate findings:")
-            quality_lines.extend(f"- {f}" for f in quality.get("failures", [])[:5])
-        lines.extend(["# Answer Quality", *quality_lines, ""])
+    # Measured provenance the synthesizer kept out of the answer (evidence
+    # accounting, integrity findings). This is where it is rendered.
+    machine_notes = state.get("synthesis_machine_notes") or []
+    for note in machine_notes:
+        text = str(note or "").strip()
+        if text:
+            lines.extend([text, ""])
 
-    lines.extend([
-        "# Limitations",
-        *[f"- {item}" for item in limitations],
-        "",
-        "# Confidence Score",
-        f"{confidence:.2f}",
-    ])
-    return "\n".join(lines)
+    return "\n".join(lines).strip()
 
 
 def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str | None = None):
@@ -1997,19 +2032,25 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         async def _synthesize_and_score(ctx: Dict[str, Any]):
             # Outline / section-wise / compression options ride in `context` so
             # the synthesizer entry point keeps its original signature (test
-            # doubles patch it with that signature).
+            # doubles patch it with that signature). The synthesizer writes the
+            # machine-owned provenance it kept OUT of the answer back into this
+            # dict, so we can route it to the audit layer.
+            synthesis_ctx = {
+                **ctx,
+                "outline": answer_outline,
+                "section_wise": section_wise,
+                "compress_context": compress_context,
+                "compress_threshold": compress_threshold,
+            }
             answer = await synthesizer_agent(
                 llm=llm,
                 query=state["query"],
                 facts=usable,
-                context={
-                    **ctx,
-                    "outline": answer_outline,
-                    "section_wise": section_wise,
-                    "compress_context": compress_context,
-                    "compress_threshold": compress_threshold,
-                },
+                context=synthesis_ctx,
             )
+            machine_notes = [
+                str(n) for n in (synthesis_ctx.get("synthesis_machine_notes") or []) if str(n).strip()
+            ]
             # Report-contract verification: check the emitted answer's citations
             # against the evidence (never the reverse). Observational only —
             # it scores honesty, it does not rewrite.
@@ -2039,9 +2080,9 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
                 mode=str(state.get("mode", "standard") or "standard"),
                 threshold=threshold,
             )
-            return answer, support, health, quality
+            return answer, support, health, quality, machine_notes
 
-        answer, support, citation_health, quality = await _synthesize_and_score(base_context)
+        answer, support, citation_health, quality, synthesis_notes = await _synthesize_and_score(base_context)
 
         # Answer revision pass (the quality optimizer's LLM half): the writer
         # rewrites its draft ONCE — fed the measured failures when the gate
@@ -2059,7 +2100,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         )
         if run_revision:
             try:
-                answer2, support2, health2, quality2 = await _synthesize_and_score({
+                answer2, support2, health2, quality2, notes2 = await _synthesize_and_score({
                     **base_context,
                     "quality_feedback": quality.failures,
                     "revision": True,
@@ -2071,6 +2112,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
                     answer, support, citation_health, quality = (
                         answer2, support2, health2, quality2,
                     )
+                    synthesis_notes = notes2
 
         logger.info("synthesizer_done", answer_chars=len(answer), usable_facts=len(usable),
                     support_rate=round(support_rate_val, 2) if (support_rate_val := support.get("rate")) is not None else None,
@@ -2085,6 +2127,9 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             "evidence_distribution": evidence_distribution,
             "outline": answer_outline.to_dict() if answer_outline is not None else {},
             "section_wise": bool(section_wise),
+            # Machine-owned provenance the synthesizer kept out of the answer;
+            # rendered by build_answer_audit.
+            "synthesis_machine_notes": synthesis_notes,
         }
 
     async def finalize_node(state: ResearchState) -> FinalizeUpdate:
@@ -2099,18 +2144,21 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             if meta.get("conversation_kind"):
                 return {
                     "final_report": build_conversation_report(state),
+                    "final_audit": "",
                     "decision_options": [],
                 }
             return {
                 "final_report": build_direct_answer_report(state),
+                "final_audit": "",
                 "decision_options": [],
             }
         # Decision options computed once and shared with the report builder.
         options = build_decision_layer(state)
-        report = build_markdown_report(state, decision_options=options)
-        # Decision options ride in state so the route can persist them (3.5).
+        # Primary answer is the synthesizer's output verbatim; the machine-owned
+        # disclosure moves to the separate audit document.
         return {
-            "final_report": report,
+            "final_report": build_markdown_report(state, decision_options=options),
+            "final_audit": build_answer_audit(state, decision_options=options),
             "decision_options": options,
         }
 

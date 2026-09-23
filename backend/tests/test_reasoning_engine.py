@@ -256,7 +256,7 @@ def test_reasoning_structure_reaches_writer_prompt():
     assert any("EVIDENCE-GROUNDED REASONING STRUCTURE" in p for p in captured)
 
 
-def test_report_still_contains_required_sections_and_fallback_reasoning():
+def test_audit_report_contains_required_sections_and_fallback_reasoning():
     from app.agents.synthesizer import synthesize
     from app.agents.outline import build_outline
 
@@ -269,17 +269,19 @@ def test_report_still_contains_required_sections_and_fallback_reasoning():
             return {"answer": "## Executive Summary\n\nGlobal spending reached 200 billion [1]."}
 
     outline = build_outline("What is AI spending?", facts, [])
+    # The fixed-format audit profile is where deterministic section guarantees
+    # still apply; adaptive profiles leave structure to the writer.
     result = asyncio.run(
         synthesize(
             _NoReasoningLLM(), "What is AI spending?", facts,
-            {"intent": {}, "sub_questions": [], "reasoning": reasoning},
+            {"intent": {}, "sub_questions": [], "reasoning": reasoning, "report_profile": "audit"},
             outline=outline, section_wise=False, compress_context=False,
         )
     )
     # The deterministic fallback carries the argument structure even though the
     # writer omitted it...
     assert "## Reasoning" in result.answer
-    # ...and the mandatory sections are still enforced.
+    # ...and the audit profile's mandatory sections are still enforced.
     for heading in ("## Executive Summary", "## Key Findings", "## Limitations & Unknowns"):
         assert heading in result.answer
 

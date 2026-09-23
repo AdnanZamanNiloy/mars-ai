@@ -538,10 +538,11 @@ def test_llm_prompt_carries_angles_and_evidence():
     system_flat = " ".join(seen["system"].lower().split())
     assert "separate them explicitly" in system_flat, "entity/sense separation rule must be present"
     assert "according to the research" in system_flat, "banned-phrase rule must be present"
-    # The section skeleton (including Key Findings) lives in the writer prompt,
-    # where the profile and angles are known; the system prompt carries the
-    # shared formatting/citation contract only.
-    assert "## Key Findings" in seen["user"]
+    # The writing contract lives in the writer prompt, where the profile and
+    # angles are known; it is adaptive now (no universal heading list), so it
+    # instructs the writer to shape the answer to the question and carries the
+    # researched dimensions.
+    assert "no required heading list" in seen["user"]
     assert "Report text here" in answer
 
 

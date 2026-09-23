@@ -222,7 +222,9 @@ def test_failures_are_actionable_for_the_retry_prompt():
     )
     assert report.failures
     assert all(isinstance(f, str) and len(f) > 20 for f in report.failures)
-    assert any("Executive Summary" in f for f in report.failures)
+    # Failures must be specific and content-oriented, not a demand for a
+    # particular heading. The data-dump draft fails on its statistics dump.
+    assert any("dump" in f.lower() for f in report.failures)
 
 
 def test_scores_are_stable_and_in_range():
@@ -280,11 +282,12 @@ async def test_quality_gate_retries_once_and_ships_better_draft(monkeypatch):
         if len(calls) == 1:
             return "No."
         return (
-            "## Executive Summary\n\n"
-            "RAG retrieves documents before generation [1].\n\n"
-            "## Key Findings\n\n"
-            "- RAG grounds outputs in cited sources [1].\n\n"
-            "## Limitations\n\nCould not verify more claims.\n\n"
+            "RAG retrieves documents before generation, so the model answers from "
+            "grounded evidence rather than parametric memory alone [1]. Taken "
+            "together, the evidence supports using retrieval whenever answers must "
+            "be traceable to sources [1]. Limitations: the evidence here is a "
+            "single source, so the claim remains provisional pending independent "
+            "confirmation.\n\n"
             "## Sources\n\n[1] arxiv.org (preprint, primary) — https://arxiv.org/a"
         )
 
@@ -303,6 +306,8 @@ async def test_quality_gate_retries_once_and_ships_better_draft(monkeypatch):
     assert len(calls) == 2, "gate retry must fire exactly once"
     assert "quality_feedback" not in calls[0]
     assert calls[1].get("quality_feedback"), "failures must reach the retry draft"
-    assert final["synthesized_answer"].startswith("## Executive Summary")
+    assert final["synthesized_answer"].startswith("RAG retrieves documents")
     assert final["quality"]["passed"] is True
-    assert "# Answer Quality" in final["final_report"]
+    # The measured quality score lives in the audit layer, not the answer.
+    assert final["final_report"] == final["synthesized_answer"]
+    assert "Answer quality" in final["final_audit"]

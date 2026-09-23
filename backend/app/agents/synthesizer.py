@@ -487,10 +487,39 @@ the research was done, not a definition of the topic — the answer. If the
 evidence does not support a direct answer, the first sentence says exactly
 that and names what is missing.
 
+━━━ STRUCTURE EMERGES FROM THE QUESTION ━━━
+
+The answer is NOT required to contain any particular universal heading. Do not
+create sections merely to satisfy a template. There is no mandatory section
+list and no fixed order.
+
+Choose the shape the question and the evidence call for:
+- a definition is explained, not audited;
+- a comparison is organised by criterion with a verdict;
+- a "why" leads with the mechanism and weighs rival explanations;
+- a how-to is ordered steps;
+- a decision lays out options, trade-offs and a conditioned recommendation;
+- a broad state-of-the-field question organises around the dominant themes the
+  evidence actually supports, not around a set of headings chosen in advance;
+- a narrow question stays short.
+
+Each section you do write must earn its place by carrying evidence or
+reasoning the answer needs. Prefer a natural narrative over a checklist of
+headings. Use a heading only when it helps the reader navigate; a short answer
+may need none. Tables, bullets and timelines are welcome when they materially
+improve comprehension — never as filler.
+
+Do NOT include internal research-process information in the primary answer:
+no pipeline stages, fallbacks, evidence grades, budgets, counts of verified
+facts, quality or confidence scores, agent names or attempts. Express
+uncertainty naturally in prose ("the evidence is thin on X", "sources
+disagree"), and leave process provenance to the audit layer.
+
 ━━━ ABSOLUTE FORMATTING RULES ━━━
 
-1. Clear visual hierarchy: markdown `## ` headings, a blank line before every
-   new section, and headings that are LABELS ("Cost drivers") never questions.
+1. Clear visual hierarchy IF you use headings: markdown `## ` headings with a
+   blank line before each, and headings that are LABELS ("Cost drivers") never
+   questions.
 2. Short paragraphs — 3 to 4 sentences maximum.
 3. Bullets for genuinely enumerable findings; prose for reasoning. Never a
    wall of text, never a report that is nothing but bullets.
@@ -502,9 +531,8 @@ that and names what is missing.
    not write the confidence score, the relevance/quality score, the count of
    verified facts, the number of facts in the pool, "below the threshold",
    "relevance N/100", or any number describing the research system rather than
-   the subject. Those figures are appended automatically from measured state.
-   Describe the strength of the EVIDENCE in words ("well-established",
-   "single-source") and let the appendix carry the numbers.
+   the subject. Describe the strength of the EVIDENCE in words
+   ("well-established", "single-source").
 7. Plain language over jargon. Use a technical term when it is the precise
    word, and define it on first use when the reader may not know it.
 8. LENGTH: follow the length instruction in the prompt exactly. It is a hard
@@ -561,69 +589,128 @@ def _render_structure_contract(
     ambiguous: bool,
     has_figures: bool,
 ) -> str:
-    """The exact section list this report must carry, per profile.
+    """The writing contract for this report.
 
-    Two things this fixes over a fixed prompt: the writer is told which
-    sections are MACHINE-OWNED (so it stops producing a second, estimated
-    "Evidence & Confidence" that then duplicates the measured one), and short
-    profiles are not asked for sections whose content does not exist.
+    The previous version handed the writer a numbered list of exact headings
+    ("1. `## Executive Summary`, 2. `## Key Findings`, 3. Deep-dive sections,
+    4. `## Key Figures`"). That made every answer the same document regardless
+    of the question, and it contradicted the system prompt's own hard-failure
+    rule against "a section written only because the template had a slot for
+    it".
+
+    Now the writer is given a shape strategy, not a heading list. Only the
+    `audit` profile keeps explicit headings, because an audit genuinely is a
+    fixed-format artifact. For every other profile the structure is chosen by
+    the writer from the question and the evidence, guided by the query-shape
+    advice and the researched dimensions below.
     """
-    lines: List[str] = ["REQUIRED STRUCTURE (exact order, exact headings):", ""]
-    lines.append(
-        "1. `## Executive Summary` — 4-6 sentences. First sentence answers the "
-        "question directly."
-        + (
-            " The query term is ambiguous: the numbered disambiguation block "
-            "comes first, then the answer for the researched meaning."
-            if ambiguous else ""
+    # Audit is the one profile whose contract IS a fixed structure.
+    if profile.name == "audit":
+        return _render_audit_contract(profile=profile, ambiguous=ambiguous, has_figures=has_figures)
+
+    lines: List[str] = [
+        "SHAPE YOUR ANSWER TO THE QUESTION — there is no required heading list.",
+        "",
+        "Write an opening that states the answer or the central finding directly, "
+        "in 2-4 sentences, with its citation. Then organise the body around the "
+        "few ideas that actually matter for THIS question, in the order a reader "
+        "needs them. Use as many or as few sections as the material warrants: a "
+        "narrow question is a tight answer, a broad one may need several thematic "
+        "sections. Do not add a section that would only restate what was already "
+        "said.",
+    ]
+    if ambiguous:
+        lines.append(
+            "The query term is ambiguous: name the distinct meanings in the "
+            "opening, keep them strictly separate, and make clear which one the "
+            "answer addresses."
         )
-    )
-    lines.append(
-        "2. `## Key Findings` — bullets only, one self-contained fact each with "
-        f"its [n], highest-confidence first, maximum {profile.max_findings}."
-    )
     if angles:
         lines.append(
-            "3. Deep-dive sections — one `## ` section per angle below, in "
-            "order, titled with a short LABEL (never the question restated). "
-            "Skip an angle that adds nothing rather than padding it."
+            "The evidence covers these researched dimensions — weave in the ones "
+            "that matter for this question and drop the rest; do not give each one "
+            "its own section by default:\n"
+            + "\n".join(f"- {a}" for a in angles)
         )
     else:
         lines.append(
-            "3. Deep-dive sections — 2-4 `## ` sections on the dimensions the "
-            "evidence actually supports, each titled with a short label."
+            "Organise around the two to four most important ideas the evidence "
+            "actually supports. Derive them from the material; name each with a "
+            "short label if a heading helps."
         )
-    step = 4
+    if has_figures:
+        lines.append(
+            "Where quantitative claims are central, give the number with its unit, "
+            "period and scope, each cited — in prose or a compact table, whichever "
+            "reads better."
+        )
+    lines.extend(
+        [
+            "",
+            "Include, wherever they belong in the flow, the uncertainty and the "
+            "counter-evidence the material actually contains: what is well-"
+            "established, what is disputed, and what is not yet settled. Do not "
+            "quarantine these into labelled 'Limitations' or 'Counterarguments' "
+            "blocks unless a section genuinely helps; a sentence in the right "
+            "place is stronger than a rubric. Conversely, never omit a real "
+            "conflict or gap just to sound confident.",
+            "",
+            "Do NOT write an evidence/confidence panel, a source ledger, an "
+            "open-questions list, a 'reasoning' section or a Sources list — "
+            "measured provenance is appended separately and a second, estimated "
+            "copy is a defect. Cite inline with [n] markers.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _render_audit_contract(
+    profile: ReportProfile,
+    *,
+    ambiguous: bool,
+    has_figures: bool,
+) -> str:
+    """Explicit structure for the audit profile only — an audit is a format."""
+    lines: List[str] = ["REQUIRED STRUCTURE (audit format, exact order):", ""]
+    step = 1
+    lines.append(
+        f"{step}. `## Executive Summary` — 4-6 sentences. First sentence answers "
+        "the question directly."
+        + (
+            " The query term is ambiguous: the numbered disambiguation block comes "
+            "first, then the answer for the researched meaning."
+            if ambiguous else ""
+        )
+    )
+    step += 1
+    lines.append(
+        f"{step}. `## Key Findings` — bullets only, one self-contained fact each "
+        f"with its [n], highest-confidence first, maximum {profile.max_findings}."
+    )
+    step += 1
+    lines.append(
+        f"{step}. Deep-dive sections — `## ` sections on the dimensions the "
+        "evidence supports, each titled with a short label."
+    )
+    step += 1
     if has_figures:
         lines.append(
             f"{step}. `## Key Figures` — the quantitative claims, each with its "
             "number, unit, period and scope, each cited."
         )
         step += 1
-    for heading in profile.writer_sections:
-        if heading in _WRITER_OWNED_ALWAYS:
-            continue
-        if heading == "Limitations & Unknowns":
-            lines.append(
-                f"{step}. `## Limitations & Unknowns` — what the evidence does "
-                "not settle, in your own words. Be specific; 'more research is "
-                "needed' is not a limitation."
-            )
-            step += 1
-        elif heading == "Counterarguments & Disputed Points":
-            lines.append(
-                f"{step}. `## Counterarguments & Disputed Points` — the "
-                "strongest case against the report's own conclusion, and every "
-                "source conflict, presented as a disagreement."
-            )
-            step += 1
-    lines.append("")
-    lines.append(
-        "DO NOT WRITE these sections — they are appended automatically from "
-        "measured state and a second, estimated copy is a defect: "
-        "Evidence & Confidence, Open Questions & Missing Angles, Source "
-        "ledger, Auditable Source Ledger, Sources/References, Evidence "
-        "integrity, Reasoning."
+    lines.extend(
+        [
+            f"{step}. `## Limitations & Unknowns` — what the evidence does not "
+            "settle, in your own words. Be specific; 'more research is needed' is "
+            "not a limitation.",
+            "",
+            "DO NOT WRITE these sections — they are appended automatically from "
+            "measured state and a second, estimated copy is a defect: Evidence & "
+            "Confidence, Open Questions & Missing Angles, Source ledger, "
+            "Auditable Source Ledger, Sources/References, Evidence integrity, "
+            "Reasoning.",
+        ]
     )
     return "\n".join(lines)
 
@@ -712,6 +799,11 @@ class SynthesisResult:
     profile: str = ""
     word_count: int = 0
     quality: Dict[str, Any] = field(default_factory=dict)
+    # Machine-owned provenance that is deliberately NOT part of the primary
+    # answer for adaptive profiles (evidence accounting, integrity notes,
+    # objection blocks). It is emitted here so an audit consumer can render it
+    # without it ever touching the answer body.
+    machine_notes: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -724,6 +816,7 @@ class SynthesisResult:
             "profile": self.profile,
             "word_count": self.word_count,
             "quality": dict(self.quality),
+            "machine_notes": list(self.machine_notes),
         }
 
 
@@ -1435,16 +1528,26 @@ def _finalize(
     answer = _scrub_pipeline_telemetry(answer)
     answer = _ensure_disambiguation(answer, ctx)
 
-    answer, machine_keys = _add_required_sections(
-        answer,
-        ctx=ctx,
-        usable_facts=usable_facts,
-        contradictions=contradictions,
-        cited_facts=cited_facts,
-        profile=profile,
-    )
+    # Only the audit profile is a fixed-format artifact. For every other
+    # profile the answer is the writer's prose: machine-owned accounting is NOT
+    # injected into it (it would read as process noise and re-impose the
+    # historical report shape). That content is returned separately as
+    # `machine_notes` for the audit layer.
+    adaptive_answer = profile.name != "audit"
 
-    if profile.include_reasoning:
+    if not adaptive_answer:
+        answer, machine_keys = _add_required_sections(
+            answer,
+            ctx=ctx,
+            usable_facts=usable_facts,
+            contradictions=contradictions,
+            cited_facts=cited_facts,
+            profile=profile,
+        )
+    else:
+        machine_keys = set()
+
+    if profile.include_reasoning and not adaptive_answer:
         answer, added = _add_reasoning_structure(answer, ctx=ctx)
         machine_keys |= added
 
@@ -1508,17 +1611,37 @@ def _finalize(
         independence=independence,
     )
 
-    answer = _merge_into_section(answer, "evidence", evidence_block)
-    for block in tail_blocks:
-        answer = answer.rstrip() + "\n\n" + block
+    machine_notes: List[str] = []
+    if adaptive_answer:
+        # Preserve the measured provenance in the audit payload instead of the
+        # answer. Auditable state is never lost — it is relocated.
+        if evidence_block.strip():
+            machine_notes.append(evidence_block.strip())
+        machine_notes.extend(b.strip() for b in tail_blocks if b.strip())
+    else:
+        answer = _merge_into_section(answer, "evidence", evidence_block)
+        for block in tail_blocks:
+            answer = answer.rstrip() + "\n\n" + block
 
     integrity = _integrity_note(audit, quality)
     if integrity:
-        answer = answer.rstrip() + "\n\n" + integrity
+        if adaptive_answer:
+            machine_notes.append(integrity.strip())
+        else:
+            answer = answer.rstrip() + "\n\n" + integrity
 
     answer = _strip_canonical_sections(answer, {"sources"})
     answer = answer.rstrip() + "\n\n" + legend
-    answer = _reorder_sections(answer)
+    # Canonical reordering only applies to the fixed-format audit report; an
+    # adaptive answer keeps the order the writer chose for this question.
+    if not adaptive_answer:
+        answer = _reorder_sections(answer)
+
+    # Hand the machine-owned provenance back to the caller through the context
+    # dict it already passed (no signature change, no module-level state). The
+    # workflow merges this into the audit layer.
+    if isinstance(ctx, dict):
+        ctx["synthesis_machine_notes"] = list(machine_notes)
 
     return SynthesisResult(
         answer=answer,
@@ -1530,6 +1653,7 @@ def _finalize(
         profile=profile.name,
         word_count=_count_words(answer),
         quality=quality.to_dict(),
+        machine_notes=machine_notes,
     )
 
 

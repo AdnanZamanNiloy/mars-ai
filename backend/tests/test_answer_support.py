@@ -98,4 +98,6 @@ async def test_synthesizer_node_records_support(monkeypatch):
     assert support["cited"] == 2
     assert support["supported"] == 1
     assert support["rate"] == 0.5
-    assert "# Final Answer" in final["final_report"]
+    # The primary answer is the synthesizer's prose, not a report skeleton.
+    assert final["final_report"].strip()
+    assert final["final_report"] == final["synthesized_answer"]

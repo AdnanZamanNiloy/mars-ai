@@ -152,7 +152,9 @@ def test_resume_reruns_critic_not_planner_or_search(tmp_path, monkeypatch):
 
     status, report = asyncio.run(_check())
     assert status == "completed"
-    assert "# Final Answer" in report
+    # The persisted primary answer no longer carries an injected report
+    # skeleton; it is non-empty and persisted.
+    assert report and report.strip()
 
 
 def test_incremental_sources_saved_without_duplicates(tmp_path):

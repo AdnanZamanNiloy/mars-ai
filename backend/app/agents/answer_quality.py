@@ -76,12 +76,45 @@ def _concept_terms(text: str) -> List[str]:
 
 
 def _exec_summary_text(answer: str) -> str:
-    match = re.search(r"^##\s+Executive Summary\s*$", answer or "", re.M)
-    if not match:
-        return (answer or "")[:700]
-    start = match.end()
-    nxt = re.search(r"^##\s+", answer[start:], re.M)
-    return answer[start: start + nxt.start()] if nxt else answer[start:]
+    """The answer's opening: the first substantive paragraph or two.
+
+    Previously this located the text ONLY under a literal `## Executive
+    Summary` heading and fell back to the first 700 chars. Because the
+    synthesizer is now free to shape the answer to the question (and may lead
+    with a comparison table, a direct definition, or a thesis paragraph), the
+    opening is taken structurally: skip leading headings, then read the first
+    block that carries prose. A report that DOES use the heading still works.
+    """
+    text = answer or ""
+    # If the writer explicitly used an Executive Summary heading, honor it.
+    match = re.search(r"^##\s+Executive Summary\s*$", text, re.M)
+    if match:
+        start = match.end()
+        nxt = re.search(r"^##\s+", text[start:], re.M)
+        return text[start: start + nxt.start()] if nxt else text[start:]
+    # Otherwise: the first non-heading, non-list block of prose.
+    for block in re.split(r"\n{2,}", text):
+        stripped = block.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.lstrip().startswith(("-", "*", ">", "|", "1.")):
+            continue
+        return stripped
+    return text[:700]
+
+
+# Phrases that expose the research pipeline's own mechanics. These belong in
+# the audit layer, never in the answer. This list mirrors the synthesizer's
+# _scrub_pipeline_telemetry cues and is used to PENALIZE any draft that still
+# leads with how it was produced instead of what it found.
+_PROCESS_NOISE_RE = re.compile(
+    r"(pipeline stage|deterministic fallback|corroboration attempt|"
+    r"evidence grade\s*[A-D]\b|search budget|internal confidence|"
+    r"uncovered (research )?dimension|agent state|token budget|"
+    r"below the threshold|relevance \d+/100|of \d+ facts verified|"
+    r"this report was (?:assembled|generated)|the research (?:found|discovered))",
+    re.IGNORECASE,
+)
 
 
 def _word_count(text: str) -> int:
@@ -326,9 +359,9 @@ def evaluate_answer(
         )
     if concept_hit < 0.5:
         failures.append(
-            "Relevance: the Executive Summary does not address the query's core "
+            "Relevance: the answer opening does not address the query's core "
             f"terms ({', '.join(concept_terms[:4]) or query[:60]}). Answer the asked "
-            "question in the first paragraph."
+            "question directly in the first paragraph."
         )
     if sense_alignment < 0.6:
         failures.append(
@@ -363,9 +396,13 @@ def evaluate_answer(
     health_ok = (int(health.get("ok", 0) or 0) / health_total) if health_total else 0.6
     evidence = round(100 * (0.40 * density + 0.30 * verified_share + 0.15 * primary + 0.15 * health_ok))
 
-    # ---- Clarity: structure, length band, no data dumps ----
-    has_exec = bool(re.search(r"^##\s+Executive Summary", answer or "", re.M)) or "# Final Answer" in (answer or "")
-    has_bullets = "\n- " in (answer or "") or "\n* " in (answer or "")
+    # ---- Clarity: readability, length band, signal density, no data dumps ----
+    # Structural compliance is deliberately NOT scored. The old formula gave
+    # 25% for the presence of a literal `## Executive Summary` heading and 25%
+    # for bullets, so the gate actively drove the writer toward the same
+    # report-shaped answer for every question — the opposite of adaptive
+    # synthesis. Clarity now measures whether the answer is readable and
+    # signal-dense, whatever structure the question called for.
     words = _word_count(answer)
     band = _length_band_score(words, mode)
     bullets = [
@@ -374,9 +411,17 @@ def evaluate_answer(
     ]
     dumps = sum(1 for line in bullets if _is_data_dump_line(line))
     dump_term = 1 - (dumps / len(bullets)) if bullets else 1.0
-    clarity = round(100 * (0.25 * has_exec + 0.25 * has_bullets + 0.30 * band + 0.20 * dump_term))
-    if not has_exec:
-        failures.append("Clarity: the report has no '## Executive Summary' section.")
+    # Process-noise: a draft that explains the pipeline instead of the subject
+    # loses clarity and is flagged for the rewrite.
+    process_hits = len(_PROCESS_NOISE_RE.findall(answer or ""))
+    process_term = max(0.0, 1.0 - 0.5 * process_hits)
+    # Long runs of unbroken prose hurt readability; paragraph breaks or lists
+    # help. This rewards readable presentation without mandating a heading.
+    paragraphs = [p for p in re.split(r"\n{2,}", (answer or "").strip()) if p.strip()]
+    readable = 1.0 if (len(paragraphs) >= 2 or bullets or words < 220) else 0.7
+    clarity = round(100 * (
+        0.40 * band + 0.25 * dump_term + 0.20 * process_term + 0.15 * readable
+    ))
     if band < 0.7:
         failures.append(
             f"Clarity: report length ({words} words) is outside the {mode} band — "
@@ -386,6 +431,12 @@ def evaluate_answer(
         failures.append(
             "Clarity: some bullets are bare statistics dumps — give every number "
             "context in prose or drop it."
+        )
+    if process_term < 1.0:
+        failures.append(
+            "Clarity: the answer exposes internal research-process detail (pipeline "
+            "stages, fallbacks, evidence grades, budgets). Describe what is known; "
+            "leave process provenance to the audit layer."
         )
 
     # ---- Reasoning: does it CONCLUDE and ANSWER, not just summarize? ----
@@ -501,6 +552,7 @@ def evaluate_answer(
             "answer_relevance": round(answer_relevance, 3),
             "citation_density": round(density, 3),
             "primary_share": round(primary, 3),
+            "process_noise": process_hits,
         },
     )
     logger.info(

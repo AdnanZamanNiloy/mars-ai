@@ -97,7 +97,7 @@ async def test_expansion_searches_only_new_questions(monkeypatch):
     assert search_inputs[2] == [("What are RAG benchmarks this year?", "encyclopedia")], search_inputs
     assert len(final["sub_questions"]) == 3
     assert len(final["search_results"]) == 3
-    assert "# Final Answer" in final["final_report"]
+    assert final["final_report"] == final["synthesized_answer"]
 
 
 async def test_variant_queries_searched_and_attributed(monkeypatch):
@@ -146,4 +146,4 @@ async def test_variant_queries_searched_and_attributed(monkeypatch):
     assert search_inputs[1] == [("What is RAG today?", "encyclopedia"),
                                 ("RAG definition overview 2026", "encyclopedia")], search_inputs
     assert len(final["facts"]) == 2, final["facts"]
-    assert "# Final Answer" in final["final_report"]
+    assert final["final_report"] == final["synthesized_answer"]

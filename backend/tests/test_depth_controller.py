@@ -129,7 +129,8 @@ def test_critic_pass_alone_finalizes():
 
 
 def test_early_stop_note_in_report(monkeypatch):
-    """The report limitations must state an early stop on marginal gain."""
+    """An early stop on marginal gain is disclosed in the audit layer, not
+    injected into the primary answer."""
     import app.graph.workflow as wf
 
     state = _state(
@@ -141,4 +142,6 @@ def test_early_stop_note_in_report(monkeypatch):
     state["critique"] = {"is_sufficient": False, "improved_queries": ["q"]}
     state["synthesized_answer"] = "answer"
     report = wf.build_markdown_report(state)
-    assert "marginal" in report.lower()
+    assert report == "answer"
+    audit = wf.build_answer_audit(state)
+    assert "marginal" in audit.lower()
