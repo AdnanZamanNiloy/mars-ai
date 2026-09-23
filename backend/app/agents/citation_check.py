@@ -112,10 +112,16 @@ async def check_citations(
             url = legend.get(int(marker))
             if not url:
                 continue
-            bucket = per_url.setdefault(url, {"cited": 0, "supported": 0})
+            bucket = per_url.setdefault(url, {"cited": 0, "supported": 0, "synthesis": 0})
             bucket["cited"] += 1
             if detail.get("status") == "supported":
                 bucket["supported"] += 1
+            elif detail.get("status") == "synthesis":
+                # An attributed cross-source synthesis sentence draws on this
+                # source's verified evidence even though it matches no single
+                # claim verbatim; the URL is contributing, so it is not a
+                # partial-support warning.
+                bucket["synthesis"] += 1
 
     urls = sorted({u for u in legend.values() if u})
     to_check = urls[: max(1, max_sources)]
@@ -134,9 +140,11 @@ async def check_citations(
     counts = {"ok": 0, "warn": 0, "broken": 0, "bad": 0, "unchecked": 0}
     for marker in sorted(legend):
         url = legend[marker]
-        support = per_url.get(url, {"cited": 0, "supported": 0})
+        support = per_url.get(url, {"cited": 0, "supported": 0, "synthesis": 0})
         cited = int(support["cited"])
-        supported = int(support["supported"])
+        # Synthesis sentences draw on this source's evidence, so they count
+        # toward the URL's support for the health verdict.
+        supported = int(support["supported"]) + int(support.get("synthesis", 0))
         support_rate = round(supported / cited, 3) if cited else None
 
         probe = probe_by_url.get(url) if enabled else None

@@ -641,7 +641,8 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                             yield event_line("intent", **{
                                 k: intent_data.get(k)
                                 for k in ("query_type", "domain", "explanation_level",
-                                          "ambiguity", "senses", "recommended_action", "origin")
+                                          "ambiguity", "senses", "interpretations",
+                                          "underspecified", "recommended_action", "origin")
                             })
                             await _persist(record_event(
                                 settings.database_url, request_id, "intent", "end",

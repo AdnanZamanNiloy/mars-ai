@@ -501,6 +501,17 @@ def _blueprint_key(query: str, intent: Dict[str, Any], outline: AnswerOutline) -
     )
     for name, pattern in patterns:
         if re.search(pattern, text, re.IGNORECASE):
+            # A BROAD outline (3+ evidence-backed dimensions) inside a
+            # state/trend-shaped question is a thematic survey, not a one-line
+            # status update. The ordered regex list matched 'current' and
+            # collapsed "current trends in AI" onto a concise status answer,
+            # discarding the dimensions the research actually covered. Only the
+            # `status` family is overridden: a `definition` ("What is CRISPR?")
+            # or `list` question keeps its own shape even when the pool is
+            # broad, and strong task families (comparison, decision, how-to,
+            # timeline, forecast) always keep theirs.
+            if outline.broad and name == "status":
+                return "broad_research"
             return name
     return "broad_research" if outline.broad else "general"
 
@@ -531,10 +542,21 @@ def build_blueprint(
     themes = [s.title for s in outline.sections if s.title and s.title != "Answer"][:5]
 
     level = str(intent.get("explanation_level", "") or "").lower()
-    deep = str(mode or "standard").lower().startswith(("deep", "executive")) or outline.broad
-    depth = "concise" if (level == "basic" or key in ("definition", "status")) else (
-        "deep" if deep else "standard"
-    )
+    # Depth is question-shape driven: a broad SURVEY (broad_research) needs
+    # depth even when phrased as a "current"/status question, while a genuinely
+    # short definition or status question stays concise even when the pool
+    # happens to be broad. A basic explanation level is always concise.
+    broad_survey = key == "broad_research" and outline.broad
+    if level == "basic" and not broad_survey:
+        depth = "concise"
+    elif broad_survey:
+        depth = "deep"
+    elif key in ("definition", "status", "list"):
+        depth = "concise"
+    elif str(mode or "standard").lower().startswith(("deep", "executive")) or outline.broad:
+        depth = "deep"
+    else:
+        depth = "standard"
 
     return AnswerBlueprint(
         query=query,

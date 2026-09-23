@@ -175,6 +175,26 @@ class SynthesizerAnswerModel(BaseModel):
     answer: str = Field(min_length=1)
 
 
+class AnalyticalRelationshipModel(BaseModel):
+    """One connection between findings named by the Analytical Synthesis Agent."""
+    kind: str = ""
+    statement: str = ""
+
+
+class AnalyticalBriefModel(BaseModel):
+    """Analytical Synthesis Agent output — the schema ANALYST_SYSTEM_PROMPT
+    documents and the parser reads (AGENTS.md 4.2). Every statement cites the
+    evidence numbers it rests on; the module's deterministic guard drops any
+    statement carrying a number absent from the evidence pool."""
+    thesis: str = ""
+    insights: List[str] = Field(default_factory=list)
+    relationships: List[AnalyticalRelationshipModel] = Field(default_factory=list)
+    counter_evidence: List[str] = Field(default_factory=list)
+    implications: List[str] = Field(default_factory=list)
+    cross_source_conclusions: List[str] = Field(default_factory=list)
+    uncertainties: List[str] = Field(default_factory=list)
+
+
 class IntentSenseModel(BaseModel):
     """One candidate meaning of an ambiguous query term."""
     label: str = Field(min_length=1)

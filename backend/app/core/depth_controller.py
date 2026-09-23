@@ -90,13 +90,28 @@ def _url_to_axis(state: Dict[str, Any]) -> Dict[str, str]:
 
 
 def _axis_coverage(state: Dict[str, Any], minimum_sources: int) -> Dict[str, int]:
-    """Verified-fact count per planned axis, attributed via the fact's source URL."""
+    """Verified-fact count per planned axis, attributed via the fact's source URL.
+
+    Attribution order (the second is the fix for false "uncovered axis"
+    reports): a fact is credited to the planner axis of its source URL's
+    sub-question; when the URL mapping is unavailable (the search results that
+    would supply it have been trimmed, or the fact was re-sourced during
+    corroboration), the fact's OWN `axis` field is used. Without the fallback a
+    fully-researched pool whose URL→axis map was empty reported every axis as a
+    hard hole, and those false holes flowed on as "unknown" noise.
+    """
     verified = _verified_facts(state)
     url_axis = _url_to_axis(state)
     counts: Dict[str, int] = {axis: 0 for axis in _planned_axes(state)}
+    if not counts:
+        return counts
     for fact in verified:
         url = str(fact.get("source", "")).strip()
         axis = url_axis.get(url, "")
+        if axis not in counts:
+            # Fall back to the fact's own axis (stamped by the summarizer from
+            # its contract) before treating the fact as unattributed.
+            axis = str(fact.get("axis", "") or "").strip().lower()
         if axis in counts:
             counts[axis] += 1
     return counts

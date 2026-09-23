@@ -512,13 +512,67 @@ def evaluate_answer(
             "state the conclusion in terms of the query's own subject."
         )
 
+    # Synthesis (Phase 8 §5): does the answer REASON ACROSS sources, or recite
+    # them one at a time? Measured from three deterministic signals — conclusion
+    # language, attribution dominance, and cross-source joins. This is the
+    # explicit "synthesis" measure the fidelity check cannot provide on its own.
+    attribution_leads = sum(
+        1 for s in re.split(r"(?<=[.!?])\s+", answer or "")
+        if s.strip().lower().lstrip("-*# ").startswith(
+            ("according to", "source ", "the report states", "one source",
+             "another source", "the first source", "the second source")
+        )
+    )
+    sentence_count = max(1, len([s for s in re.split(r"(?<=[.!?])\s+", answer or "") if s.strip()]))
+    attribution_ratio = attribution_leads / sentence_count
+    cross_source_join = any(
+        t in lowered for t in (
+            "taken together", "together, these", "combined", "jointly",
+            "collectively", "both sources", "across these", "these findings",
+            "the evidence points", "reinforce", "corroborat",
+        )
+    )
+    synthesis_term = 1.0 if (conclusion_term and cross_source_join) else (
+        0.5 if (conclusion_term or cross_source_join) else 0.0
+    )
+    if attribution_ratio >= 0.4:
+        synthesis_term = min(synthesis_term, 0.4)
+        failures.append(
+            "Reasoning: the answer narrates source by source — synthesise across "
+            "the evidence (what it collectively shows) rather than reporting what "
+            "each source says in turn."
+        )
+    if conclusion_term and not cross_source_join:
+        failures.append(
+            "Reasoning: the answer draws no cross-source synthesis — state what the "
+            "evidence TOGETHER indicates, not only a per-source summary."
+        )
+
+    # Signal density (Phase 8 §5): the fraction of sentences that carry a
+    # citation marker or a distinct content-bearing clause. A draft padded with
+    # filler and restatement scores low; a dense analyst answer scores high.
+    substantive = 0
+    for s in re.split(r"(?<=[.!?])\s+", answer or ""):
+        text = s.strip()
+        if not text:
+            continue
+        if re.search(r"\[\d+\]", text) or len(set(re.findall(r"[a-z][a-z0-9\-]{3,}", text.lower()))) >= 4:
+            substantive += 1
+    signal_density = substantive / sentence_count if sentence_count else 1.0
+    if signal_density < 0.5:
+        failures.append(
+            "Clarity: most sentences carry no citation or distinct claim — remove "
+            "filler and restatement; every sentence should advance the argument."
+        )
+
     reasoning = round(100 * (
         0.20 * conflict_term
         + 0.15 * limitations
         + 0.10 * objections
-        + 0.25 * conclusion_term
+        + 0.20 * conclusion_term
         + 0.15 * separation_term
         + 0.15 * answer_question_term
+        + 0.05 * synthesis_term
     ))
 
     overall = round(

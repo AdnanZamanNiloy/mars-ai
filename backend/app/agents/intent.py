@@ -235,6 +235,90 @@ class SenseCandidate:
 
 
 @dataclass
+class Interpretation:
+    """One useful reading of an under-specified query term.
+
+    Distinct from `SenseCandidate`: a sense is a homonym (same word, different
+    thing); an interpretation is the same thing read along different useful axes
+    ("most demanding jobs" = high-demand OR stressful). Both call for answering
+    more than one reading rather than spending the answer on the ambiguity.
+    """
+
+    label: str
+    description: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"label": self.label, "description": self.description}
+
+
+# Query terms whose meaning is materially under-specified — a careful answer
+# addresses the useful readings instead of announcing that the term is vague.
+# Deliberately small and honest: this is the deterministic detector, not a
+# substitute for the LLM reading the question.
+_UNDERSPECIFIED_TERMS: Dict[str, List[Dict[str, str]]] = {
+    "demanding": [
+        {"label": "Hard to fill (high demand)",
+         "description": "roles employers struggle to staff because supply is short"},
+        {"label": "Stressful or difficult (high strain)",
+         "description": "roles with the heaviest workload, pressure or burnout risk"},
+    ],
+    "best": [
+        {"label": "Highest quality",
+         "description": "the option judged strongest on merit"},
+        {"label": "Best fit for a use case",
+         "description": "the option that wins for a particular situation"},
+    ],
+    "risky": [
+        {"label": "Likelihood of failure",
+         "description": "how probable a bad outcome is"},
+        {"label": "Severity of failure",
+         "description": "how damaging the bad outcome would be"},
+    ],
+    "popular": [
+        {"label": "Most used",
+         "description": "the option with the largest user base"},
+        {"label": "Fastest growing",
+         "description": "the option gaining adoption most quickly"},
+    ],
+    "affordable": [
+        {"label": "Lowest upfront cost",
+         "description": "cheapest to acquire"},
+        {"label": "Lowest total cost of ownership",
+         "description": "cheapest over its lifetime, including running costs"},
+    ],
+    "dangerous": [
+        {"label": "Frequency of harm",
+         "description": "how often it causes harm"},
+        {"label": "Severity of harm",
+         "description": "how serious the harm is when it occurs"},
+    ],
+}
+
+# A query needs at least this many useful readings before they are worth
+# answering separately; a single reading is just the question.
+MIN_INTERPRETATIONS = 2
+
+
+def _detect_interpretations(query: str) -> List[Interpretation]:
+    """Deterministic under-specification detector (LLM-free fallback).
+
+    Fires only on a curated set of genuinely two-reading terms, so it never
+    fabricates ambiguity. Returns [] for a query with one clear reading.
+    """
+    lowered = f" {(query or '').lower()} "
+    out: List[Interpretation] = []
+    for term, readings in _UNDERSPECIFIED_TERMS.items():
+        if not re.search(rf"\b{re.escape(term)}\b", lowered):
+            continue
+        out = [
+            Interpretation(label=r["label"], description=r["description"])
+            for r in readings
+        ]
+        break
+    return out if len(out) >= MIN_INTERPRETATIONS else []
+
+
+@dataclass
 class IntentReport:
     """What the pipeline knows about the question BEFORE researching it."""
 
@@ -249,13 +333,25 @@ class IntentReport:
     # Set when the user's phrasing itself demands both meanings ("What is
     # transformer?") regardless of the probability gap.
     forced_both: bool = False
+    # Under-specified (not homonymous) readings: same question, multiple useful
+    # interpretations. The answer addresses the useful ones briefly rather than
+    # spending the answer explaining that the term is ambiguous.
+    interpretations: List[Interpretation] = field(default_factory=list)
+
+    @property
+    def underspecified(self) -> bool:
+        return len(self.interpretations) >= MIN_INTERPRETATIONS
 
     @property
     def recommended_action(self) -> str:
         """research_both (answer structures both senses) vs research_dominant
         (answer disambiguates in one paragraph, then goes deep on the likely
         meaning). MARS never blocks on a clarifying question; the disambiguation
-        lives in the answer itself."""
+        lives in the answer itself.
+
+        This is about SENSE (homonym) handling only — under-specification is
+        answered through `interpretations` and is orthogonal to it.
+        """
         if self.forced_both and len(self.senses) >= 2:
             return "research_both"
         if not self.ambiguity or len(self.senses) < 2:
@@ -277,6 +373,8 @@ class IntentReport:
             "explanation_level": self.explanation_level,
             "ambiguity": self.ambiguity,
             "senses": [s.to_dict() for s in self.senses],
+            "interpretations": [i.to_dict() for i in self.interpretations],
+            "underspecified": self.underspecified,
             "recommended_action": self.recommended_action,
             "reasoning": self.reasoning,
             "origin": self.origin,
@@ -356,6 +454,7 @@ def heuristic_intent(query: str) -> IntentReport:
         origin="heuristic",
         forced_both=bool(ambiguity and len(senses) >= 2
                          and _DEFINITIONAL_QUERY_RE.match((query or "").strip())),
+        interpretations=_detect_interpretations(query),
     )
 
 
@@ -423,6 +522,10 @@ def _finalize(
         reasoning=str(payload.get("reasoning", "") or "").strip() or fallback.reasoning,
         origin=origin,
         forced_both=forced_both,
+        # Under-specification is detected deterministically: the LLM schema is
+        # homonym-shaped, and forcing extra readings from it would invent
+        # ambiguity. `fallback` already ran the detector.
+        interpretations=fallback.interpretations,
     )
 
 

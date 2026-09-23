@@ -101,3 +101,51 @@ async def test_synthesizer_node_records_support(monkeypatch):
     # The primary answer is the synthesizer's prose, not a report skeleton.
     assert final["final_report"].strip()
     assert final["final_report"] == final["synthesized_answer"]
+
+
+# --- cross-source synthesis is attributed, not unsupported -------------------
+
+_SYNTH_FACTS = [
+    {"claim": "AI adoption is rising across enterprise workflows.",
+     "source": "https://a.com/x", "verified": True},
+    {"claim": "Inference costs have fallen sharply.",
+     "source": "https://b.com/y", "verified": True},
+]
+
+
+def test_multi_source_synthesis_is_attributed_not_unsupported():
+    answer = (
+        "Taken together, these trends indicate AI is shifting toward operational "
+        "deployment [1][2].\n\n"
+        "Sources:\n[1] a.com — https://a.com/x\n[2] b.com — https://b.com/y"
+    )
+    support = verify_answer_support(answer, _SYNTH_FACTS)
+    detail = support["sentence_details"][0]
+    assert detail["status"] == "synthesis"
+    assert detail["multi_source"] is True
+    # A synthesis sentence is never counted as supported fact, and never as
+    # unsupported contamination.
+    assert support["synthesis"] == 1
+    assert support["supported"] == 0
+    assert support["unsupported"] == []
+
+
+def test_fabricated_number_in_synthesis_still_fails():
+    answer = (
+        "Taken together, the market grew 9000 percent in 2026 [1][2].\n\n"
+        "Sources:\n[1] a.com — https://a.com/x\n[2] b.com — https://b.com/y"
+    )
+    support = verify_answer_support(answer, _SYNTH_FACTS)
+    assert support["sentence_details"][0]["status"] == "numeric_failure"
+    assert support["synthesis"] == 0
+
+
+def test_single_source_sentence_still_requires_support_threshold():
+    # One cited source, no lexical overlap -> unsupported, never synthesis.
+    answer = (
+        "Quantum tunnelling drives macroeconomic inflation cycles [1].\n\n"
+        "Sources:\n[1] a.com — https://a.com/x"
+    )
+    support = verify_answer_support(answer, _SYNTH_FACTS)
+    assert support["sentence_details"][0]["status"] == "unsupported"
+    assert support["sentence_details"][0]["multi_source"] is False

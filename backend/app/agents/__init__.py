@@ -55,6 +55,9 @@ _LAZY: dict[str, str] = {
     "critic_agent": "app.agents.critic",
     "redteam_agent": "app.agents.redteam",
     "RedTeamReport": "app.agents.redteam",
+    # analytical synthesis (thesis between plan and writer)
+    "analytical_synthesis": "app.agents.analyst",
+    "AnalyticalBrief": "app.agents.analyst",
     # conflicts / scoring
     "summarize_contradictions": "app.agents.contradiction",
     "contradiction_followups": "app.agents.contradiction",

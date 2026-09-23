@@ -192,7 +192,8 @@ def test_to_dict_round_trip_shape():
     report = heuristic_intent("What is transformer?")
     d = report.to_dict()
     assert set(d) == {"query", "query_type", "domain", "explanation_level", "ambiguity",
-                      "senses", "recommended_action", "reasoning", "origin"}
+                      "senses", "interpretations", "underspecified", "recommended_action",
+                      "reasoning", "origin"}
     assert d["senses"][0]["probability"] == 0.75
 
 
@@ -496,3 +497,55 @@ async def test_summarizer_timeout_gets_one_budgeted_second_chance(tmp_path):
     assert facts and facts[0]["extraction"] == "llm"
     from app.core.usage import clear_run_usage
     clear_run_usage()
+
+
+# --- under-specified (non-homonymous) queries --------------------------------
+
+def test_underspecified_query_yields_useful_readings():
+    report = heuristic_intent("What are the most demanding jobs in 2027?")
+    assert report.underspecified
+    assert len(report.interpretations) >= 2
+    labels = " ".join(i.label.lower() for i in report.interpretations)
+    assert "demand" in labels and ("stress" in labels or "strain" in labels)
+    # Under-specification is NOT homonym ambiguity and must not masquerade as it.
+    assert report.ambiguity is False
+    assert report.senses == []
+
+
+def test_underspecified_survives_llm_path():
+    from app.core.llm import LLMClient  # noqa: F401  (import path guard)
+    import asyncio
+
+    class _LLM:
+        async def generate_json(self, system_prompt, user_prompt, **kwargs):
+            # LLM returns a clear (non-homonym) reading.
+            return {
+                "query_type": "analytical",
+                "domain": "economics",
+                "explanation_level": "practical",
+                "ambiguity": False,
+                "senses": [],
+                "reasoning": "asking which jobs are hardest",
+            }
+
+    report = asyncio.run(classify_intent(_LLM(), "What are the most demanding jobs in 2027?"))
+    assert report.underspecified
+    assert len(report.interpretations) >= 2
+
+
+def test_clear_query_has_no_interpretations():
+    report = heuristic_intent("What is the capital of France?")
+    assert not report.underspecified
+    assert report.interpretations == []
+
+
+def test_interpretations_block_renders_readings_and_forbids_ambiguity_essay():
+    from app.agents.synthesizer import _render_interpretations_block
+
+    report = heuristic_intent("What are the most demanding jobs in 2027?")
+    block = _render_interpretations_block(report.to_dict())
+    assert "UNDER-SPECIFIED QUERY" in block
+    assert "Do NOT spend the answer explaining" in block
+    assert "Hard to fill" in block
+    # A clear query renders nothing.
+    assert _render_interpretations_block({"interpretations": []}) == ""

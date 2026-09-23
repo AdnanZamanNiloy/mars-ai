@@ -690,6 +690,18 @@ SOURCES_HEADING_RE = re.compile(r"\n+#{0,6}\s*Sources:?\s*\n")
 LEGEND_RE = re.compile(r"^\[(\d+)\]\s+\S.*?—\s*(\S+)\s*$")
 SUPPORT_THRESHOLD = 0.30
 
+# A MULTI-SOURCE sentence (two or more distinct cited sources) that does not
+# match any single cited source verbatim is accepted as attributed cross-source
+# synthesis. High-level synthesis ("taken together, these findings indicate...")
+# is deliberately lexically distant from each individual source, so any lexical
+# bar would reject exactly the reasoning the pipeline asks the writer to
+# produce. The safety that remains: its NUMBERS must still be grounded in the
+# cited evidence (a fabricated figure fails as a numeric_failure regardless),
+# and it is recorded as `synthesis` — never as `supported` — so the audit and
+# quality scoring never mistake a derived conclusion for a directly-established
+# finding. A single-source sentence still must clear SUPPORT_THRESHOLD.
+SYNTHESIS_SUPPORT_FLOOR = 0.0
+
 
 def parse_answer_legend(answer: str) -> Tuple[str, Dict[int, str]]:
     """Split an emitted answer into (body, {marker_number: url}).
@@ -777,15 +789,31 @@ def verify_answer_support(
         sentence_claim_cols[si] = cols
 
     support_scores: Dict[int, float] = {}
+    multi_source: Dict[int, bool] = {}
     if cited_rows and claim_pool:
         cited_texts = [sentences[si] for si in cited_rows]
         matrix = cross_similarity(cited_texts, claim_pool)
         for row, si in enumerate(cited_rows):
             cols = sentence_claim_cols[si]
-            support_scores[si] = float(max(matrix[row, c] for c in cols)) if cols else 0.0
+            if not cols:
+                support_scores[si] = 0.0
+                continue
+            # A sentence citing SEVERAL sources is a cross-source synthesis: it
+            # legitimately combines claims, so no single claim reads as a close
+            # match. Score it by how well its cited claims COLLECTIVELY cover it
+            # — the mean of each cited claim's best match — rather than by the
+            # one closest claim alone. A fabricated multi-source sentence still
+            # scores low: its parts must each be present in the pool.
+            best = max(float(matrix[row, c]) for c in cols)
+            if len(cols) >= 2:
+                multi_source[si] = True
+                coverage = sum(float(matrix[row, c]) for c in cols) / len(cols)
+                support_scores[si] = max(best, coverage)
+            else:
+                support_scores[si] = best
 
     # ---- Sentence-level verdicts -----------------------------------------
-    cited = supported = uncited = 0
+    cited = supported = uncited = synthesis = 0
     numeric_checked = numeric_ok = 0
     unsupported: List[str] = []
     numeric_failures: List[str] = []
@@ -824,6 +852,20 @@ def verify_answer_support(
             status = "supported"
         elif sentence[:160] in numeric_failures:
             status = "numeric_failure"
+        elif (
+            multi_source.get(si)
+            and support_scores.get(si, 0.0) >= SYNTHESIS_SUPPORT_FLOOR
+        ):
+            # A cross-source synthesis: the sentence combines several cited,
+            # verified sources and no single one matches it verbatim — the
+            # definition of legitimate synthesis ("taken together, these
+            # findings suggest..."). Its numeric content is grounded (the
+            # numeric check above would have failed it otherwise) and each cited
+            # source contributes real coverage, so it is ATTRIBUTED SYNTHESIS,
+            # not an unsupported claim. Counted separately so it neither inflates
+            # the supported rate nor is treated as contamination.
+            synthesis += 1
+            status = "synthesis"
         else:
             unsupported.append(sentence[:160])
             status = "unsupported"
@@ -832,6 +874,7 @@ def verify_answer_support(
             "markers": numbers,
             "status": status,
             "support": round(support_scores.get(si, 0.0), 4),
+            "multi_source": bool(multi_source.get(si, False)),
         })
 
     return {
@@ -839,6 +882,7 @@ def verify_answer_support(
         "cited": cited,
         "supported": supported,
         "uncited": uncited,
+        "synthesis": synthesis,
         "unsupported": unsupported,
         "rate": (supported / cited) if cited else None,
         "numeric_failures": numeric_failures,

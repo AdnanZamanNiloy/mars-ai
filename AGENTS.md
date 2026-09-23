@@ -240,6 +240,19 @@ These are real bugs found by reading the code, not hypotheticals. Each one below
   timestamp as started_at. Rule: before awaiting inside a loop, confirm
   iterations don't depend on each other; if they don't, gather (bounded
   when sockets/concurrency matter).
+
+[FIXED — cross-source synthesis scored as unsupported] app/agents/evidence_utils.py
+  verify_answer_support scored each cited sentence by its BEST match against
+  a SINGLE cited source's claims. A legitimate synthesis sentence ("Taken
+  together, these findings indicate…") deliberately shares little vocabulary
+  with any one source, so it scored ~0.03 and was counted as unsupported
+  contamination — the relevance score punished exactly the reasoning the
+  synthesizer is instructed to produce. A sentence citing two or more
+  DISTINCT verified sources is now classified `synthesis` (counted
+  separately; never "supported", never contamination), while fabricated
+  numbers in such a sentence still fail as `numeric_failure`. Rule: any
+  per-sentence check that assumes ONE source per sentence must be revisited
+  when the pipeline is told to reason ACROSS sources.
 ```
 
 If you find a new instance of any of these patterns anywhere in the codebase while working on something else, fix it or flag it in your commit message — don't leave it for later just because it's outside your current task's file scope.

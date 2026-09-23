@@ -59,6 +59,7 @@ KIND_CORROBORATION = "corroboration"
 KIND_PRIMARY_SOURCE = "primary_source"
 KIND_COUNTER_EVIDENCE = "counter_evidence"
 KIND_CONTRADICTION_RESOLUTION = "contradiction_resolution"
+KIND_DIMENSION_COVERAGE = "dimension_coverage"
 
 # Deterministic kind ordering used as the first tie-break. Declared as a tuple
 # (not a set) so the order is stable and documented.
@@ -67,6 +68,7 @@ KIND_ORDER: Tuple[str, ...] = (
     KIND_COUNTER_EVIDENCE,
     KIND_CORROBORATION,
     KIND_PRIMARY_SOURCE,
+    KIND_DIMENSION_COVERAGE,
 )
 
 # --- Score weights (the allocation policy, in the open) ---------------------
@@ -90,6 +92,7 @@ UNCERTAINTY_THIN_DIMENSION = 0.5
 GAP_NEEDS_CORROBORATION = 1.0
 GAP_PRIMARY_THIN = 0.8
 GAP_UNRESOLVED_CONTRADICTION = 0.5
+GAP_UNDER_RESEARCHED_DIMENSION = 0.9
 
 # Expected-gain (novelty) multipliers.
 EXPECTED_GAIN_OPEN = 1.0
@@ -424,6 +427,96 @@ def _primary_source_candidates(
     return out
 
 
+def _dimension_coverage_candidates(
+    state: Dict[str, Any], *, limit: int
+) -> List[Dict[str, Any]]:
+    """Targeted follow-up for dimensions that are CENTRAL but under-researched.
+
+    This is the one genuinely new detector: the existing channels all fire on an
+    evidence *deficiency* (single-source, thin-primary, contradicted). None fires
+    on the synthesis-level judgement "this dimension matters a lot to the answer
+    but the evidence behind it is shallow". The synthesis planner
+    (`app.core.synthesis_planner`) makes that judgement explicit; this channel
+    turns each under-researched dimension it names into a focused search using
+    the dimension's own question text.
+
+    Reuses `build_synthesis_plan` and the planner's own sub-question text — no
+    new evidence logic, no new LLM call.
+    """
+    facts = [f for f in state.get("facts", []) or [] if isinstance(f, dict)]
+    if not facts:
+        return []
+    sub_questions = state.get("sub_questions", []) or []
+    try:
+        from app.core.synthesis_planner import build_synthesis_plan
+        from app.agents.outline import build_outline
+
+        outline = build_outline(
+            str(state.get("query", "") or ""),
+            facts,
+            sub_questions,
+            intent=state.get("intent") or {},
+        )
+        plan = build_synthesis_plan(
+            facts,
+            state.get("contradictions") or [],
+            query=str(state.get("query", "") or ""),
+            query_type=str((state.get("intent") or {}).get("query_type", "") or ""),
+            outline=outline,
+            sub_questions=sub_questions,
+        )
+    except Exception as exc:
+        logger.warning("investigation_planner_dimension_failed", error=str(exc), exc_info=exc)
+        return []
+
+    # Under-researched notes carry the dimension title/question; match back to
+    # the planned sub-question so the query is the dimension's own question.
+    by_label: Dict[str, Dict[str, Any]] = {}
+    for item in sub_questions:
+        if not isinstance(item, dict):
+            continue
+        for label in (
+            str(item.get("question", "") or ""),
+            str(item.get("axis", "") or ""),
+        ):
+            key = _normalize(label)
+            if key:
+                by_label[key] = item
+
+    attempt = max(0, _as_int(state.get("iteration", 0)))
+    out: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    for note in plan.under_researched:
+        # The note is formatted as "'<label>' is thin ..." / "'<label>' has no ...".
+        label = note.split("'", 2)[1] if note.count("'") >= 2 else ""
+        item = by_label.get(_normalize(label))
+        question = str(item.get("question", "") or "") if isinstance(item, dict) else ""
+        if not question:
+            question = label or str(state.get("query", "") or "")
+        question = question.strip()
+        if not question:
+            continue
+        query = question if attempt == 0 else f"{question} (attempt {attempt + 1})"
+        if _normalize(query) in seen:
+            continue
+        seen.add(_normalize(query))
+        out.append(
+            _make_candidate(
+                kind=KIND_DIMENSION_COVERAGE,
+                target=label or question,
+                query=query,
+                impact=0.7,
+                uncertainty=UNCERTAINTY_THIN_DIMENSION,
+                gap=GAP_UNDER_RESEARCHED_DIMENSION,
+                gain=EXPECTED_GAIN_OPEN,
+                reason="the answer depends on this dimension but its evidence is thin",
+            )
+        )
+        if len(out) >= max(1, limit):
+            break
+    return out
+
+
 def _counter_evidence_candidates(
     state: Dict[str, Any],
     entries: Dict[str, Dict[str, Any]],
@@ -592,6 +685,7 @@ def select_investigations(
             lambda: _counter_evidence_candidates(state, entries, limit=generation_limit),
             lambda: _corroboration_candidates(state, entries, limit=generation_limit),
             lambda: _primary_source_candidates(state, limit=generation_limit),
+            lambda: _dimension_coverage_candidates(state, limit=generation_limit),
         ):
             try:
                 candidates.extend(generator() or [])

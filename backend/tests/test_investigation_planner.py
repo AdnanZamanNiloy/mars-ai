@@ -15,6 +15,7 @@ from app.core.investigation_planner import (
     KIND_CONTRADICTION_RESOLUTION,
     KIND_CORROBORATION,
     KIND_COUNTER_EVIDENCE,
+    KIND_DIMENSION_COVERAGE,
     KIND_PRIMARY_SOURCE,
     explain,
     select_investigations,
@@ -350,3 +351,64 @@ async def test_search_node_preserves_executed_query_memory():
     issued = [q[0] if isinstance(q, (tuple, list)) else q for q in calls[0]]
     executed = set(out.get("executed_queries") or [])
     assert all(" ".join(q.lower().split()) in executed for q in issued)
+
+
+# --- synthesis-plan-driven dimension-coverage channel ------------------------
+
+def test_under_researched_dimension_gets_a_targeted_query():
+    """A central-but-thin dimension produces a dimension_coverage candidate
+    whose query is the dimension's own question text."""
+    state = {
+        "query": "What is the current state of the AI market?",
+        "facts": [
+            _fact(
+                "AI market size reached 200 billion dollars in 2025",
+                "https://reuters.com/ai-market",
+                has_numbers=True,
+                sub_question="market size",
+                axis="evidence",
+            ),
+        ],
+        "sub_questions": [
+            {"question": "market size", "axis": "evidence"},
+            {"question": "what is the adoption mechanism", "axis": "mechanism"},
+        ],
+        "contradictions": [],
+        "intent": {"query_type": "analytical"},
+    }
+    result = select_investigations(state, budget_cap=8)
+    coverage = [c for c in result["ranked"] if c["kind"] == KIND_DIMENSION_COVERAGE]
+    assert coverage, "a central thin dimension must produce a coverage candidate"
+    assert any(c["query"] == "market size" for c in coverage), coverage
+
+
+def test_no_dimension_coverage_when_every_dimension_is_well_covered():
+    """Two corroborated findings per dimension -> nothing is under-researched."""
+    state = {
+        "query": "What is the AI market?",
+        "facts": [
+            _fact(
+                "AI market size reached 200 billion dollars",
+                "https://reuters.com/a", has_numbers=True,
+                corroborating_sources=["https://ft.com/a"],
+                sub_question="market size", axis="evidence",
+            ),
+            _fact(
+                "AI market grew 20 percent year over year",
+                "https://who.int/a", has_numbers=True,
+                corroborating_sources=["https://oecd.org/a"],
+                sub_question="market size", axis="evidence",
+            ),
+        ],
+        "sub_questions": [{"question": "market size", "axis": "evidence"}],
+        "contradictions": [],
+        "intent": {"query_type": "factual"},
+    }
+    result = select_investigations(state, budget_cap=8)
+    assert not any(c["kind"] == KIND_DIMENSION_COVERAGE for c in result["ranked"])
+
+
+def test_dimension_coverage_channel_is_total_on_garbage():
+    for state in ({}, {"facts": None}, {"facts": ["garbage"], "sub_questions": None}):
+        result = select_investigations(state, budget_cap=4)
+        assert isinstance(result.get("selected"), list)

@@ -958,6 +958,9 @@ async def synthesize(
     ambiguity_block = _render_ambiguity_block(intent)
     if ambiguity_block:
         length_hint = f"{length_hint}\n\n{ambiguity_block}"
+    interpretations_block = _render_interpretations_block(intent)
+    if interpretations_block:
+        length_hint = f"{length_hint}\n\n{interpretations_block}"
 
     guidance = _format_guidance(query, intent)
 
@@ -1028,10 +1031,19 @@ async def synthesize(
         numbered, cited_facts = _number_facts(top_facts)
         angles = _angles_of(cited_facts)
 
+        # PRIMARY guidance: the AnalystBrief and the SynthesisPlan lead the
+        # prompt. A large evidence block placed before them let the evidence
+        # dump overshadow the analytical synthesis — the writer summarised the
+        # evidence instead of writing the answer the brief implies. The brief
+        # now comes FIRST, evidence comes SECOND, and the mechanical
+        # constraints sit between them.
+        primary_guidance = _render_analytical_guidance(ctx)
+
         user_prompt = (
             f"Main query: {query}\n\n"
             f"{length_hint}\n\n"
-            + (f"{guidance}\n\n" if guidance else "")
+            + primary_guidance
+            + (f"CONSTRAINTS\n{guidance}\n\n" if guidance else "")
             + (f"{quality_contract}\n\n" if quality_contract else "")
             + _render_structure_contract(
                 resolved_profile,
@@ -1056,8 +1068,9 @@ async def synthesize(
                 else render_outline(outline)
             )
             + _REASONING_DEPTH_BLOCK
-            + "Evidence — each line begins with the citation number you MUST use for\n"
-            "that claim:\n"
+            + "SUPPORTING EVIDENCE — cite each line by the number it begins with. "
+            "Use only the evidence needed to support the brief above; do not "
+            "enumerate every line:\n"
             + _render_evidence_block(cited_facts)
             + "\n\n"
             + _render_ranges_block(contradictions)
@@ -3493,6 +3506,39 @@ def _ensure_disambiguation(answer: str, ctx: Dict[str, Any]) -> str:
     return f"{block}\n\n{answer.lstrip()}"
 
 
+def _render_interpretations_block(intent: Dict[str, Any]) -> str:
+    """Answer-first guidance for an UNDER-SPECIFIED query.
+
+    Distinct from the homonym disambiguation block: the term names ONE thing but
+    the question does not say which useful reading is meant. The user's policy is
+    to INFER the most useful reading and, where two readings are both materially
+    useful, answer both briefly — never spend the answer explaining that the
+    question is ambiguous.
+    """
+    if not isinstance(intent, dict):
+        return ""
+    readings = [
+        i for i in (intent.get("interpretations") or [])
+        if isinstance(i, dict) and str(i.get("label", "")).strip()
+    ]
+    if len(readings) < 2:
+        return ""
+    listed = "\n".join(
+        f"  {i + 1}) **{str(r.get('label')).strip()}**"
+        + (f" — {str(r.get('description', '')).strip()}" if str(r.get("description", "")).strip() else "")
+        for i, r in enumerate(readings[:3])
+    )
+    return (
+        "UNDER-SPECIFIED QUERY — the question can be read in more than one useful "
+        "way. Do NOT spend the answer explaining that it is ambiguous. Instead:\n"
+        f"{listed}\n"
+        "Answer the reading(s) that are materially useful, giving each a short, "
+        "direct answer of its own (a sentence to a short paragraph is enough for "
+        "the secondary reading). Only if a reading would need substantially "
+        "different research to answer should you name it without answering it."
+    )
+
+
 def _render_ambiguity_block(intent: Dict[str, Any]) -> str:
     """Mandatory disambiguation contract for an ambiguous query."""
     if not isinstance(intent, dict) or not intent.get("ambiguity"):
@@ -3530,6 +3576,40 @@ def _render_ambiguity_block(intent: Dict[str, Any]) -> str:
         "bold sense name, em dash, one-clause explanation), then one sentence: "
         f"'Based on your question, this report focuses on meaning 1.' {structure}"
     )
+
+
+def _render_analytical_guidance(ctx: Dict[str, Any]) -> str:
+    """PRIMARY guidance: the AnalystBrief, then the SynthesisPlan.
+
+    Placed at the TOP of the writer prompt so the analytical synthesis is the
+    frame the writer writes from, not a footnote to an evidence dump. Renders
+    nothing when neither is present, so callers can prepend unconditionally.
+    """
+    parts: List[str] = []
+    brief = ctx.get("analytical_brief")
+    if brief is not None and hasattr(brief, "render_for_writer"):
+        try:
+            rendered = str(brief.render_for_writer()).strip()
+        except Exception:  # noqa: BLE001 - never let the brief break synthesis
+            rendered = ""
+        if rendered:
+            parts.append(
+                "WRITE THE ANSWER THE BRIEF IMPLIES — this is your primary "
+                "guidance. Start from the central thesis, develop the insights, "
+                "organise around the findings, integrate evidence into the "
+                "narrative, and preserve the counter-evidence and uncertainty. "
+                "Do not simply summarise the evidence below.\n\n"
+                + rendered
+            )
+    plan = ctx.get("synthesis_plan")
+    if plan is not None and hasattr(plan, "render_for_writer"):
+        try:
+            rendered_plan = str(plan.render_for_writer()).strip()
+        except Exception:  # noqa: BLE001 - never let the plan break synthesis
+            rendered_plan = ""
+        if rendered_plan:
+            parts.append(rendered_plan)
+    return "\n\n".join(parts) + "\n\n" if parts else ""
 
 
 def _render_context_block(ctx: Dict[str, Any]) -> str:
@@ -3611,6 +3691,10 @@ def _render_context_block(ctx: Dict[str, Any]) -> str:
             rendered_reasoning = ""
         if rendered_reasoning:
             parts.append(rendered_reasoning)
+
+    # The SynthesisPlan and AnalystBrief are NOT re-rendered here: they lead the
+    # prompt via `_render_analytical_guidance` so the evidence dump cannot
+    # overshadow them (Phase 8 context prioritization).
 
     # Surviving red-team objections belong in the brief, not only in the
     # appendix: a writer that knows the strongest counter-argument writes a

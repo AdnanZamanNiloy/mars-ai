@@ -212,6 +212,12 @@ class Settings(BaseSettings):
     # entry before the writer sees them. Distinct claims are never dropped.
     synthesis_context_compression: bool = True
     synthesis_compression_threshold: float = 0.72
+    # LLM Analytical Synthesis: one small call between the deterministic
+    # SynthesisPlan and the writer that produces a central thesis, major
+    # insights, relationships, counter-evidence and cross-source conclusions.
+    # Off disables the stage entirely (writer runs on the deterministic plan);
+    # a failed or empty call degrades to the same path (AGENTS.md 4.7).
+    synthesis_analyst_enabled: bool = True
 
     # Dynamic Research Depth (Phase 2.8)
     sufficiency_threshold: float = 0.75

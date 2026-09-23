@@ -1,6 +1,87 @@
 # Changelog
 
+## v2.3 — LLM Analytical Synthesis (analyst, not report generator)
+
+Measured finding: the deterministic SynthesisPlan (v2.2) organized the evidence
+but did not synthesize it — it had no thesis field, restated convergent claims
+as "conclusions", and on a broad query ("current trends in AI") narrowed the
+central question onto the first sub-dimension. An LLM stage between plan and
+writer was warranted.
+
+### New stage: `agents/analyst.py`
+
+- `analytical_synthesis()`: one small LLM call over the SAME verified evidence
+  + deterministic plan, producing a structured `AnalyticalBrief` — central
+  thesis, major insights, relationships, counter-evidence, implications,
+  cross-source conclusions, uncertainties. Rendered into the writer prompt
+  after the plan; no chain-of-thought ever leaves the stage.
+- **No new facts**: every statement cites evidence numbers; a deterministic
+  guard drops any statement carrying a number absent from the evidence pool
+  (citation markers stripped first, so `[1]` is never read as a figure).
+- **Verification unchanged**: the writer still cites `[n]` against verified
+  facts and `verify_answer_support` still runs. This stage only shapes what the
+  writer reasons from.
+- **Fallback (AGENTS.md 4.7)**: LLM failure / empty output / disabled
+  (`synthesis_analyst_enabled`) degrades to a brief built from the
+  deterministic plan (established → dominant → conclusions), never empty when
+  the plan is non-empty, never a crash.
+
+### Deterministic plan fix
+
+- `central_question` is now the USER'S QUERY, not the first planned dimension.
+  Using the first sub-question narrowed a broad question onto one angle — the
+  exact collapse the blueprint exists to prevent.
+
+## v2.2 — Evidence Synthesis Planning
+
+Reasoning over the evidence landscape BEFORE writing, not just better prose.
+
+### New stage: `core/synthesis_planner.py` (deterministic, LLM-free)
+
+- Builds a single explicit `SynthesisPlan` answering the twelve planning
+  questions (what is asked, needed dimensions, dominant vs incidental
+  findings, conflicts, under-researched dimensions, established/inferred,
+  prioritisation, what to omit, structure) from artifacts the pipeline
+  already computes — no new detection logic, no new LLM call.
+- **Dominant vs incidental** finding ranking by centrality (reuses
+  `evidence_completion.claim_impact` plus the grade weight). A finding clears
+  the dominant bar when it is quantitative, summary-used or A-grade
+  corroborated; a pool with nothing above the bar still gets its single best
+  finding as the lead.
+- **Under-researched dimensions**: a dimension whose most central finding is
+  important but which carries fewer than two findings is named — a
+  coverage-vs-importance judgement the existing channels did not make.
+- Renders into the writer prompt (`_render_context_block`) alongside the
+  reasoning structure; wired in `workflow.synthesizer_node`.
+
+### Synthesis-plan-driven follow-up research
+
+- New allocator channel `KIND_DIMENSION_COVERAGE` in
+  `core/investigation_planner.py`: the under-researched dimensions the plan
+  names become targeted searches using the dimension's own question text.
+  Every other channel fires on an evidence *deficiency*; this is the first
+  that fires on a synthesis-level judgement.
+
+### Under-specified (non-homonymous) questions
+
+- `IntentReport.interpretations`: a curated detector for terms with two
+  materially useful readings ("most demanding jobs" = high-demand OR
+  high-strain). The writer is told to answer both briefly, never to spend the
+  answer explaining that the term is ambiguous. Emitted on the `intent`
+  event.
+
+### Cross-source synthesis is attributed, not rejected
+
+- `verify_answer_support` classified a genuine synthesis sentence ("taken
+  together, these findings indicate…") as *unsupported* because it matched no
+  single cited source verbatim. A sentence citing two or more distinct
+  verified sources is now `synthesis` — counted separately, never as
+  supported fact and never as contamination. Fabricated numbers in such a
+  sentence still fail as `numeric_failure`. `citation_check` counts synthesis
+  sentences toward the URL's support.
+
 ## v2.1 — Intent & Answer-Quality layer
+
 
 The upgrade against the "What is transformer?" failure class: the pipeline
 used to treat the raw query as a search string, mix electrical-transformer

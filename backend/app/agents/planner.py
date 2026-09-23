@@ -1703,6 +1703,21 @@ async def planner_agent(
         intent_parts.append(
             f"Likely meaning: {intent_senses[0].get('label')} — target the plan at this sense."
         )
+    # Under-specified (not homonymous) query: the term has multiple useful
+    # readings. Plan a sub-question per materially useful reading so the answer
+    # can address both instead of explaining the ambiguity.
+    interpretations = [
+        i for i in (intent.get("interpretations") or [])
+        if isinstance(i, dict) and str(i.get("label", "")).strip()
+    ]
+    if len(interpretations) >= 2:
+        listed = "; ".join(str(i.get("label")).strip() for i in interpretations[:3])
+        intent_parts.append(
+            "UNDER-SPECIFIED QUERY — it can be read in more than one useful way: "
+            f"{listed}. Plan a sub-question for each materially useful reading so "
+            "the answer addresses both; do not spend research on the fact that the "
+            "term is ambiguous."
+        )
     if intent.get("domain"):
         intent_parts.append(
             f"Research domain: {intent.get('domain')} (overrides your own classification)."

@@ -9,6 +9,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agents.evidence_utils import dedupe_semantic_facts, filter_facts_by_domain, verify_answer_support
 from app.agents.answer_quality import evaluate_answer
+from app.agents.thesis_fidelity import check_thesis_fidelity
 from app.agents.critic import critic_agent
 from app.agents.direct_answer import direct_answer_agent
 from app.agents.intent import classify_intent, heuristic_intent
@@ -2029,6 +2030,59 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             and str(state.get("mode", "standard") or "standard") in ("deep", "executive", "standard", "audit")
         )
 
+        # Evidence Synthesis Planning (Feature: synthesis plan): reason over the
+        # evidence landscape BEFORE writing — which findings are dominant vs
+        # incidental, which dimensions are thin relative to their centrality,
+        # what may legitimately be synthesised across sources, and the intended
+        # structure. Built from the same artifacts the rest of the node has
+        # (outline, reasoning map, graded facts), deterministic and failure-safe.
+        try:
+            from app.agents.outline import build_blueprint
+            from app.core.synthesis_planner import build_synthesis_plan
+
+            plan_blueprint = build_blueprint(
+                state["query"],
+                usable,
+                state.get("sub_questions", []),
+                intent=intent,
+                outline=answer_outline,
+                mode=str(state.get("mode", "standard") or "standard"),
+                contradictions=state.get("contradictions") or [],
+            )
+            base_context["synthesis_plan"] = build_synthesis_plan(
+                usable,
+                state.get("contradictions") or [],
+                query=state["query"],
+                query_type=str(intent.get("query_type", "") or ""),
+                outline=answer_outline,
+                reasoning=base_context.get("reasoning"),
+                strategy=plan_blueprint.strategy,
+                sub_questions=state.get("sub_questions") or [],
+            )
+        except Exception as exc:
+            logger.warning("synthesis_plan_build_failed", error=str(exc), exc_info=exc)
+
+        # LLM Analytical Synthesis (Phase 7): one small call that turns the
+        # deterministic plan + verified evidence into an analyst's brief — a
+        # central thesis, synthesised insights, relationships between findings,
+        # counter-evidence and legitimate cross-source conclusions. It NEVER
+        # replaces verification (the writer still cites [n] against verified
+        # facts and verify_answer_support still runs) and degrades to the
+        # deterministic plan when disabled, failed or empty (AGENTS.md 4.7).
+        try:
+            from app.agents.analyst import analytical_synthesis
+
+            base_context["analytical_brief"] = await analytical_synthesis(
+                llm,
+                state["query"],
+                usable,
+                base_context.get("synthesis_plan"),
+                query_type=str(intent.get("query_type", "") or ""),
+                enabled=bool(getattr(llm.settings, "synthesis_analyst_enabled", True)),
+            )
+        except Exception as exc:
+            logger.warning("analytical_synthesis_failed", error=str(exc), exc_info=exc)
+
         async def _synthesize_and_score(ctx: Dict[str, Any]):
             # Outline / section-wise / compression options ride in `context` so
             # the synthesizer entry point keeps its original signature (test
@@ -2080,9 +2134,14 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
                 mode=str(state.get("mode", "standard") or "standard"),
                 threshold=threshold,
             )
-            return answer, support, health, quality, machine_notes
+            # Thesis fidelity (Phase 8): does the prose actually reflect the
+            # analyst's brief? Observational, semantic (never string matching).
+            # Its failures ride the SAME single revision pass as the quality
+            # gate's — no new loop, no new LLM call.
+            fidelity = check_thesis_fidelity(answer, ctx.get("analytical_brief"))
+            return answer, support, health, quality, machine_notes, fidelity
 
-        answer, support, citation_health, quality, synthesis_notes = await _synthesize_and_score(base_context)
+        answer, support, citation_health, quality, synthesis_notes, fidelity = await _synthesize_and_score(base_context)
 
         # Answer revision pass (the quality optimizer's LLM half): the writer
         # rewrites its draft ONCE — fed the measured failures when the gate
@@ -2093,25 +2152,34 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         # Quick mode trades the unconditional polish pass for latency; the
         # gate still repairs a FAILING draft there.
         quick_mode = str(state.get("mode", "standard")) == "quick"
+        # Thesis-fidelity failures are actionable and belong in the rewrite
+        # prompt alongside the gate's failures (bounded: one revision).
+        if fidelity.failures:
+            logger.info("thesis_fidelity_failed", score=fidelity.score,
+                        failures=len(fidelity.failures))
         run_revision = (
             gate_enabled and revision_enabled
             and ("synthesizer" not in take_fallbacks())
-            and (not quick_mode or not quality.passed)
+            and (not quick_mode or not quality.passed or bool(fidelity.failures))
         )
         if run_revision:
+            feedback = [*quality.failures, *fidelity.failures]
             try:
-                answer2, support2, health2, quality2, notes2 = await _synthesize_and_score({
+                answer2, support2, health2, quality2, notes2, fidelity2 = await _synthesize_and_score({
                     **base_context,
-                    "quality_feedback": quality.failures,
+                    "quality_feedback": feedback,
                     "revision": True,
                 })
             except Exception as exc:
                 logger.warning("synthesis_revision_failed", error=str(exc), exc_info=exc)
             else:
-                if quality2.overall >= quality.overall:
+                # Ship the revision when it is no worse on quality AND no worse
+                # on fidelity — fidelity failures are why the pass may have run.
+                if quality2.overall >= quality.overall and fidelity2.score >= fidelity.score:
                     answer, support, citation_health, quality = (
                         answer2, support2, health2, quality2,
                     )
+                    fidelity = fidelity2
                     synthesis_notes = notes2
 
         logger.info("synthesizer_done", answer_chars=len(answer), usable_facts=len(usable),
@@ -2127,6 +2195,9 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             "evidence_distribution": evidence_distribution,
             "outline": answer_outline.to_dict() if answer_outline is not None else {},
             "section_wise": bool(section_wise),
+            # Thesis fidelity: how faithfully the prose reflects the analyst's
+            # brief. Audit-only; never rendered into the primary answer.
+            "thesis_fidelity": fidelity.to_dict(),
             # Machine-owned provenance the synthesizer kept out of the answer;
             # rendered by build_answer_audit.
             "synthesis_machine_notes": synthesis_notes,
