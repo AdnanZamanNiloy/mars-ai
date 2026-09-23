@@ -22,11 +22,52 @@ flowchart TD
     CR -->|stop: budget wall / stall / no novel queries / ceiling| SY
     SY --> QG[Answer quality gate<br/>accuracy/relevance/evidence/<br/>clarity/reasoning 0-100<br/>one bounded re-synthesis]
     QG --> CH[Citation health check<br/>live URL re-validation +<br/>sentence-support fusion]
-    CH --> FIN[Finalize<br/>report: answer, evidence,<br/>contradictions, decision layer,<br/>limitations, confidence]
+    CH --> FIN[Finalize<br/>PRIMARY ANSWER = synthesizer prose<br/>+ separate AUDIT document]
 ```
 
 One LangGraph instance drives the loop (`app/graph/workflow.py`); the
 resume endpoint re-enters at the critic node with state rebuilt from SQLite.
+
+---
+
+## Synthesis: structured internally, adaptive externally
+
+The pipeline determines **what is known**; the synthesis layer determines
+**what matters for this question**; the presentation layer determines **how to
+communicate it**. These three responsibilities are deliberately separate.
+
+```text
+evidence state ──> ADAPTIVE ANSWER BLUEPRINT ──> synthesis ──> primary answer
+                        (question + evidence)                 (clean, cited)
+                                                                     +
+                                                              audit / trace
+```
+
+* **Evidence state** is the verified fact pool, contradictions, independence and
+  temporal profile — produced by the research pipeline and unchanged by
+  synthesis.
+* **Adaptive answer blueprint** (`app/agents/outline.py`, `AnswerBlueprint`) is
+  a deterministic, LLM-free plan for HOW to communicate: the presentation
+  strategy for the question family (comparison by criterion, mechanism chain,
+  ordered steps, options + trade-offs, thematic synthesis, concise definition),
+  the dominant themes the evidence supports, and the depth. It names no
+  headings.
+* **Primary answer** is the synthesizer's prose. For every profile except
+  `audit` it is returned verbatim, with no injected report skeleton. The only
+  machine-appended tail is the numbered source legend (citations stay visible).
+* **Audit / trace** (`build_answer_audit`, the `final_audit` field) holds
+  research provenance: confidence and its caveats, the measured five-axis
+  quality score, the supporting-evidence ledger, source conflicts, the decision
+  layer, and measured evidence accounting. None of it is mixed into the answer.
+
+**Modes scale effort, not format.** Quick/standard/deep/audit differ in research
+breadth, triangulation and synthesis depth (and the `audit` profile additionally
+uses a fixed, traceable format). They do not switch between unrelated fixed
+report templates.
+
+**Audit is the one fixed format.** Because an audit is a format, the `audit`
+profile keeps the explicit section contract; every other profile lets structure
+emerge from the question and the evidence.
 
 ---
 
@@ -37,7 +78,8 @@ resume endpoint re-enters at the critic node with state rebuilt from SQLite.
 | Module | Responsibility |
 |---|---|
 | `app/agents/intent.py` | Intent classification before research: ambiguity → ranked senses, domain, explanation level; deterministic fallback with curated homonym hints; never blocks — the answer disambiguates. |
-| `app/agents/answer_quality.py` | Pre-delivery gate: five-axis 0-100 scoring from measured state; one bounded re-synthesis with failures fed back; below-threshold answers disclosed. |
+| `app/agents/answer_quality.py` | Pre-delivery gate: five-axis 0-100 scoring from measured state; scores usefulness (relevance/coherence/signal density/citation integrity), never heading compliance; penalizes process leakage; one bounded re-synthesis with failures fed back. |
+| `app/agents/outline.py` | Answer-first outline + adaptive `AnswerBlueprint`: the deterministic presentation strategy (question family, dominant themes, depth) handed to the writer in place of a heading list. |
 | `app/agents/planner.py` | Contracts with axis/search_type/minimum_sources/variants/wave/sense; axis-coverage enforcement; intent domain override; dependency waves (max 3). |
 | `app/agents/search.py` | 5 providers, per-provider circuit breakers + retry policies, fetch bulkhead, PDF extraction, canonical-URL + near-dup snippet dedup, domain diversity caps, freshness half-lives, disk cache. |
 | `app/agents/summarizer.py` | Per-contract specialists (financial/technical/…), source attribution validated against provided documents, direct-quote parsing, token-budgeted chunking, per-URL cache keyed by role + prerequisite digest. |
@@ -79,7 +121,7 @@ resume endpoint re-enters at the critic node with state rebuilt from SQLite.
 | `search_progress` | `snippets` |
 | `critic` | `iteration`, `reason`, `breakdown` (confidence signals + weights + notes), `redteam`, `budget` (live ledger snapshot) |
 | `findings` | `items` (claims with verification flags/scores/reasons); re-emitted once with `verified_update` after the verifier pass |
-| `final_report` | `report`, `confidence`, `degraded`, `answer_support`, `budget`, `wave_report`, `citation_health` |
+| `final_report` | `report` (the primary answer), `audit` (separate audit/trace markdown), `confidence`, `degraded`, `answer_support`, `budget`, `wave_report`, `citation_health`, `quality`, `outline` |
 | `decisions` | `items` (decision layer options) |
 | `error` | `message` (actionable: key/quota/timeout causes) |
 
@@ -117,6 +159,24 @@ references it could not resolve from raw pages alone.
 exhausts free-tier TPM/TPD quotas (observed live: Groq 200k daily tokens
 burned by 3 parallel summarizer calls). The semaphore bounds in-flight
 prompts, not threads.
+
+**Why the quality gate scores usefulness, not headings.** An earlier gate gave
+25% of its clarity score for the presence of a `## Executive Summary` heading
+and 25% for bullets. That actively drove the writer toward the same
+report-shaped answer for every question and made a differently-shaped answer
+fail its own review. Clarity now measures readability, length band, signal
+density and the absence of process noise. A heading is never rewarded by
+itself.
+
+**Why process mechanics never reach the primary answer.** "Pipeline stage",
+"deterministic fallback", evidence grades, budgets and confidence floats
+describe the research system, not the subject. They are scrubbed from the
+answer and rendered in the audit layer. Uncertainty is expressed in prose
+("the evidence is thin on X"), not as a score.
+
+**Why deep mode is depth, not length.** Deep/executive runs raise research
+breadth, triangulation and the synthesis depth guidance; they do not select a
+longer fixed report structure. A deep answer is stronger, not merely longer.
 
 ---
 

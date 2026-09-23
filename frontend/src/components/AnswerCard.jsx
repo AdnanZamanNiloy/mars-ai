@@ -226,7 +226,7 @@ export default function AnswerCard({ run }) {
       ) : sections.finalAnswer ? (
         <div className="answer-lead">{renderRichText(sections.finalAnswer)}</div>
       ) : (
-        <p className="answer-lead">The final report did not include an executive summary.</p>
+        <p className="answer-lead">No answer was produced for this run.</p>
       )}
 
       <div className="answer-actions">
@@ -271,6 +271,13 @@ export default function AnswerCard({ run }) {
           ))}
         </div>
       ) : null}
+
+      {run.audit ? (
+        <details className="audit-block">
+          <summary>Research audit &amp; trace</summary>
+          <div className="audit-body">{renderRichText(run.audit)}</div>
+        </details>
+      ) : null}
     </div>
   );
 }
@@ -278,10 +285,10 @@ export default function AnswerCard({ run }) {
 export function ReplayAnswerCard({ trace }) {
   /* Read-only replay built from the persisted trace — same card, zero new fetches. */
   const report = trace.final_report?.report_markdown || "";
-  const hasSectionedReport = report.includes("# Final Answer");
   const run = {
     runId: trace.run_id || null,
     report,
+    audit: trace.final_report?.audit_markdown || "",
     confidence: typeof trace.final_report?.confidence === "number" ? trace.final_report.confidence : null,
     findings: (trace.claims || []).map((c) => ({
       claim: c.claim,
@@ -294,11 +301,7 @@ export function ReplayAnswerCard({ trace }) {
     decisions: trace.decisions || [],
     snippets: (trace.sources || []).length,
   };
-  // Direct-answer runs persist a headingless plain-text report. Without this,
-  // parseReport finds no "# Final Answer" section and the card falls through to
-  // "did not include an executive summary", hiding the answer that IS stored.
-  if (report && !hasSectionedReport) {
-    run.directAnswer = { answer: report };
-  }
+  // parseReport treats the whole document as the answer when there is no legacy
+  // "# Final Answer" wrapper, so both adaptive and legacy reports render.
   return <AnswerCard run={run} />;
 }

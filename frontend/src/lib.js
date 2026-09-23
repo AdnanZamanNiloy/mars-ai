@@ -16,12 +16,22 @@ function extractSection(markdown, heading, nextHeadings) {
 
 const REPORT_HEADINGS = ["# Final Answer", "# Supporting Evidence", "# Contradictions", "# Decision Layer"];
 
+/* The backend now delivers the primary answer as the synthesizer's own prose
+ * (adaptive structure — it may or may not use headings), with pipeline
+ * metadata moved to a separate `audit` document. Older persisted reports still
+ * carry the `# Final Answer` wrapper and are handled for compatibility. */
 export function parseReport(markdown) {
+  const text = markdown || "";
+  const hasLegacyWrapper = text.includes("# Final Answer");
+  if (!hasLegacyWrapper) {
+    // The whole document is the answer itself.
+    return { finalAnswer: text.trim(), evidence: "", contradictions: "", decisionLayer: "" };
+  }
   return {
-    finalAnswer: extractSection(markdown, "# Final Answer", REPORT_HEADINGS.filter((h) => h !== "# Final Answer")),
-    evidence: extractSection(markdown, "# Supporting Evidence", REPORT_HEADINGS.filter((h) => h !== "# Supporting Evidence")),
-    contradictions: extractSection(markdown, "# Contradictions", REPORT_HEADINGS.filter((h) => h !== "# Contradictions")),
-    decisionLayer: extractSection(markdown, "# Decision Layer", REPORT_HEADINGS.filter((h) => h !== "# Decision Layer")),
+    finalAnswer: extractSection(text, "# Final Answer", REPORT_HEADINGS.filter((h) => h !== "# Final Answer")),
+    evidence: extractSection(text, "# Supporting Evidence", REPORT_HEADINGS.filter((h) => h !== "# Supporting Evidence")),
+    contradictions: extractSection(text, "# Contradictions", REPORT_HEADINGS.filter((h) => h !== "# Contradictions")),
+    decisionLayer: extractSection(text, "# Decision Layer", REPORT_HEADINGS.filter((h) => h !== "# Decision Layer")),
   };
 }
 

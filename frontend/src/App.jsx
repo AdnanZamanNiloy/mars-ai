@@ -617,6 +617,7 @@ export default function App() {
           const run = {
             ...m.run,
             report: evt.report || "",
+            audit: typeof evt.audit === "string" ? evt.audit : (m.run.audit || ""),
             confidence: typeof evt.confidence === "number" ? evt.confidence : null,
             degraded: Array.isArray(evt.degraded) ? evt.degraded : [],
             degradedReasons: evt.degraded_reasons && typeof evt.degraded_reasons === "object"

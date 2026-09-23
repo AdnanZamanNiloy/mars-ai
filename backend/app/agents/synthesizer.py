@@ -3797,7 +3797,18 @@ _PIPELINE_TELEMETRY_RE = re.compile(
     r"\b(?:the )?evidence pool (?:contains?|held?|has)\b|"
     r"\bfacts? in the (?:evidence )?pool\b|"
     r"\bself-?verif(?:ied|ication) (?:rate|pass)\b|"
-    r"\bdeterministic fallback\b|\bdegraded run\b"
+    r"\bdeterministic fallback\b|\bdegraded run\b|"
+    # Process-mechanics phrasing the task calls out explicitly. These describe
+    # how the research was run, not what was found.
+    r"\bcorroboration attempts?\b|"
+    r"\btargeted corroboration\b|"
+    r"\bevidence grade [A-D]\b|"
+    r"\bsearch budget\b|\btoken budget\b|"
+    r"\binternal confidence (?:calculation|score)\b|"
+    r"\buncovered (?:research )?dimensions?\b|"
+    r"\bagent state\b|"
+    r"\bcapability gaps? on\b|"
+    r"\bsingle-source after \d+\b"
     r")"
 )
 

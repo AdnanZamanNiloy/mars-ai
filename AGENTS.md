@@ -21,18 +21,24 @@ Hardware:   target host has 8GB RAM. Concurrency and memory footprint
 
 Entrypoint:      main.py (FastAPI app, lifespan init)
 Agents:          app/agents/*.py (planner, search, summarizer, critic,
-                 synthesizer, verifier, evidence_utils, contradiction
+                 synthesizer, outline, verifier, evidence_utils, contradiction
                  helpers, citation_check, budget, redteam — one file per
                  pipeline stage or shared utility)
 Orchestration:   app/graph/workflow.py (LangGraph StateGraph; wave-ordered
                  summarization with prerequisite context)
+Answer/audit:    the primary answer (state["synthesized_answer"] →
+                 state["final_report"]) NEVER carries process metadata; the
+                 audit/trace (state["final_audit"], build_answer_audit) carries
+                 confidence, quality, evidence ledger, conflicts, decisions.
+                 Adaptive structure comes from outline.py's AnswerBlueprint.
 API:             app/api/routes.py (stream, resume, trace, providers)
 Core utilities:  app/core/*.py (config, llm client + response cache, usage
                  ledger, semantic engine, confidence, contradictions, depth
                  controller, isolation, degradation, providers)
 Persistence:     app/db/sqlite.py (auto-initializing schema)
 Benchmarks:      bench/ (run_offline.py deterministic suite, run_live.py
-                 live-provider suite, datasets.py labeled fixtures)
+                 live-provider suite, datasets.py labeled fixtures,
+                 eval_answer_quality.py adaptive-synthesis benchmark)
 Frontend:        frontend/src/App.jsx consumes the NDJSON stream; components
                  in frontend/src/components/
 ```
