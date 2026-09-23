@@ -549,3 +549,38 @@ def test_interpretations_block_renders_readings_and_forbids_ambiguity_essay():
     assert "Hard to fill" in block
     # A clear query renders nothing.
     assert _render_interpretations_block({"interpretations": []}) == ""
+
+
+# --- Phase 10: forecasting questions -----------------------------------------
+
+def test_future_year_query_is_detected_as_forecast():
+    """A bare future year ("in 2027") is a forward-looking question even with no
+    "will"/"forecast" verb — it must not be answered as an observable fact."""
+    from app.agents.synthesizer import infer_query_type
+
+    assert infer_query_type("What would be the most demanding jobs in 2027?") == "forecast"
+    assert infer_query_type("The state of AI in 2030") == "forecast"
+
+
+def test_historical_year_is_not_a_forecast():
+    from app.agents.synthesizer import infer_query_type
+
+    assert infer_query_type("What happened in the 2019 election?") != "forecast"
+
+
+def test_forecast_guidance_separates_projections_from_observations():
+    from app.agents.synthesizer import _format_guidance
+
+    guidance = _format_guidance("What would be the most demanding jobs in 2027?", {})
+    assert "OFFICIAL PROJECTIONS" in guidance
+    assert "CURRENT INDICATORS" in guidance
+    assert "CROSS-SOURCE INFERENCE" in guidance
+    assert "UNKNOWNS" in guidance
+    assert "Never invent a probability, a rank" in guidance
+
+
+def test_future_year_blueprint_uses_forecast_strategy():
+    from app.agents.outline import build_blueprint
+
+    bp = build_blueprint("What would be the most demanding jobs in 2027?", [], [])
+    assert bp.strategy == "forecast"

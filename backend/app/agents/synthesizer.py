@@ -396,7 +396,13 @@ _FORMAT_GUIDANCE: Dict[str, str] = {
         "level and its as-of date FIRST, label every projection as a projection "
         "with its source's assumptions, and give a range rather than a point "
         "estimate. Never present a projection in the same voice as an "
-        "observation."
+        "observation. Keep four kinds of statement strictly separate: OFFICIAL "
+        "PROJECTIONS (a named body's forecast, with its assumptions), CURRENT "
+        "INDICATORS (the measured today that the forecast extends), CROSS-SOURCE "
+        "INFERENCE (your own reasoning across sources, clearly marked as "
+        "inference), and UNKNOWNS (say so; do not guess). Never invent a "
+        "probability, a rank, a percentage or a date the evidence does not "
+        "contain."
     ),
     "timeline": (
         "SHAPE — this is a chronological question. Order the report by date, "
@@ -458,9 +464,23 @@ def infer_query_type(query: str) -> str:
     for name, pattern in _QUERY_TYPE_PATTERNS:
         if pattern.search(text):
             return name
+    # A forward year with no explicit forecast verb is still a forecast
+    # question ("the most demanding jobs in 2027"). Reuses the temporal module's
+    # clock-relative detector, so a historical year never triggers the shape.
+    from app.core.temporal import query_targets_future
+
+    if query_targets_future(text):
+        return "forecast"
     return ""
 
 
+# A bare future year ("in 2027", "2030 outlook") names a forward-looking
+# question even without the verb "will" or the word "forecast". The
+# `_QUERY_TYPE_PATTERNS` forecast entry only catches "by 20NN", so a question
+# like "the most demanding jobs in 2027" was classified as a generic/list
+# question and answered as if the future were observable. `infer_query_type`
+# reuses `app.core.temporal.query_targets_future` (one clock-relative source of
+# truth) so a historical year never triggers the forecast shape.
 def _format_guidance(query: str, intent: Dict[str, Any] | None) -> str:
     """The expected document shape for this question, or "" if unrecognised."""
     intent = intent if isinstance(intent, dict) else {}

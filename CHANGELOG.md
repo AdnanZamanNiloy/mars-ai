@@ -1,5 +1,59 @@
 # Changelog
 
+## v2.4 — Question-Driven Coverage & Research (Phase 10)
+
+Measured finding: MARS could rank evidence by relevance (v2.3 §1), but a broad
+question was still researched and answered through whatever the first retrieval
+returned — required dimensions the search never covered simply vanished from the
+plan, so partial coverage was presented as the whole landscape.
+
+### Question-driven coverage (`core/synthesis_planner.py`)
+
+- `build_synthesis_plan(required_dimensions=...)`: the plan now plans against the
+  QUESTION's required dimensions (the research contracts' own dimension labels),
+  not only the axes the retrieved facts happened to fill.
+- `required_dimensions_from_plan()`: derives that set deterministically from the
+  research contracts, so no new LLM call is spent.
+- `SynthesisPlan.uncovered`: a required dimension with no evidence is now named
+  (and rendered to the writer as "REQUIRED DIMENSIONS WITH NO EVIDENCE") instead
+  of disappearing. Distinct from `under_researched` (thin-but-present).
+- `SynthesisPlan.required_total` / `covered_total` / `coverage_ratio`: an explicit
+  coverage summary. Partial coverage adds a writer caution that the evidence-
+  backed findings are what the research established, not the complete landscape.
+- `PlannedDimension.required`: marks dimensions the question demanded.
+- Themes are now ordered by the centrality of the evidence behind each section,
+  so a peripheral axis with facts (unrelated history/Wikipedia material) cannot
+  become a headline theme merely because it was retrieved.
+
+### Coverage-aware follow-up (`core/investigation_planner.py`)
+
+- The existing `dimension_coverage` channel now also targets `uncovered`
+  required dimensions, ranked ABOVE merely thin ones (`GAP_UNCOVERED_DIMENSION =
+  1.2` vs `GAP_UNDER_RESEARCHED_DIMENSION = 0.9`). Reuses the same candidate kind
+  and the existing per-pass budget; no new detector, no new LLM call, no new
+  channel.
+
+### Forecasting questions (`core/temporal.py`, `agents/synthesizer.py`, `agents/outline.py`)
+
+- `query_targets_future()`: clock-relative detection of a future year in the
+  question, so "the most demanding jobs in 2027" is a forecast even without the
+  verb "will". A historical year never triggers the forecast shape.
+- The forecast writer guidance now requires four strictly separated statement
+  kinds — OFFICIAL PROJECTIONS, CURRENT INDICATORS, CROSS-SOURCE INFERENCE,
+  UNKNOWNS — and forbids inventing a probability, rank, percentage or date the
+  evidence does not contain.
+
+### Coverage-aware AnalystBrief (`agents/analyst.py`)
+
+- The analyst prompt now receives coverage (required vs covered), the uncovered
+  dimensions, the intended interpretation and under-specified readings — not
+  just a ranked fact list — so it reasons over the whole landscape.
+
+### Modes (unchanged by design)
+
+- Deep/executive already raise breadth, source requirements and iterations;
+  quick lowers them. No per-mode answer templates were added.
+
 ## v2.3 — LLM Analytical Synthesis (analyst, not report generator)
 
 Measured finding: the deterministic SynthesisPlan (v2.2) organized the evidence

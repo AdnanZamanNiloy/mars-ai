@@ -412,3 +412,106 @@ def test_dimension_coverage_channel_is_total_on_garbage():
     for state in ({}, {"facts": None}, {"facts": ["garbage"], "sub_questions": None}):
         result = select_investigations(state, budget_cap=4)
         assert isinstance(result.get("selected"), list)
+
+
+def test_uncovered_required_dimension_gets_targeted_followup():
+    """A dimension the question REQUIRES but retrieval never covered must
+    produce a targeted dimension_coverage candidate — the coverage-aware
+    follow-up that fixes broad questions being researched too narrowly."""
+    state = {
+        "query": "What is the current trend of AI?",
+        "facts": [
+            _fact(
+                "AI adoption reached 78 percent in 2025",
+                "https://mckinsey.com/a", has_numbers=True,
+                corroborating_sources=["https://gartner.com/a"],
+                sub_question="adoption rates", axis="adoption rates",
+            ),
+        ],
+        # The plan required regulation coverage; retrieval returned none.
+        "sub_questions": [
+            {"question": "adoption rates", "axis": "adoption rates"},
+            {"question": "what regulation applies to AI", "axis": "regulation"},
+        ],
+        "contradictions": [],
+        "intent": {"query_type": "analytical"},
+    }
+    result = select_investigations(state, budget_cap=8)
+    coverage = [c for c in result["ranked"] if c["kind"] == KIND_DIMENSION_COVERAGE]
+    queries = " ".join(c["query"].lower() for c in coverage)
+    assert "regulation" in queries, coverage
+
+
+def test_uncovered_required_dimension_outranks_thin_dimension():
+    """A fully missing required dimension is a bigger gap than a thin-but-
+    present one, so it ranks higher within the coverage channel."""
+    state = {
+        "query": "What is the current trend of AI?",
+        "facts": [
+            _fact(
+                "AI adoption reached 78 percent in 2025",
+                "https://mckinsey.com/a", has_numbers=True,
+                sub_question="adoption rates", axis="adoption rates",
+            ),
+        ],
+        "sub_questions": [
+            {"question": "adoption rates", "axis": "adoption rates"},
+            {"question": "what regulation applies to AI", "axis": "regulation"},
+        ],
+        "contradictions": [],
+        "intent": {"query_type": "analytical"},
+    }
+    result = select_investigations(state, budget_cap=8)
+    coverage = [c for c in result["ranked"] if c["kind"] == KIND_DIMENSION_COVERAGE]
+    assert coverage
+    # The uncovered "regulation" dimension leads the coverage candidates.
+    assert "regulation" in coverage[0]["query"].lower(), coverage
+
+
+def test_adequately_covered_required_dimension_triggers_no_followup():
+    """Every required dimension has corroborated evidence -> no coverage
+    follow-up is issued (no unnecessary search)."""
+    state = {
+        "query": "What is the current trend of AI?",
+        "facts": [
+            _fact(
+                "AI adoption reached 78 percent in 2025",
+                "https://mckinsey.com/a", has_numbers=True,
+                corroborating_sources=["https://gartner.com/a"],
+                sub_question="adoption rates", axis="adoption rates",
+            ),
+            _fact(
+                "AI adoption grew 20 percent year over year",
+                "https://pwc.com/a", has_numbers=True,
+                corroborating_sources=["https://deloitte.com/a"],
+                sub_question="adoption rates", axis="adoption rates",
+            ),
+            _fact(
+                "AI regulation expanded across 40 jurisdictions in 2025",
+                "https://oecd.org/a", has_numbers=True,
+                corroborating_sources=["https://europa.eu/a"],
+                sub_question="regulation", axis="regulation",
+            ),
+            _fact(
+                "AI regulation added 12 new compliance rules in 2025",
+                "https://nist.gov/a", has_numbers=True,
+                corroborating_sources=["https://iso.org/a"],
+                sub_question="regulation", axis="regulation",
+            ),
+        ],
+        "sub_questions": [
+            {"question": "adoption rates", "axis": "adoption rates"},
+            {"question": "regulation", "axis": "regulation"},
+        ],
+        "contradictions": [],
+        "intent": {"query_type": "analytical"},
+    }
+    result = select_investigations(state, budget_cap=8)
+    coverage = [
+        c for c in result["ranked"]
+        if c["kind"] == KIND_DIMENSION_COVERAGE
+        and any(w in c["query"].lower() for w in ("adoption", "regulation"))
+    ]
+    assert not coverage, coverage
+
+

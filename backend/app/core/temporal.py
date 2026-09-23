@@ -112,6 +112,25 @@ def is_projection_phrasing(claim: str) -> bool:
     return any(cue in text for cue in _PROJECTION_CUES)
 
 
+def query_targets_future(query: str, *, lookahead_years: int = 1) -> bool:
+    """True when the QUERY names a year at or beyond (current year + lookahead).
+
+    This is the forecast-shape signal: "the most demanding jobs in 2027" is a
+    forward-looking question even though it uses neither "will" nor "forecast".
+    Clock-relative so a historical year never triggers the forecast shape.
+    Deterministic and total.
+    """
+    current = _today().year
+    threshold = current + max(0, int(lookahead_years))
+    for raw in _YEAR_RE.findall(str(query or "")):
+        try:
+            if int(raw) >= threshold:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
 def validate_temporal(
     claim: str,
     published_at: str = "",

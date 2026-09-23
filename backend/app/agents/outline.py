@@ -513,6 +513,16 @@ def _blueprint_key(query: str, intent: Dict[str, Any], outline: AnswerOutline) -
             if outline.broad and name == "status":
                 return "broad_research"
             return name
+    # A bare future year ("most demanding jobs in 2027") is a forecast even
+    # without a forecast verb; reuse the temporal module's clock-relative check
+    # so a historical year is never mistaken for one.
+    try:
+        from app.core.temporal import query_targets_future
+
+        if query_targets_future(text):
+            return "forecast"
+    except Exception as exc:  # detection failure must not break the blueprint
+        logger.warning("forecast_shape_detection_failed", error=str(exc), exc_info=exc)
     return "broad_research" if outline.broad else "general"
 
 

@@ -172,3 +172,59 @@ def test_broad_query_central_question_is_the_query_not_first_dimension():
     )
     assert plan.central_question == "What are the current trends in AI as of 2026?"
     assert "How fast is enterprise AI adoption" not in plan.central_question
+
+
+# --- 7. coverage-aware inputs (Phase 10 §4) ----------------------------------
+
+def test_analyst_prompt_receives_coverage_gaps():
+    """The analyst must see the question's required coverage and its gaps, not
+    just a ranked fact list, so it reasons over the whole landscape."""
+    from app.agents.outline import build_outline
+
+    facts = [
+        {"claim": "Enterprise AI adoption reached 78% in 2025.",
+         "source": "https://mckinsey.com/a", "verified": True, "has_numbers": True,
+         "corroborating_sources": ["https://gartner.com/a"],
+         "sub_question": "adoption", "axis": "adoption"},
+    ]
+    required = [
+        {"axis": "adoption", "question": "adoption"},
+        {"axis": "regulation", "question": "what regulation applies to AI"},
+    ]
+    outline = build_outline("Current AI trends?", facts, required)
+    plan = build_synthesis_plan(
+        facts, [], query="Current AI trends?", query_type="analytical",
+        outline=outline, sub_questions=required, required_dimensions=required,
+    )
+    captured: list = []
+
+    class _RecLLM:
+        async def generate_json(self, system_prompt, user_prompt, **kwargs):
+            captured.append(user_prompt)
+            return {"thesis": "Adoption grew while regulation coverage is missing [1]."}
+
+    asyncio.run(analytical_synthesis(
+        _RecLLM(), "Current AI trends?", facts, plan,
+        query_type="analytical",
+        intent={"interpretations": [{"label": "adoption", "description": "how many use it"}]},
+    ))
+    prompt = captured[0]
+    assert "Coverage:" in prompt
+    assert "NO evidence" in prompt
+    assert "INTENDED INTERPRETATION" in prompt
+
+
+def test_analyst_grounded_counter_evidence_survives_invented_one_dropped():
+    """The no-fabrication guard keeps grounded statements and drops the invented
+    number, so unsupported precision never reaches the writer."""
+    llm = _LLM({
+        "thesis": "Costs fell roughly 90% over 18 months [2].",
+        "counter_evidence": [
+            "Adoption reached 12.5% of firms in 2027 [1]",  # 12.5/2027 not in evidence
+            "Some surveys overstate production use [1].",
+        ],
+    })
+    brief = _run(llm)
+    assert any("overstate" in c for c in brief.counter_evidence)
+    assert all("12.5" not in c for c in brief.counter_evidence)
+

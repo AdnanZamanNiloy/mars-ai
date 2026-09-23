@@ -53,7 +53,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from app.core.degradation import record_fallback
 from app.core.llm import LLMClient
@@ -377,6 +377,23 @@ def _format_plan(plan: Any) -> str:
     except Exception:  # a plan that cannot serialize must not break the stage
         return ""
     parts: List[str] = []
+    # Coverage first: what the question required vs what the evidence covers,
+    # so the analyst reasons over the whole landscape rather than only the
+    # retrieved findings (§4/§5). A partial-coverage question must not be
+    # treated as fully answered.
+    required_total = int(data.get("required_total", 0) or 0)
+    covered_total = int(data.get("covered_total", 0) or 0)
+    if required_total:
+        parts.append(
+            f"Coverage: {covered_total}/{required_total} required dimensions "
+            f"have evidence (ratio {data.get('coverage_ratio', 0)})"
+        )
+    if data.get("uncovered"):
+        parts.append(
+            "Required dimensions with NO evidence (name these as gaps, do not "
+            "present the retrieved findings as the whole answer): "
+            + "; ".join(data["uncovered"][:4])
+        )
     if data.get("dominant"):
         parts.append(
             "Dominant findings: "
@@ -438,6 +455,7 @@ async def analytical_synthesis(
     plan: Any = None,
     *,
     query_type: str = "",
+    intent: Optional[Dict[str, Any]] = None,
     enabled: bool = True,
 ) -> AnalyticalBrief:
     """Produce the analytical brief. Deterministic fallback on any failure.
@@ -452,10 +470,39 @@ async def analytical_synthesis(
 
     evidence_block = _format_evidence(pool)
     plan_block = _format_plan(plan)
+    intent = intent if isinstance(intent, dict) else {}
+    # Intended interpretation (§4 priority 2): the resolved intent and any
+    # under-specified readings, so the analyst reasons over the reading the
+    # answer is meant to take rather than a bare topic string.
+    interpretation_lines: List[str] = []
+    senses = [
+        s for s in (intent.get("senses") or [])
+        if isinstance(s, dict) and str(s.get("label", "")).strip()
+    ]
+    if intent.get("ambiguity") and senses:
+        interpretation_lines.append(
+            "Ambiguous term; leading reading: "
+            + str(senses[0].get("label")).strip()
+            + (f" (also: {', '.join(str(s.get('label')).strip() for s in senses[1:3])})" if len(senses) > 1 else "")
+        )
+    readings = [
+        i for i in (intent.get("interpretations") or [])
+        if isinstance(i, dict) and str(i.get("label", "")).strip()
+    ]
+    if readings:
+        interpretation_lines.append(
+            "Useful readings (answer the material ones): "
+            + "; ".join(str(i.get("label")).strip() for i in readings[:3])
+        )
+    interpretation_block = (
+        "INTENDED INTERPRETATION:\n" + "\n".join(f"- {l}" for l in interpretation_lines) + "\n\n"
+        if interpretation_lines else ""
+    )
     user_prompt = (
         f"Question: {query}\n\n"
         + (f"Query type: {query_type}\n\n" if query_type else "")
-        + (f"DETERMINISTIC PLAN (measured, ranked):\n{plan_block}\n\n" if plan_block else "")
+        + interpretation_block
+        + (f"DETERMINISTIC PLAN (measured, ranked — includes coverage gaps):\n{plan_block}\n\n" if plan_block else "")
         + "VERIFIED EVIDENCE (cite these numbers only):\n"
         + evidence_block
         + "\n\nProduce the analytical brief. Return JSON only."

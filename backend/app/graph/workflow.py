@@ -2038,7 +2038,10 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         # (outline, reasoning map, graded facts), deterministic and failure-safe.
         try:
             from app.agents.outline import build_blueprint
-            from app.core.synthesis_planner import build_synthesis_plan
+            from app.core.synthesis_planner import (
+                build_synthesis_plan,
+                required_dimensions_from_plan,
+            )
 
             plan_blueprint = build_blueprint(
                 state["query"],
@@ -2058,6 +2061,12 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
                 reasoning=base_context.get("reasoning"),
                 strategy=plan_blueprint.strategy,
                 sub_questions=state.get("sub_questions") or [],
+                # Question-driven coverage: the plan's own dimensions are the
+                # required set, so a required dimension retrieval never covered
+                # is reported uncovered rather than silently dropped.
+                required_dimensions=required_dimensions_from_plan(
+                    state.get("sub_questions") or []
+                ),
             )
         except Exception as exc:
             logger.warning("synthesis_plan_build_failed", error=str(exc), exc_info=exc)
@@ -2078,6 +2087,7 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
                 usable,
                 base_context.get("synthesis_plan"),
                 query_type=str(intent.get("query_type", "") or ""),
+                intent=intent,
                 enabled=bool(getattr(llm.settings, "synthesis_analyst_enabled", True)),
             )
         except Exception as exc:

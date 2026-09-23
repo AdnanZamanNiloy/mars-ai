@@ -93,6 +93,9 @@ GAP_NEEDS_CORROBORATION = 1.0
 GAP_PRIMARY_THIN = 0.8
 GAP_UNRESOLVED_CONTRADICTION = 0.5
 GAP_UNDER_RESEARCHED_DIMENSION = 0.9
+# A dimension the question REQUIRES but retrieval never covered at all is a
+# larger gap than a thin-but-present one, so it outranks it within this channel.
+GAP_UNCOVERED_DIMENSION = 1.2
 
 # Expected-gain (novelty) multipliers.
 EXPECTED_GAIN_OPEN = 1.0
@@ -437,8 +440,13 @@ def _dimension_coverage_candidates(
     on the synthesis-level judgement "this dimension matters a lot to the answer
     but the evidence behind it is shallow". The synthesis planner
     (`app.core.synthesis_planner`) makes that judgement explicit; this channel
-    turns each under-researched dimension it names into a focused search using
-    the dimension's own question text.
+    turns each under-researched OR uncovered dimension it names into a focused
+    search using the dimension's own question text.
+
+    An UNCOVERED dimension (required by the question's plan, no evidence at all)
+    outranks a merely thin one: a required angle the answer cannot address at
+    all is the largest possible coverage gap, so it gets a larger gap weight and
+    impact while still sharing this one channel and this one candidate kind.
 
     Reuses `build_synthesis_plan` and the planner's own sub-question text — no
     new evidence logic, no new LLM call.
@@ -448,7 +456,10 @@ def _dimension_coverage_candidates(
         return []
     sub_questions = state.get("sub_questions", []) or []
     try:
-        from app.core.synthesis_planner import build_synthesis_plan
+        from app.core.synthesis_planner import (
+            build_synthesis_plan,
+            required_dimensions_from_plan,
+        )
         from app.agents.outline import build_outline
 
         outline = build_outline(
@@ -457,6 +468,7 @@ def _dimension_coverage_candidates(
             sub_questions,
             intent=state.get("intent") or {},
         )
+        required = required_dimensions_from_plan(sub_questions)
         plan = build_synthesis_plan(
             facts,
             state.get("contradictions") or [],
@@ -464,13 +476,15 @@ def _dimension_coverage_candidates(
             query_type=str((state.get("intent") or {}).get("query_type", "") or ""),
             outline=outline,
             sub_questions=sub_questions,
+            required_dimensions=required,
         )
     except Exception as exc:
         logger.warning("investigation_planner_dimension_failed", error=str(exc), exc_info=exc)
         return []
 
-    # Under-researched notes carry the dimension title/question; match back to
-    # the planned sub-question so the query is the dimension's own question.
+    # Under-researched/uncovered notes carry the dimension title/question; match
+    # back to the planned sub-question so the query is the dimension's own
+    # question.
     by_label: Dict[str, Dict[str, Any]] = {}
     for item in sub_questions:
         if not isinstance(item, dict):
@@ -486,32 +500,50 @@ def _dimension_coverage_candidates(
     attempt = max(0, _as_int(state.get("iteration", 0)))
     out: List[Dict[str, Any]] = []
     seen: Set[str] = set()
-    for note in plan.under_researched:
-        # The note is formatted as "'<label>' is thin ..." / "'<label>' has no ...".
-        label = note.split("'", 2)[1] if note.count("'") >= 2 else ""
+
+    def _emit(label: str, *, uncovered: bool) -> None:
         item = by_label.get(_normalize(label))
         question = str(item.get("question", "") or "") if isinstance(item, dict) else ""
         if not question:
             question = label or str(state.get("query", "") or "")
         question = question.strip()
         if not question:
-            continue
+            return
         query = question if attempt == 0 else f"{question} (attempt {attempt + 1})"
         if _normalize(query) in seen:
-            continue
+            return
         seen.add(_normalize(query))
         out.append(
             _make_candidate(
                 kind=KIND_DIMENSION_COVERAGE,
                 target=label or question,
                 query=query,
-                impact=0.7,
+                impact=0.85 if uncovered else 0.7,
                 uncertainty=UNCERTAINTY_THIN_DIMENSION,
-                gap=GAP_UNDER_RESEARCHED_DIMENSION,
+                gap=(
+                    GAP_UNCOVERED_DIMENSION if uncovered
+                    else GAP_UNDER_RESEARCHED_DIMENSION
+                ),
                 gain=EXPECTED_GAIN_OPEN,
-                reason="the answer depends on this dimension but its evidence is thin",
+                reason=(
+                    "a dimension the question requires has no evidence at all"
+                    if uncovered
+                    else "the answer depends on this dimension but its evidence is thin"
+                ),
             )
         )
+
+    # Uncovered required dimensions first: the largest coverage gaps.
+    for note in plan.uncovered:
+        label = note.split("'", 2)[1] if note.count("'") >= 2 else ""
+        _emit(label, uncovered=True)
+        if len(out) >= max(1, limit):
+            return out
+
+    for note in plan.under_researched:
+        # The note is formatted as "'<label>' is thin ..." / "'<label>' has no ...".
+        label = note.split("'", 2)[1] if note.count("'") >= 2 else ""
+        _emit(label, uncovered=False)
         if len(out) >= max(1, limit):
             break
     return out

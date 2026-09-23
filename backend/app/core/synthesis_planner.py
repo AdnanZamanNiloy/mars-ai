@@ -60,6 +60,9 @@ MAX_INCIDENTAL = 6
 # Dimensions the plan will name as under-researched before it stops being a
 # priority signal and becomes noise.
 MAX_UNDER_RESEARCHED = 4
+# Required dimensions with no evidence at all that the plan will name before it
+# becomes a list of everything the research failed to find.
+MAX_UNCOVERED = 4
 
 # A dimension is "under-researched relative to its importance" when its highest
 # finding centrality is at or above this bar but it carries fewer than
@@ -129,6 +132,40 @@ def _dimension_terms(outline: Any, sub_questions: Optional[Sequence[Any]]) -> se
     return terms
 
 
+def required_dimensions_from_plan(
+    sub_questions: Optional[Sequence[Any]],
+) -> List[Dict[str, str]]:
+    """The question's required dimensions, taken from the research contracts.
+
+    The planner's dimension directive names the dimensions THIS query needs and
+    `enforce_axis_coverage` turns each into a contract carrying that label as
+    its `axis`. Those contracts are the authoritative, question-driven coverage
+    set — retrieving them here means the synthesis layer plans against what the
+    QUESTION requires, not merely against the axes the retrieved facts happened
+    to fill (the failure §1 exists to fix).
+
+    Returns a deterministic, de-duplicated list of ``{"axis", "question"}``
+    dicts in plan order. Total: a missing/garbage plan yields ``[]``.
+    """
+    out: List[Dict[str, str]] = []
+    seen: set = set()
+    for item in sub_questions or []:
+        if not isinstance(item, dict):
+            continue
+        axis = str(item.get("axis", "") or "").strip()
+        if not axis or axis.lower() in ("general", "answer"):
+            continue
+        key = _norm(axis)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            "axis": axis,
+            "question": str(item.get("question", "") or "").strip(),
+        })
+    return out
+
+
 
 # Grade weights reused for ordering (A best). Kept local and identical to the
 # scales in reasoning_engine / evidence_grade so nothing disagrees.
@@ -175,6 +212,11 @@ class PlannedDimension:
     sources: int = 0
     has_evidence: bool = False
     under_researched: bool = False
+    # The dimension was required by the research plan (the planner's
+    # query-specific dimension directive), not merely inferred from the facts
+    # that happened to be retrieved. A required dimension with no evidence is
+    # a coverage gap the answer must acknowledge — the whole point of §1.
+    required: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -186,6 +228,7 @@ class PlannedDimension:
             "sources": self.sources,
             "has_evidence": self.has_evidence,
             "under_researched": self.under_researched,
+            "required": self.required,
         }
 
 
@@ -218,6 +261,11 @@ class SynthesisPlan:
     incidental: List[Finding] = field(default_factory=list)
     dimensions: List[PlannedDimension] = field(default_factory=list)
     under_researched: List[str] = field(default_factory=list)
+    # Required dimensions (from the question's dimension plan) that retrieval
+    # left with no evidence at all. Distinct from `under_researched` (thin but
+    # present): these are the question's own demands the answer did NOT cover,
+    # and the writer must say so rather than answer only the covered angles.
+    uncovered: List[str] = field(default_factory=list)
     conflicts: List[Dict[str, Any]] = field(default_factory=list)
     synthesized_conclusions: List[str] = field(default_factory=list)
     established: List[str] = field(default_factory=list)
@@ -225,12 +273,25 @@ class SynthesisPlan:
     unknown: List[str] = field(default_factory=list)
     priority_note: str = ""
     omit_note: str = ""
+    # Question-driven coverage summary: how many of the question's required
+    # dimensions the evidence actually covers. A broad question with low
+    # coverage must not be answered as if the retrieved few were the landscape.
+    required_total: int = 0
+    covered_total: int = 0
+
+    @property
+    def coverage_ratio(self) -> float:
+        """Fraction of the question's required dimensions that have evidence."""
+        if not self.required_total:
+            return 1.0
+        return round(self.covered_total / self.required_total, 3)
 
     @property
     def is_empty(self) -> bool:
         return not (
             self.dominant or self.dimensions or self.conflicts
             or self.synthesized_conclusions or self.under_researched
+            or self.uncovered
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -244,6 +305,7 @@ class SynthesisPlan:
             "incidental": [f.to_dict() for f in self.incidental],
             "dimensions": [d.to_dict() for d in self.dimensions],
             "under_researched": list(self.under_researched),
+            "uncovered": list(self.uncovered),
             "conflicts": [dict(c) for c in self.conflicts],
             "synthesized_conclusions": list(self.synthesized_conclusions),
             "established": list(self.established),
@@ -251,6 +313,9 @@ class SynthesisPlan:
             "unknown": list(self.unknown),
             "priority_note": self.priority_note,
             "omit_note": self.omit_note,
+            "required_total": self.required_total,
+            "covered_total": self.covered_total,
+            "coverage_ratio": self.coverage_ratio,
         }
 
     def render_for_writer(self) -> str:
@@ -321,6 +386,16 @@ class SynthesisPlan:
                 "limitation rather than overstating):"
             )
             lines.extend(f"- {d}" for d in self.under_researched)
+
+        if self.uncovered:
+            lines.append("")
+            lines.append(
+                "REQUIRED DIMENSIONS WITH NO EVIDENCE (the question needs these, "
+                "but research found nothing usable — say so explicitly; do NOT "
+                "answer only the covered angles as if the question were fully "
+                "answered):"
+            )
+            lines.extend(f"- {d}" for d in self.uncovered)
 
         if self.established or self.inferred or self.unknown:
             lines.append("")
@@ -490,16 +565,36 @@ def _split_by_centrality(
 def _plan_dimensions(
     outline: Any,
     findings: Sequence[Finding],
-) -> Tuple[List[PlannedDimension], List[str]]:
-    """Build the dimension plan and name the under-researched dimensions.
+    required_dimensions: Optional[Sequence[Dict[str, str]]] = None,
+) -> Tuple[List[PlannedDimension], List[str], List[str]]:
+    """Build the dimension plan, name thin dimensions, and name uncovered ones.
 
-    A dimension is under-researched when its most central finding is important
-    (centrality >= `DIMENSION_IMPORTANT_CENTRALITY`) but it carries fewer than
-    `THIN_DIMENSION_MIN_FACTS` verified facts — i.e. the answer depends on it but
-    the evidence is thin. An entirely empty planned dimension is always named.
+    Two distinct gaps are reported, because the answer must treat them
+    differently:
+
+      * UNDER-RESEARCHED — the dimension has some evidence but thin relative to
+        its importance; acknowledge the limitation.
+      * UNCOVERED — the dimension was REQUIRED by the question's plan but
+        retrieval produced no supporting evidence at all; the answer must say
+        the question's own demand went unanswered rather than silently answer
+        only the angles that were retrieved.
+
+    `required_dimensions` (from the research plan's contracts) is the
+    question-driven coverage set. When it is provided, every required dimension
+    becomes a `PlannedDimension` even if the outline dropped it for lack of
+    facts — that is the fix for "first-retrieved facts define the dimensions".
     """
-    if outline is None or not getattr(outline, "sections", None):
-        return [], []
+    # Index required dimensions by normalized axis and by normalized label so a
+    # marked-up outline section can be matched back to its requirement.
+    required_by_axis: Dict[str, Dict[str, str]] = {}
+    for req in required_dimensions or []:
+        if not isinstance(req, dict):
+            continue
+        axis = str(req.get("axis", "") or "").strip()
+        if not axis:
+            continue
+        required_by_axis[_norm(axis)] = req
+
     # Map each finding to its section by the fact's own axis/sub_question so a
     # dimension's centrality is the best finding that belongs to it.
     centrality_by_sub: Dict[str, int] = {}
@@ -511,14 +606,16 @@ def _plan_dimensions(
                 centrality_by_sub.get(key, 0), finding.centrality
             )
         for axis in finding.axes:
-            key = axis.lower()
+            key = _norm(axis)
             centrality_by_axis[key] = max(
                 centrality_by_axis.get(key, 0), finding.centrality
             )
 
     under: List[str] = []
     planned: List[PlannedDimension] = []
-    for section in outline.sections:
+    matched_required: set = set()
+
+    for section in getattr(outline, "sections", None) or []:
         axis = str(getattr(section, "axis", "") or "")
         title = str(getattr(section, "title", "") or "")
         question = str(getattr(section, "question", "") or "")
@@ -527,7 +624,7 @@ def _plan_dimensions(
         ]
         fact_count = len(section_facts)
 
-        top_centrality = centrality_by_axis.get(axis.lower(), 0)
+        top_centrality = centrality_by_axis.get(_norm(axis), 0)
         sources: set = set()
         for fact in section_facts:
             sub = _norm(fact.get("sub_question", ""))
@@ -538,6 +635,30 @@ def _plan_dimensions(
             url = str(fact.get("source", "") or "").strip()
             if url:
                 sources.add(url)
+
+        # A section is "required" when its axis (or question text) matches a
+        # planned dimension. Only sections with evidence ever reach the outline,
+        # so a match here is always covered.
+        req = required_by_axis.get(_norm(axis))
+        is_required = req is not None
+        if req is not None:
+            matched_required.add(_norm(axis))
+        else:
+            # Fallback for when the outline re-derived the section axis from the
+            # facts instead of the contract: match on question text, but only
+            # when the question is substantial enough that a substring overlap
+            # is meaningful (a 1-2 word "question" would match almost anything).
+            section_q = _norm(question)
+            for key, candidate in required_by_axis.items():
+                if key in matched_required:
+                    continue
+                q = _norm(candidate.get("question", ""))
+                if len(q.split()) < 3 or not section_q:
+                    continue
+                if q == section_q or q in section_q or section_q in q:
+                    is_required = True
+                    matched_required.add(key)
+                    break
 
         empty = fact_count == 0
         thin = (
@@ -565,9 +686,37 @@ def _plan_dimensions(
                 sources=len(sources),
                 has_evidence=not empty,
                 under_researched=empty or thin,
+                required=is_required,
             )
         )
-    return planned, under[:MAX_UNDER_RESEARCHED]
+
+    # Required dimensions the outline never covered at all: emit them as
+    # evidence-less planned dimensions and name them as uncovered. Without this,
+    # a required dimension with zero retrieved evidence vanished from the plan —
+    # the answer then answered only whatever the first search happened to find.
+    uncovered: List[str] = []
+    for key, req in required_by_axis.items():
+        if key in matched_required:
+            continue
+        axis = str(req.get("axis", "") or "").strip()
+        question = str(req.get("question", "") or "").strip()
+        label = question or axis or "an unnamed dimension"
+        uncovered.append(f"'{label}' was required by the question but no evidence was found")
+        planned.append(
+            PlannedDimension(
+                axis=axis,
+                title=axis,
+                question=question,
+                fact_count=0,
+                top_centrality=0,
+                sources=0,
+                has_evidence=False,
+                under_researched=True,
+                required=True,
+            )
+        )
+
+    return planned, under[:MAX_UNDER_RESEARCHED], uncovered[:MAX_UNCOVERED]
 
 
 def _cross_source_conclusions(reasoning: Any) -> List[str]:
@@ -602,6 +751,7 @@ def build_synthesis_plan(
     strategy: str = "",
     summary_claims: Optional[Sequence[Any]] = None,
     sub_questions: Optional[Sequence[Any]] = None,
+    required_dimensions: Optional[Sequence[Dict[str, str]]] = None,
 ) -> SynthesisPlan:
     """Build the evidence synthesis plan. Deterministic and total.
 
@@ -609,6 +759,13 @@ def build_synthesis_plan(
     (dimensions/structure), `reasoning` a `ReasoningMap` (conclusions, conflicts,
     epistemic status). Both are optional: when absent the plan degrades to what
     grading alone can rank, never raising.
+
+    `required_dimensions` is the question-driven coverage set — the dimensions
+    the research plan derived for THIS question (see
+    `required_dimensions_from_plan`). When supplied, a required dimension that
+    retrieval never covered is reported in `plan.uncovered` instead of vanishing,
+    so a broad question is not silently narrowed to whatever the first search
+    returned.
     """
     plan = SynthesisPlan(
         query=str(query or ""),
@@ -624,6 +781,14 @@ def build_synthesis_plan(
         summaries = {
             _norm(s) for s in (summary_claims or []) if str(s or "").strip()
         }
+
+        # Question-driven coverage: when the caller supplies the plan's required
+        # dimensions use them; otherwise derive them from the research contracts
+        # (sub_questions), which carry the directive's dimension labels. Never
+        # derive coverage from the evidence alone — that is the collapse §1 fixes.
+        required = [
+            r for r in (required_dimensions or []) if isinstance(r, dict)
+        ] or required_dimensions_from_plan(sub_questions)
 
         graded: List[Dict[str, Any]] = []
         if pool:
@@ -654,7 +819,9 @@ def build_synthesis_plan(
         ranked = _rank_findings(graded, summaries, q_terms, d_terms)
         plan.dominant, plan.incidental = _split_by_centrality(ranked)
 
-        plan.dimensions, plan.under_researched = _plan_dimensions(outline, ranked)
+        plan.dimensions, plan.under_researched, plan.uncovered = _plan_dimensions(
+            outline, ranked, required
+        )
 
         # Conflicts: from the reasoning structure (competing explanations).
         competing = getattr(reasoning, "competing", None) or []
@@ -676,15 +843,33 @@ def build_synthesis_plan(
 
         plan.synthesized_conclusions = _cross_source_conclusions(reasoning)
 
-        # Structure: the caller's blueprint strategy + the outline's themes.
+        # Structure: the caller's blueprint strategy + the evidence-backed
+        # themes. Themes are ordered by the centrality of the evidence behind
+        # each dimension, NOT by outline order: a peripheral axis (an unrelated
+        # historical or Wikipedia-backed section) that merely has facts must not
+        # become a headline theme. Only dimensions with at least one
+        # question/dimension-relevant finding qualify; if every section is
+        # peripheral the themes fall back to the outline order unchanged.
         plan.strategy = str(strategy or "")
         if outline is not None:
-            plan.themes = [
-                str(getattr(s, "title", "") or "")
-                for s in (getattr(outline, "sections", None) or [])
-                if str(getattr(s, "title", "") or "").strip()
-                and str(getattr(s, "title", "")) != "Answer"
-            ][:5]
+            theme_rows: List[Tuple[int, int, str]] = []
+            for order, section in enumerate(getattr(outline, "sections", None) or []):
+                title = str(getattr(section, "title", "") or "").strip()
+                if not title or title == "Answer":
+                    continue
+                axis = _norm(str(getattr(section, "axis", "") or ""))
+                question = _norm(str(getattr(section, "question", "") or ""))
+                best = 0
+                for dim in plan.dimensions:
+                    if _norm(dim.axis) == axis or (
+                        question and _norm(dim.question) == question
+                    ):
+                        best = max(best, dim.top_centrality)
+                theme_rows.append((-best, order, title))
+            # When no dimension carries relevant evidence every `best` is 0 and
+            # the stable sort preserves outline order exactly as before.
+            theme_rows.sort()
+            plan.themes = [title for _, _, title in theme_rows][:5]
 
         # The question being answered is the USER'S QUERY, not the first
         # planned dimension. Using the first sub-question narrowed a broad
@@ -714,6 +899,25 @@ def build_synthesis_plan(
             plan.omit_note = (
                 "The incidental findings are available if they support a dominant "
                 "point; do not enumerate them for completeness."
+            )
+
+        # Coverage summary + broad-question caution. When the question's plan
+        # required more dimensions than the evidence covers, the answer must not
+        # present the retrieved few as the whole landscape — the exact failure
+        # §5 exists to prevent ("three conveniently retrieved facts become the
+        # three trends"). The caution fires only on a genuine shortfall.
+        required_dims = [d for d in plan.dimensions if d.required]
+        if required_dims:
+            plan.required_total = len(required_dims)
+            plan.covered_total = sum(1 for d in required_dims if d.has_evidence)
+        if plan.required_total >= 3 and plan.uncovered:
+            plan.priority_note = (
+                (plan.priority_note + " " if plan.priority_note else "")
+                + f"Coverage is partial: {plan.covered_total} of "
+                f"{plan.required_total} required dimensions have evidence. Present "
+                "the evidence-backed findings as what the research established, "
+                "not as the complete landscape; name the uncovered dimensions as "
+                "gaps rather than letting the retrieved findings define the scope."
             )
     except Exception as exc:  # total/fail-safe: return the partial plan
         logger.warning("synthesis_plan_failed", error=str(exc), exc_info=exc)

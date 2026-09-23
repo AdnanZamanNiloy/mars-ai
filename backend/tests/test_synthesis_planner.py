@@ -334,3 +334,175 @@ def test_existing_ranking_behavior_intact_without_query_context():
     plan = build_synthesis_plan(facts, [], query="", query_type="")
     # The quantitative corroborated finding still leads on absolute merit.
     assert plan.dominant and "Alpha" in plan.dominant[0].claim
+
+
+# --- Phase 10: question-driven coverage / uncovered dimensions ----------------
+
+def test_required_dimension_with_no_evidence_is_uncovered_not_omitted():
+    """A dimension the question REQUIRES but retrieval never covered must be
+    reported (uncovered), not silently dropped — otherwise a broad question
+    collapses to whatever the first search returned."""
+    facts = [
+        {"claim": "AI adoption reached 78 percent among enterprises in 2025.",
+         "source": "https://mckinsey.com/a", "verified": True, "has_numbers": True,
+         "corroborating_sources": ["https://gartner.com/a"],
+         "sub_question": "adoption rates", "axis": "adoption rates"},
+    ]
+    required = [
+        {"axis": "adoption rates", "question": "adoption rates"},
+        {"axis": "cost trends", "question": "how are AI costs trending"},
+        {"axis": "regulation", "question": "what regulation affects AI"},
+    ]
+    outline = build_outline("What is the current trend of AI?", facts, required)
+    plan = build_synthesis_plan(
+        facts, [], query="What is the current trend of AI?",
+        query_type="analytical", outline=outline,
+        sub_questions=required,
+        required_dimensions=required,
+    )
+    uncovered = " ".join(plan.uncovered).lower()
+    assert "costs trending" in uncovered
+    assert "regulation" in uncovered
+    # The covered dimension is not reported as uncovered.
+    assert "adoption rates" not in uncovered
+    # Uncovered dimensions still appear in the dimension plan, marked required.
+    uncovered_dims = [d for d in plan.dimensions if not d.has_evidence]
+    assert any(d.axis == "regulation" and d.required for d in uncovered_dims)
+
+
+def test_required_dimensions_derived_from_sub_questions_when_not_passed():
+    """The required set is the research plan's own dimension labels, so the
+    synthesis layer plans against the QUESTION even without an explicit arg."""
+    facts = [
+        {"claim": "Inference costs fell 90 percent over 18 months.",
+         "source": "https://a16z.com/b", "verified": True, "has_numbers": True,
+         "sub_question": "inference costs", "axis": "inference costs"},
+    ]
+    subs = [
+        {"axis": "inference costs", "question": "inference costs"},
+        {"axis": "hardware supply", "question": "what is the hardware supply constraint"},
+    ]
+    outline = build_outline("Why are AI inference costs falling?", facts, subs)
+    plan = build_synthesis_plan(
+        facts, [], query="Why are AI inference costs falling?",
+        query_type="analytical", outline=outline, sub_questions=subs,
+    )
+    assert any("hardware supply" in u.lower() for u in plan.uncovered)
+    assert any(d.required and not d.has_evidence for d in plan.dimensions)
+
+
+def test_uncovered_renders_in_writer_brief():
+    facts = [
+        {"claim": "AI adoption reached 78 percent in 2025.",
+         "source": "https://mckinsey.com/a", "verified": True, "has_numbers": True,
+         "sub_question": "adoption", "axis": "adoption"},
+    ]
+    required = [
+        {"axis": "adoption", "question": "adoption"},
+        {"axis": "regulation", "question": "what regulation applies"},
+    ]
+    outline = build_outline("Current AI trends?", facts, required)
+    plan = build_synthesis_plan(
+        facts, [], query="Current AI trends?", query_type="analytical",
+        outline=outline, sub_questions=required, required_dimensions=required,
+    )
+    rendered = plan.render_for_writer()
+    assert "REQUIRED DIMENSIONS WITH NO EVIDENCE" in rendered
+
+
+def test_broad_question_does_not_let_three_facts_define_scope():
+    """Three conveniently retrieved facts must not become the whole answer when
+    the question required more dimensions."""
+    facts = [
+        {"claim": "AI adoption reached 78 percent in 2025.",
+         "source": "https://mckinsey.com/a", "verified": True, "has_numbers": True,
+         "corroborating_sources": ["https://gartner.com/a"],
+         "sub_question": "adoption", "axis": "adoption"},
+        {"claim": "AI funding hit 100 billion dollars in 2025.",
+         "source": "https://cbinsights.com/a", "verified": True, "has_numbers": True,
+         "corroborating_sources": ["https://pitchbook.com/a"],
+         "sub_question": "funding", "axis": "funding"},
+        {"claim": "AI model costs fell 90 percent over 18 months.",
+         "source": "https://a16z.com/b", "verified": True, "has_numbers": True,
+         "corroborating_sources": ["https://epochai.org/b"],
+         "sub_question": "costs", "axis": "costs"},
+    ]
+    required = [
+        {"axis": "adoption", "question": "adoption"},
+        {"axis": "funding", "question": "funding"},
+        {"axis": "costs", "question": "costs"},
+        {"axis": "regulation", "question": "what regulation applies"},
+        {"axis": "safety", "question": "what are the safety concerns"},
+    ]
+    outline = build_outline("What is the current trend of AI?", facts, required)
+    plan = build_synthesis_plan(
+        facts, [], query="What is the current trend of AI?",
+        query_type="analytical", outline=outline,
+        sub_questions=required, required_dimensions=required,
+    )
+    # The three covered dimensions are dominant/incidental; the two required
+    # but unevidenced ones are surfaced as coverage gaps, not ignored.
+    assert len(plan.uncovered) >= 2
+    assert any("regulation" in u.lower() for u in plan.uncovered)
+    assert any("safety" in u.lower() for u in plan.uncovered)
+
+
+# --- Phase 10: contamination control / selection vs quality -------------------
+
+def test_peripheral_dimension_does_not_become_a_headline_theme():
+    """A high-quality but irrelevant section (an unrelated historical axis)
+    must not be promoted to a headline theme just because it has facts."""
+    facts = [
+        {"claim": "AI adoption reached 78 percent of enterprises in 2025.",
+         "source": "https://mckinsey.com/a", "verified": True, "has_numbers": True,
+         "corroborating_sources": ["https://gartner.com/a"],
+         "sub_question": "adoption", "axis": "adoption"},
+        {"claim": "An unrelated nineteenth-century canal tonnage statistic.",
+         "source": "https://history.example/x", "verified": True, "has_numbers": True,
+         "sub_question": "historical background", "axis": "history"},
+    ]
+    required = [
+        {"axis": "adoption", "question": "adoption"},
+        {"axis": "history", "question": "historical background"},
+    ]
+    outline = build_outline("What is the current trend of AI adoption?", facts, required)
+    plan = build_synthesis_plan(
+        facts, [], query="What is the current trend of AI adoption?",
+        query_type="analytical", outline=outline,
+        sub_questions=required, required_dimensions=required,
+    )
+    assert plan.themes, "expected at least one theme"
+    # The adoption dimension leads the themes; the peripheral history section
+    # is not promoted above it.
+    assert "adoption" in plan.themes[0].lower()
+
+
+def test_high_quality_but_irrelevant_evidence_is_kept_but_not_dominant():
+    """Selection vs quality: a well-formed, corroborated, quantitative fact that
+    is unrelated to the question stays available (not deleted) but never leads."""
+    facts = [
+        {"claim": "AI inference costs fell 90 percent over 18 months.",
+         "source": "https://a16z.com/b", "verified": True, "has_numbers": True,
+         "corroborating_sources": ["https://epochai.org/b"],
+         "sub_question": "inference costs", "axis": "inference costs"},
+        {"claim": "Medieval wool exports reached 40 thousand bales.",
+         "source": "https://history.example/w", "verified": True, "has_numbers": True,
+         "corroborating_sources": ["https://archive.example/w"],
+         "sub_question": "history", "axis": "history"},
+    ]
+    required = [
+        {"axis": "inference costs", "question": "inference costs"},
+    ]
+    plan = build_synthesis_plan(
+        facts, [], query="Why are AI inference costs falling?",
+        query_type="analytical", sub_questions=required,
+        required_dimensions=required,
+    )
+    dominant = " ".join(f.claim.lower() for f in plan.dominant)
+    incidental = " ".join(f.claim.lower() for f in plan.incidental)
+    assert "inference costs" in dominant
+    assert "wool" not in dominant
+    # Not deleted: it remains available among the incidental findings.
+    assert "wool" in incidental
+
+
