@@ -1645,6 +1645,7 @@ def _finalize(
     """
     answer = _sanitize_answer_text(answer, query)
     answer = _scrub_pipeline_telemetry(answer)
+    answer = _reduce_redundant_audit_language(answer)
     answer = _ensure_disambiguation(answer, ctx)
 
     # Only the audit profile is a fixed-format artifact. For every other
@@ -3358,19 +3359,40 @@ def _deterministic_report(
     # Lead with the answer. The extractive path states what the evidence shows
     # in prose; process provenance and counts are NOT put in the answer (they
     # live in the audit layer). Uncertainty is expressed naturally.
-    thin_note = (
-        "The evidence here is thin — treat the following as provisional. "
-        if gap_stats["verified"] < 3
-        else ""
-    )
     headline_text = _with_citation(headline).strip() if headline is not None else ""
     opening_parts: List[str] = []
     if headline_text:
+        # Synthesized lead: the best-supported finding stated as the answer,
+        # followed by the other leading findings, rather than a self-referential
+        # line about "the summary below". When the pool is thin this is labelled
+        # provisional, but it is still an answer, not a process note. Claims
+        # previewed here are marked used so no section repeats them.
         opening_parts.append(headline_text)
-    opening_parts.append(
-        f"{thin_note}The summary below reflects the verified sources retrieved "
-        f"for \u201c{_normalize_query_concept(query)}\u201d."
-    )
+        follow: List[str] = []
+        for item in diverse:
+            if item is headline or item in used:
+                continue
+            if not str(item.get("claim", "")).strip():
+                continue
+            rendered = _with_citation(item).strip()
+            if not rendered:
+                continue
+            _take(item)
+            follow.append(rendered)
+            if len(follow) >= 2:
+                break
+        if follow:
+            opening_parts.append(" ".join(follow).rstrip())
+        if gap_stats["verified"] < 3:
+            opening_parts.append(
+                "The evidence here is thin, so treat this as provisional — "
+                "the best-supported reading, not a settled conclusion."
+            )
+    else:
+        opening_parts.append(
+            f"No reliable evidence was retrieved for "
+            f"\u201c{_normalize_query_concept(query)}\u201d."
+        )
     sections.insert(0, "\n\n".join(opening_parts))
 
     # A short natural uncertainty/caveat close, without pipeline mechanics.
@@ -3965,6 +3987,70 @@ _PIPELINE_TELEMETRY_RE = re.compile(
     r"\bsingle-source after \d+\b"
     r")"
 )
+
+
+# Sentence-level audit-language openings that convey the same idea ("the
+# evidence does not establish X"). When an answer repeats this idea, only the
+# first uncited instance is kept; later uncited repeats are dropped. A sentence
+# carrying a [n] citation is a substantive qualification, never removed.
+_REDUNDANT_AUDIT_RE = re.compile(
+    r"(?i)\b("
+    r"the (?:available )?evidence (?:does not|doesn't|cannot|can't|is unable to)\b|"
+    r"what the evidence (?:does not|doesn't|lacks|omits)\b|"
+    r"(?:could not|cannot|can't) be (?:verified|determined|established|confirmed)\b|"
+    r"the (?:research|evidence) pool (?:does not|doesn't|lacks|contains no)\b|"
+    r"this cannot be determined\b|"
+    r"there is (?:insufficient|not enough) evidence\b|"
+    r"not enough (?:evidence|information) (?:to|is)\b|"
+    r"remains? (?:unclear|unknown|uncertain)\b|"
+    r"it is (?:unclear|unknown|impossible to (?:say|determine))\b"
+    r")"
+)
+
+# One is the correct proportionality: the answer states the limitation once.
+MAX_AUDIT_LANGUAGE_SENTENCES = 1
+
+
+def _reduce_redundant_audit_language(text: str) -> str:
+    """Collapse repeated audit-language formulations to a single statement.
+
+    Phase 11.1 §2: an answer must LEAD with the best-supported conclusion, not
+    repeat "the evidence does not establish…" in several places. Proportionate:
+    the first uncited audit-language sentence is retained (the limitation is
+    still stated) and later UNCITED repeats are dropped. A cited limitation is
+    substantive evidence handling and is always kept, so grounding and citation
+    enforcement are untouched. Deterministic; never adds or changes a fact.
+
+    Runs after `_scrub_pipeline_telemetry`, which removes whole pipeline-
+    telemetry sentences; this targets the softer repeated limitation phrasing.
+    """
+    if not text or not _REDUNDANT_AUDIT_RE.search(text):
+        return text
+    kept = 0
+    out_paragraphs: List[str] = []
+    for para in text.split("\n\n"):
+        stripped = para.strip()
+        # Headings, bullets and tables are structural; leave them untouched.
+        if not stripped or stripped.startswith(("#", "-", "*", "|")):
+            out_paragraphs.append(para)
+            continue
+        sentences = split_into_sentences(para, max_sentences=40)
+        if not sentences:
+            out_paragraphs.append(para)
+            continue
+        surviving: List[str] = []
+        for sentence in sentences:
+            is_audit = bool(_REDUNDANT_AUDIT_RE.search(sentence))
+            has_citation = bool(re.search(r"\[\d+\]", sentence))
+            if not is_audit or has_citation:
+                surviving.append(sentence)
+                continue
+            if kept < MAX_AUDIT_LANGUAGE_SENTENCES:
+                kept += 1
+                surviving.append(sentence)
+            # else: drop the repeated, uncited limitation sentence.
+        out_paragraphs.append(" ".join(s.strip() for s in surviving).strip())
+    return "\n\n".join(p for p in out_paragraphs if p.strip())
 
 
 def _scrub_pipeline_telemetry(text: str) -> str:

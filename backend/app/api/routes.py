@@ -905,14 +905,13 @@ async def stream_research(request: Request, payload: ResearchRequest) -> Streami
                                  provider_kinds=_degradation["provider_kinds"],
                                  budget=budget_snapshot)
 
-            # Decision Layer rows (3.5): one per strategic option.
+            # Decision Layer rows (3.5): persisted for the audit/trace, NOT
+            # surfaced in the user-facing answer stream. The internal decision
+            # machinery (Option A/B/C/D, recommended option) must never reach a
+            # normal answer; it stays in the audit document and the DB trace.
             decision_options = last_snapshot.get("decision_options") or []
             if decision_options:
                 await _persist(save_decisions(settings.database_url, request_id, decision_options))
-                yield event_line("decisions", items=[
-                    {k: o.get(k) for k in ("option_label", "description", "is_recommended", "rationale", "risk_note")}
-                    for o in decision_options
-                ])
         finally:
             clear_fallbacks()
             clear_run_usage()

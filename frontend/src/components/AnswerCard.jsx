@@ -4,7 +4,7 @@ import {
 } from "./icons";
 import ExportMenu from "./ExportMenu";
 /* Final report card — renders ONLY backend-produced content:
- * report markdown sections, findings events, decisions events. */
+ * report markdown sections, findings events. */
 
 /* Inline markdown renderer: the report body is markdown, so `**bold**`,
  * `*italic*`, `` `code` ``, and `[text](url)` must render as elements
@@ -204,7 +204,6 @@ export default function AnswerCard({ run }) {
   const degradedNotice = degraded.length
     ? describeDegradation(degraded, run.degradedReasons || {}, run.providerDegraded === true)
     : "";
-  const decisions = Array.isArray(run.decisions) ? run.decisions : [];
   const support = typeof run.answerSupport === "number" ? Math.round(run.answerSupport * 100) : null;
   const outlineSections = run.outline && Array.isArray(run.outline.sections) ? run.outline.sections : [];
 
@@ -256,22 +255,6 @@ export default function AnswerCard({ run }) {
         </div>
       ) : null}
 
-      {decisions.length ? (
-        <div className="decisions-block">
-          <h3 style={{ fontSize: 15.5, fontWeight: 650, margin: "0 0 8px" }}>Decision layer</h3>
-          {decisions.map((d) => (
-            <div className={`decision-option${d.is_recommended ? " recommended" : ""}`} key={d.option_label}>
-              <div className="decision-head">
-                <b>Option {d.option_label}{d.is_recommended ? " — recommended" : ""}</b>
-              </div>
-              {d.description ? <p>{d.description}</p> : null}
-              {d.rationale ? <p className="sub2">Rationale: {d.rationale}</p> : null}
-              {d.risk_note ? <p className="sub2">Risk: {d.risk_note}</p> : null}
-            </div>
-          ))}
-        </div>
-      ) : null}
-
       {run.audit ? (
         <details className="audit-block">
           <summary>Research audit &amp; trace</summary>
@@ -298,7 +281,6 @@ export function ReplayAnswerCard({ trace }) {
       agent: c.agent || "",
       challenged: c.challenged === 1 || c.challenged === true,
     })),
-    decisions: trace.decisions || [],
     snippets: (trace.sources || []).length,
   };
   // parseReport treats the whole document as the answer when there is no legacy

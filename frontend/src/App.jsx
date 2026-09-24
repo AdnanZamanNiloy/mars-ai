@@ -159,7 +159,6 @@ function blankRun(query, mode) {
     verifiedCount: 0,
     critiques: [],
     breakdown: null,
-    decisions: [],
     report: "",
     confidence: null,
     degraded: [],
@@ -200,7 +199,7 @@ function blankRun(query, mode) {
 /* Rebuild the ordered replay thread for a persisted session.
 
  * The session row already carries one run entry per question, but the replay
- * card reads the REAL per-run trace (claims, sources, decisions). Fetching it
+ * card reads the REAL per-run trace (claims, sources). Fetching it
  * here — rather than synthesizing a stub from the stored report — is what
  * makes a restored answer render its evidence instead of a blank card.
  * The session's redundant `user` rows are dropped: the replay card renders
@@ -221,8 +220,7 @@ async function buildReplayMessages(session, signal) {
         confidence: meta.confidence,
         claims: [],
         sources: [],
-        decisions: [],
-        events: [],
+            events: [],
         final_report: meta.report
           ? { report_markdown: meta.report, confidence: meta.confidence }
           : null,
@@ -606,10 +604,6 @@ export default function App() {
           }));
           pushTrace(tempId, { key: "findings", text: "Claims extracted", kind: "active" });
         }
-        break;
-      case "decisions":
-        if (Array.isArray(evt.items)) patchRun(tempId, { decisions: evt.items });
-        pushTrace(tempId, { text: `${(evt.items || []).length} options evaluated`, kind: "done" });
         break;
       case "final_report":
         setMessages((prev) => prev.map((m) => {
