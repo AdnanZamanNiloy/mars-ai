@@ -52,6 +52,10 @@ from app.agents.sources import (
     primary_source_share,
 )
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 # ---------------------------------------------------------------------------
 # Legacy public names, kept so existing imports and tests keep working.
 # The authoritative registry now lives in app.agents.sources.
@@ -520,6 +524,71 @@ def filter_facts_by_domain(
 # Deduplication with corroboration tracking
 # ---------------------------------------------------------------------------
 
+# Confidence margin within which a higher-authority source wins the
+# representative slot over a marginally-more-confident lower-authority one.
+# Below this, confidence is not meaningfully different and source authority
+# decides; above it, a genuinely stronger extraction/verification wins.
+_REPRESENTATIVE_CONFIDENCE_MARGIN = 0.05
+
+
+def _source_authority(fact: Dict[str, Any]) -> float:
+    """0..1 authority for a fact's source, from the shared source registry.
+
+    Prefers an explicit `source_tier`/`is_primary` already stamped upstream and
+    falls back to classifying the URL. Total: an unknown source yields 0.0 and
+    never raises (AGENTS.md 4.4).
+    """
+    if not isinstance(fact, dict):
+        return 0.0
+    if bool(fact.get("is_primary", False)):
+        return 1.0
+    try:
+        from app.agents.sources import authority_score
+
+        return float(authority_score(str(fact.get("source", "") or "")))
+    except Exception as exc:  # authority failure must never break dedup
+        logger.warning("representative_authority_failed", error=str(exc), exc_info=exc)
+        return 0.0
+
+
+def _pick_representative(kept: Dict[str, Any], candidate: Dict[str, Any]) -> Dict[str, Any]:
+    """Choose which of two equivalent facts represents the merged claim.
+
+    Both support the SAME claim (the similarity + polarity guard already
+    passed), so this is a presentation choice, not a truth choice — either
+    source is valid evidence. Rule (§6 source authority priority):
+
+      * a primary source beats a non-primary source when their confidences are
+        within `_REPRESENTATIVE_CONFIDENCE_MARGIN` (a primary document must not
+        lose its citation slot to a news summary of it just because the summary
+        scored slightly higher);
+      * otherwise the higher-authority source wins within that margin;
+      * a clearly higher-confidence copy still wins regardless of authority, so
+        a better-extracted or better-verified fact is never discarded.
+
+    A verified copy must never be represented by an unverified one; that guard
+    is applied by the caller after this choice.
+    """
+    if not isinstance(kept, dict):
+        return candidate
+    if not isinstance(candidate, dict):
+        return kept
+    kept_conf = float(kept.get("confidence", 0.0) or 0.0)
+    cand_conf = float(candidate.get("confidence", 0.0) or 0.0)
+    if abs(cand_conf - kept_conf) > _REPRESENTATIVE_CONFIDENCE_MARGIN:
+        # A clearly better-confidence copy wins; authority does not override it.
+        return candidate if cand_conf > kept_conf else kept
+    kept_auth = _source_authority(kept)
+    cand_auth = _source_authority(candidate)
+    if cand_auth > kept_auth:
+        return candidate
+    if cand_auth < kept_auth:
+        return kept
+    # Equal authority: keep the higher-confidence copy, tie-break on the
+    # existing representative (stable across input order).
+    return candidate if cand_conf > kept_conf else kept
+
+
 def dedupe_semantic_facts(
     facts: List[Dict[str, Any]], threshold: float = 0.86
 ) -> List[Dict[str, Any]]:
@@ -655,7 +724,7 @@ def dedupe_semantic_facts(
         if claim != str(kept.get("claim", "")) and claim not in variants:
             variants.append(claim)
 
-        winner = candidate if candidate["confidence"] > float(kept.get("confidence", 0.0) or 0.0) else kept
+        winner = _pick_representative(kept, candidate)
         merged = dict(winner)
         merged["corroborating_sources"] = corroborating
         merged["corroboration_count"] = max(1, distinct_publisher_count(corroborating))

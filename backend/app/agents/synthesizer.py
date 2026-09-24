@@ -510,6 +510,29 @@ the research was done, not a definition of the topic — the answer. If the
 evidence does not support a direct answer, the first sentence says exactly
 that and names what is missing.
 
+For an ordinary factual or research question, the opening paragraph answers
+the question directly. Do NOT open on the state of the evidence:
+  BAD  → "The evidence base is incomplete, and several dimensions remain
+          uncertain..."
+  GOOD → "AI adoption is rising quickly, mainly because firms expect
+          measurable productivity gains while implementation barriers fall."
+Open with the best-supported answer, THEN qualify it where the evidence
+requires. The user's question leads; research gaps never become the answer.
+
+━━━ COMPRESS UNCERTAINTY ━━━
+
+Keep uncertainty where it affects interpretation, confidence or the
+conclusion. State it ONCE, in one plain sentence, not as a section.
+  PREFER   → "The available evidence does not establish a reliable 2027
+              ranking, so the safest conclusion is X."
+  NOT      → "Three sources were checked, none contained a 2027 ranking; the
+              evidence pool does not contain... therefore..."
+Do not repeat the same limitation in several places, and do not enumerate
+what the evidence pool lacks. Do NOT create a "What is not known" /
+"Limitations" section unless the unknown materially changes the answer. The
+detailed uncertainty and audit bookkeeping stay in the audit layer, which the
+reader can consult — the answer gives the reader the answer.
+
 ━━━ STRUCTURE EMERGES FROM THE QUESTION ━━━
 
 The answer is NOT required to contain any particular universal heading. Do not
@@ -537,6 +560,13 @@ no pipeline stages, fallbacks, evidence grades, budgets, counts of verified
 facts, quality or confidence scores, agent names or attempts. Express
 uncertainty naturally in prose ("the evidence is thin on X", "sources
 disagree"), and leave process provenance to the audit layer.
+
+Never expose internal decision machinery: do NOT label material as "Option A
+/ B / C / D", do NOT present a "recommended option", dimension ranking,
+internal decision framework, scoring or planner terminology unless the user
+explicitly asked for a decision framework. If the question is a decision
+question, answer it as prose with options named for what they ARE ("the
+nuclear route…", "the renewables-first route…"), not by internal labels.
 
 ━━━ ABSOLUTE FORMATTING RULES ━━━
 
@@ -590,6 +620,9 @@ renumber, do not guess, do not cite a number you were not given.
   them explicitly or state that the identity is ambiguous.
 - Prefer the primary source when a primary document and a news summary of it
   both appear; cite the primary and use the summary only for framing.
+- When a claim is backed by both an official/primary source and a weaker
+  secondary source, cite the primary. Use a secondary source when it carries
+  information the primary does not. Never invent a primary source.
 
 HARD FAILURE CONDITIONS — reject your own draft if any are true:
 - The first sentence does not answer the question
@@ -3599,11 +3632,13 @@ def _render_ambiguity_block(intent: Dict[str, Any]) -> str:
 
 
 def _render_analytical_guidance(ctx: Dict[str, Any]) -> str:
-    """PRIMARY guidance: the AnalystBrief, then the SynthesisPlan.
+    """PRIMARY guidance: the AnalystBrief, then the SynthesisPlan, then the
+    answer-priority directive.
 
     Placed at the TOP of the writer prompt so the analytical synthesis is the
     frame the writer writes from, not a footnote to an evidence dump. Renders
-    nothing when neither is present, so callers can prepend unconditionally.
+    nothing when none of the three are present, so callers can prepend
+    unconditionally.
     """
     parts: List[str] = []
     brief = ctx.get("analytical_brief")
@@ -3629,6 +3664,18 @@ def _render_analytical_guidance(ctx: Dict[str, Any]) -> str:
             rendered_plan = ""
         if rendered_plan:
             parts.append(rendered_plan)
+    # Answer priority (Phase 11): classify the material above into
+    # CORE_ANSWER / SUPPORTING / CONTEXT / AUDIT_ONLY so the writer leads with
+    # the answer and keeps audit bookkeeping out of the normal answer. Derived
+    # from the SAME plan + brief, deterministically, with no extra LLM call.
+    try:
+        from app.core.answer_priority import render_for_writer as _render_priority
+
+        priority = _render_priority(plan, brief)
+    except Exception:  # noqa: BLE001 - priority guidance must never break
+        priority = ""
+    if priority:
+        parts.append(priority.strip())
     return "\n\n".join(parts) + "\n\n" if parts else ""
 
 
@@ -3679,7 +3726,10 @@ def _render_context_block(ctx: Dict[str, Any]) -> str:
     parts.append(
         "The figures above are INTERNAL METADATA for your judgement only. "
         "Never quote them verbatim in the report body — the appendix states "
-        "them, and the body describes evidence strength in words."
+        "them, and the body describes evidence strength in words. State any "
+        "limitation ONCE: do not repeat formulations like 'the evidence does "
+        "not establish', 'what the evidence does not contain', 'cannot be "
+        "verified' or 'the research pool' across the answer."
     )
 
     distribution = ctx.get("evidence_distribution")
