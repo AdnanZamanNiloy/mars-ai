@@ -997,9 +997,11 @@ def build_answer_audit(
     if quality_line:
         lines.extend(["## Answer quality (measured)", quality_line, ""])
 
-    # Answer conformance (Phase 12): whether the prose fit the question's shape,
-    # calibrated inference, synthesised its conflicts and had proportional
-    # depth. Measured state, audit-only — never part of the primary answer.
+    # Answer conformance: whether the prose fit the question's shape, calibrated
+    # inference, synthesised its conflicts, had proportional depth (Phase 12),
+    # and was proportional to the QUESTION — answer-first, non-peripheral,
+    # balanced comparison, complete decision (Phase 13). Measured state,
+    # audit-only — never part of the primary answer.
     conformance = state.get("answer_conformance") or {}
     if isinstance(conformance, dict) and conformance.get("query_type"):
         conformance_line = (
@@ -1009,7 +1011,11 @@ def build_answer_audit(
             f"inference={'ok' if conformance.get('inference_calibrated', True) else 'missed'}, "
             f"conflict={'ok' if conformance.get('contradiction_synthesised', True) else 'missed'}, "
             f"uncertainty={'ok' if conformance.get('uncertainty_proportionate', True) else 'missed'}, "
-            f"depth={'ok' if conformance.get('depth_fit', True) else 'missed'})."
+            f"depth={'ok' if conformance.get('depth_fit', True) else 'missed'}, "
+            f"answer-first={'ok' if conformance.get('central_conclusion_first', True) else 'missed'}, "
+            f"proportional={'ok' if conformance.get('peripheral_proportionate', True) else 'missed'}, "
+            f"comparison-balance={'ok' if conformance.get('comparison_balanced', True) else 'missed'}, "
+            f"decision={'ok' if conformance.get('decision_complete', True) else 'missed'})."
         )
         lines.extend(["## Answer conformance (measured)", conformance_line, ""])
 

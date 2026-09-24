@@ -365,6 +365,158 @@ def test_score_is_fraction_of_checks_passed():
     assert report.score == 1.0
 
 
+# --- Phase 13 — proportionality to the question ------------------------------
+
+def test_central_conclusion_must_not_open_on_bookkeeping():
+    answer = (
+        "The evidence base is incomplete and several dimensions remain uncertain. "
+        "The available evidence does not establish a ranking. Solar is cheapest [1]."
+    )
+    report = check_answer_conformance(
+        answer, "What is the solar cost trend?", {"query_type": "factual"}
+    )
+    assert report.central_conclusion_first is False
+    assert any("opens on research limitations" in f for f in report.failures)
+
+
+def test_central_conclusion_first_passes_when_answer_leads():
+    answer = (
+        "Solar costs fell to $30/MWh in 2025 [1]. The available evidence does not "
+        "yet cover storage costs [2]."
+    )
+    report = check_answer_conformance(
+        answer, "What is the solar cost trend?", {"query_type": "factual"}
+    )
+    assert report.central_conclusion_first is True
+
+
+def test_peripheral_section_dominance_is_flagged():
+    answer = (
+        "## Answer\n"
+        "Solar costs fell sharply in 2025, with the cost trend continuing downward [1]. "
+        "This matters for grid planning and procurement.\n\n"
+        "## Grid Regulation History\n"
+        "Regulatory filing procedures evolved over several decades across many "
+        "jurisdictions and agencies, with procedural filing timelines, docket "
+        "schedules and administrative hearing calendars shaping the operational "
+        "cadence of utilities and their counsel in numerous documented instances "
+        "throughout the period under review, as described in the archival record and "
+        "the administrative docket of the reviewing authority and its predecessors [2].\n\n"
+        "## Administrative Precedent\n"
+        "The procedural history of administrative hearings demonstrates a recurring "
+        "pattern of docket scheduling, evidentiary filing requirements and agency "
+        "review calendars that shaped regulatory practice across jurisdictions and "
+        "the professional conduct of counsel appearing before the reviewing bodies [3]."
+    )
+    report = check_answer_conformance(
+        answer, "What is the solar cost trend?", {"query_type": "factual"}
+    )
+    assert report.peripheral_proportionate is False
+    assert report.peripheral_section_ratio > 0.5
+    assert any("peripheral" in f.lower() for f in report.failures)
+
+
+def test_relevant_section_is_not_peripheral():
+    answer = (
+        "## Answer\nSolar costs fell sharply in 2025 [1].\n\n"
+        "## Solar Cost Drivers\n"
+        "Solar module prices declined as manufacturing scaled, and solar cost "
+        "trends continued downward through the year, with solar deployment "
+        "growing as a result of those falling solar costs [2]."
+    )
+    report = check_answer_conformance(
+        answer, "What is the solar cost trend?", {"query_type": "factual"}
+    )
+    assert report.peripheral_proportionate is True
+
+
+def test_comparison_with_one_entity_missing_is_flagged():
+    answer = (
+        "Nuclear has high capex and long build times [1]. Nuclear provides firm "
+        "baseload capacity [2]. Nuclear construction is complex [3]."
+    )
+    report = check_answer_conformance(
+        answer, "Compare nuclear and solar energy for grid reliability.",
+        {"query_type": "comparison"},
+    )
+    assert report.comparison_balanced is False
+    assert any("does not give meaningful treatment to solar" in f
+               for f in report.failures)
+
+
+def test_comparison_with_both_entities_treated_passes():
+    answer = (
+        "Nuclear is firmer and costlier than solar [1]. Solar is cheaper but has a "
+        "lower capacity factor than nuclear [2]. Nuclear has long build times, while "
+        "solar deploys quickly [3]."
+    )
+    report = check_answer_conformance(
+        answer, "Compare nuclear and solar energy for grid reliability.",
+        {"query_type": "comparison"},
+    )
+    assert report.comparison_balanced is True
+
+
+def test_comparison_balance_noop_when_entities_unclear():
+    """When the question does not cleanly name two entities, the check must not
+    fire — a false failure is worse than a missed one."""
+    report = check_answer_conformance(
+        "The trend is rising [1].", "What is the current trend?", {"query_type": "comparison"}
+    )
+    assert report.comparison_balanced is True
+
+
+def test_decision_answer_covering_one_factor_is_flagged():
+    answer = (
+        "Security is the dominant concern. Security risks include data exposure [1]. "
+        "Security posture determines adoption [2]. Security controls matter most [3]."
+    )
+    report = check_answer_conformance(
+        answer, "Should a 50-person company adopt AI?",
+        {"query_type": "decision"},
+    )
+    assert report.decision_complete is False
+    assert any("decision factor" in f.lower() for f in report.failures)
+
+
+def test_decision_answer_with_breadth_passes():
+    answer = (
+        "Adopting AI offers clear benefits for a 50-person firm [1]. The main risks "
+        "are data exposure and vendor lock-in [2]. Costs include subscription and "
+        "operational burden [3]. Implementation requires staff training and "
+        "integration time [4]. It is not worth adopting where the workflow is "
+        "already efficient. Success criteria should include measurable time saved."
+    )
+    report = check_answer_conformance(
+        answer, "Should a 50-person company adopt AI?",
+        {"query_type": "decision"},
+    )
+    assert report.decision_complete is True
+
+
+def test_non_decision_question_skips_decision_check():
+    report = check_answer_conformance(
+        "The trend is rising [1].", "What is the trend?", {"query_type": "factual"}
+    )
+    assert report.decision_complete is True
+
+
+def test_grounding_safeguards_unchanged_pure_grounding_answer():
+    """A grounded, well-shaped answer with no peripheral/decisional issues must
+    score 1.0 — the Phase 13 checks add no penalty to healthy answers."""
+    answer = (
+        "Solar costs fell to $30/MWh in 2025 [1], whereas nuclear stayed at "
+        "$90/MWh [2]. The cost trend is downward because manufacturing scaled [3]. "
+        "For new build, solar is the better option on cost, though nuclear wins on "
+        "firm capacity [4]."
+    )
+    report = check_answer_conformance(
+        answer, "Compare solar and nuclear cost trends.", {"query_type": "comparison"}
+    )
+    assert report.score == 1.0
+    assert report.failures == []
+
+
 # --- workflow integration: conformance reaches the audit layer ---------------
 
 import app.graph.workflow as wf

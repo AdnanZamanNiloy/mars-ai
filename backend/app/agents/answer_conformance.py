@@ -190,8 +190,14 @@ class ConformanceReport:
     contradiction_synthesised: bool = True
     uncertainty_proportionate: bool = True
     depth_fit: bool = True
+    # Phase 13 — proportionality to the question.
+    central_conclusion_first: bool = True
+    peripheral_proportionate: bool = True
+    comparison_balanced: bool = True
+    decision_complete: bool = True
     depth_index: int = 0
     limitation_ratio: float = 0.0
+    peripheral_section_ratio: float = 0.0
     failures: List[str] = field(default_factory=list)
 
     @property
@@ -203,6 +209,12 @@ class ConformanceReport:
             self.contradiction_synthesised,
             self.uncertainty_proportionate,
             self.depth_fit,
+            # Phase 13 checks only count once they have something to measure;
+            # each defaults True, so an unmeasured question is never penalised.
+            self.central_conclusion_first,
+            self.peripheral_proportionate,
+            self.comparison_balanced,
+            self.decision_complete,
         ]
         return round(sum(1 for c in checks if c) / len(checks), 3)
 
@@ -214,8 +226,13 @@ class ConformanceReport:
             "contradiction_synthesised": self.contradiction_synthesised,
             "uncertainty_proportionate": self.uncertainty_proportionate,
             "depth_fit": self.depth_fit,
+            "central_conclusion_first": self.central_conclusion_first,
+            "peripheral_proportionate": self.peripheral_proportionate,
+            "comparison_balanced": self.comparison_balanced,
+            "decision_complete": self.decision_complete,
             "depth_index": self.depth_index,
             "limitation_ratio": round(self.limitation_ratio, 3),
+            "peripheral_section_ratio": round(self.peripheral_section_ratio, 3),
             "score": self.score,
             "failures": list(self.failures),
         }
@@ -283,6 +300,23 @@ def check_answer_conformance(
 
         # -- 5. DEPTH FIT ----------------------------------------------------
         _check_depth(report, sentences, mode=mode, query_type=report.query_type)
+
+        # -- 6. CENTRAL CONCLUSION FIRST (Phase 13) -------------------------
+        _check_central_conclusion_first(report, sentences, lower=lowered)
+
+        # -- 7. PERIPHERAL PROPORTIONALITY (Phase 13) -----------------------
+        _check_peripheral_proportionality(
+            report, body, query=query, question_terms=_question_terms(query, plan)
+        )
+
+        # -- 8. COMPARISON BALANCE (Phase 13) -------------------------------
+        _check_comparison_balance(
+            report, report.query_type, body, query=query,
+            question_terms=_question_terms(query, plan),
+        )
+
+        # -- 9. DECISION COMPLETENESS (Phase 13) ----------------------------
+        _check_decision_completeness(report, report.query_type, lower=lowered)
     except Exception as exc:  # total/fail-safe: never break synthesis
         logger.warning("answer_conformance_failed", error=str(exc), exc_info=exc)
     return report
@@ -545,4 +579,298 @@ def _check_depth(
             "without reasoning over them. Deepen the analysis, do not lengthen it — "
             "explain mechanisms, weigh trade-offs, and state what follows, rather "
             "than adding more sections or citations."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase 13 — proportionality to the question
+# ---------------------------------------------------------------------------
+
+# Openings that lead the answer with research bookkeeping, gaps or methodology
+# instead of the answer. A report MUST NOT open on one of these (Phase 13 §4);
+# in the right place later it is legitimate qualification.
+_LEADING_BOOKKEEPING_MARKERS = (
+    "the evidence base is", "the available evidence", "the evidence pool",
+    "the evidence does not", "no reliable evidence", "evidence is thin",
+    "several dimensions remain uncertain", "the research was",
+    "research gaps", "the sources returned", "data limitations",
+    "it is important to note that the evidence",
+    "before answering", "to answer this question we",
+)
+
+# A section is PERIPHERAL when its heading/body shares almost no content word
+# with the user's question. It may still be worth a paragraph; it must not be a
+# major section. Proportion is measured over writer sections only.
+PERIPHERAL_SECTION_MAX_RATIO = 0.5   # >50% of words in peripheral sections
+PERIPHERAL_SECTION_MIN_WORDS = 100   # ignore very short answers (one-liners)
+PERIPHERAL_SECTION_MIN_SHARE = 0.25  # a single peripheral section must exceed this
+
+# Decision questions (Phase 13 §9): the decision factors a reader must see.
+# Not every one is mandatory for every decision — the check requires that the
+# answer addresses a BREADTH of factors, not just the best-evidenced axis.
+_DECISION_FACTORS: Dict[str, tuple] = {
+    "benefits": ("benefit", "advantage", "upside", "use case", "gains", "value"),
+    "risks": ("risk", "downside", "drawback", "threat", "exposure", "concern"),
+    "costs": ("cost", "price", "expense", "budget", "spend", "operational burden",
+              "overhead", "tco", "total cost"),
+    "implementation": ("implement", "deploy", "migrat", "roll out", "integration",
+                       "resourc", "staff", "training", "timeline"),
+    "when_not": ("when not", "not worth", "avoid", "unsuitable", "poor fit",
+                 "do not adopt", "don't adopt", "circumstances where"),
+    "success": ("success criteria", "measure", "kpi", "metric", "evaluate",
+                "benchmark", "roi", "return on"),
+}
+# The number of distinct decision factors the answer must address. A decision
+# answer that covers only security (one factor) regardless of evidence strength
+# fails this; a genuine multi-factor answer passes.
+DECISION_MIN_FACTORS = 3
+
+
+def _question_terms(query: str, plan: Any = None) -> set:
+    """Content words naming what the question (and its required dimensions) is
+    about, for peripheral-relevance measurement."""
+    terms = {
+        w for w in re.findall(r"[a-z][a-z0-9\-]{3,}", _norm(query))
+        if w not in _CONTENT_STOPWORDS
+    }
+    try:
+        data = plan.to_dict() if plan is not None and hasattr(plan, "to_dict") else {}
+        for dim in data.get("dimensions") or []:
+            if not isinstance(dim, dict) or not dim.get("required"):
+                continue
+            text = str(dim.get("axis", "") or "") + " " + str(dim.get("question", "") or "")
+            terms |= {
+                w for w in re.findall(r"[a-z][a-z0-9\-]{3,}", _norm(text))
+                if w not in _CONTENT_STOPWORDS
+            }
+    except Exception:  # a plan that cannot serialize contributes no terms
+        pass
+    return terms
+
+
+def _writer_sections(answer: str) -> List[Dict[str, Any]]:
+    """Split the writer's prose into (title, text, words) sections.
+
+    Splits on H1/H2 only (sub-headings stay with their parent). Machine-appended
+    sections are already stripped by the caller. Content before the first
+    heading is returned as a pseudo-section titled "".
+    """
+    body = strip_machine_sections(answer or "")
+    sections: List[Dict[str, Any]] = []
+    preamble: List[str] = []
+    current: Optional[Dict[str, Any]] = None
+    for block in re.split(r"\n{2,}", body):
+        stripped = block.strip()
+        if not stripped:
+            continue
+        # A block may be a heading alone OR a heading followed by its body
+        # (the sanitizer keeps them in one block). Match the heading at the
+        # START of the block, not as the whole block.
+        m = re.match(r"^#{1,2}\s+([^\n]*\S)[ \t]*\n?", stripped)
+        if m:
+            if current is not None:
+                sections.append(current)
+            rest = stripped[m.end():].strip()
+            current = {"title": m.group(1).strip(), "blocks": ([rest] if rest else [])}
+        elif current is None:
+            preamble.append(stripped)
+        else:
+            current["blocks"].append(stripped)
+    if current is not None:
+        sections.append(current)
+    if preamble:
+        sections.insert(0, {"title": "", "blocks": preamble})
+    for s in sections:
+        s["text"] = "\n\n".join(s.get("blocks") or [])
+        s.pop("blocks", None)
+        s["words"] = len(re.findall(r"[A-Za-z0-9']+", s["text"]))
+    return sections
+
+
+def _check_central_conclusion_first(
+    report: ConformanceReport,
+    sentences: Sequence[str],
+    *,
+    lower: str,
+) -> None:
+    """The answer must open with the answer — not with process or gaps."""
+    if not sentences:
+        return
+    # Only the FIRST sentence is the "opening". A limitation in the second
+    # sentence is legitimate qualification, not a failure to lead with the
+    # answer — the point is that the answer comes first.
+    opening = sentences[0].lower()
+    if _contains_any(opening, _LEADING_BOOKKEEPING_MARKERS):
+        report.central_conclusion_first = False
+        report.failures.append(
+            "Central conclusion: the answer opens on research limitations or "
+            "methodology instead of the answer. Lead with the conclusion the evidence "
+            "best supports in terms of the question's own subject; state any limitation "
+            "after it, and only where it materially changes the conclusion."
+        )
+
+
+def _check_peripheral_proportionality(
+    report: ConformanceReport,
+    answer: str,
+    *,
+    query: str,
+    question_terms: set,
+) -> None:
+    """Peripheral evidence must not become a major section (Phase 13 §1/§5)."""
+    sections = [s for s in _writer_sections(answer) if s.get("words", 0) > 0]
+    total_words = sum(s["words"] for s in sections)
+    if not question_terms or total_words < PERIPHERAL_SECTION_MIN_WORDS:
+        return
+    peripheral_words = 0
+    for section in sections:
+        # A section with no heading is the opening answer — never peripheral.
+        if not str(section.get("title", "")).strip():
+            continue
+        text_terms = {
+            w for w in re.findall(r"[a-z][a-z0-9\-]{3,}", _norm(section["text"]))
+            if w not in _CONTENT_STOPWORDS
+        }
+        # Relevance is the share of the QUESTION's distinctive terms the section
+        # actually addresses. A section about an unrelated axis shares almost
+        # none, so it cannot be a major section.
+        overlap = len(text_terms & question_terms) / len(question_terms)
+        if overlap < 0.10 and section["words"] > total_words * PERIPHERAL_SECTION_MIN_SHARE:
+            peripheral_words += section["words"]
+    ratio = peripheral_words / total_words if total_words else 0.0
+    report.peripheral_section_ratio = ratio
+    if ratio > PERIPHERAL_SECTION_MAX_RATIO:
+        report.peripheral_proportionate = False
+        report.failures.append(
+            "Proportionality: most of the answer is spent on material peripheral to "
+            f"the question ({ratio:.0%} of the prose). Drop or shorten sections that do "
+            "not serve the question's dimensions — more research should produce a "
+            "stronger answer, not a longer one."
+        )
+
+
+def _check_comparison_balance(
+    report: ConformanceReport,
+    query_type: str,
+    answer: str,
+    *,
+    query: str,
+    question_terms: set,
+) -> None:
+    """Every entity in a comparison must receive meaningful treatment (§8)."""
+    qt = {
+        "comparative": "comparison", "compare": "comparison",
+    }.get(str(query_type or "").lower(), str(query_type or "").lower())
+    if qt != "comparison":
+        return
+    entities = _comparison_entities(query)
+    if len(entities) < 2:
+        return
+    lower = _norm(answer)
+    # Entity coverage: count how many mentions each entity receives. A single
+    # dominant entity with the other barely present is the asymmetry §8 names.
+    counts = {e: lower.count(e) for e in entities}
+    present = [e for e, c in counts.items() if c > 0]
+    if len(present) < len(entities):
+        missing = [e for e in entities if counts[e] == 0]
+        report.comparison_balanced = False
+        report.failures.append(
+            "Comparison balance: the answer does not give meaningful treatment to "
+            f"{', '.join(missing)}. Cover every requested entity, and where the "
+            "evidence is asymmetric say 'documented difference' vs 'not enough "
+            "evidence to compare' rather than letting one entity dominate."
+        )
+        return
+    # Both present: flag severe asymmetry (one entity cited/text-treated far more).
+    values = sorted(counts.values())
+    if values[-1] >= max(4, 3 * max(1, values[0])):
+        minor = min(counts, key=lambda k: counts[k])
+        report.comparison_balanced = False
+        report.failures.append(
+            f"Comparison balance: one entity dominates while '{minor}' is barely "
+            "covered. Give each requested entity comparable treatment, or state that "
+            "the evidence for one is insufficient to compare."
+        )
+
+
+# Prepositions/qualifiers that end an entity noun phrase in a comparison
+# question ("nuclear AND solar energy FOR grid reliability"). Cutting at these
+# stops trailing qualification polluting the entity set.
+_ENTITY_TAIL_RE = re.compile(
+    r"\b(?:for|on|in|at|by|with|regarding|about|over|to|and|or|vs\.?|versus)\b"
+)
+
+
+def _comparison_entities(query: str) -> List[str]:
+    """The two entities a comparison question names, as distinctive head tokens.
+
+    Handles the clear shapes — "X vs Y", "compare X and Y", "difference between
+    X and Y" — and cuts each entity at the first preposition so trailing
+    qualification ("solar ENERGY for grid reliability") does not become a
+    spurious third entity. Returns [] when the shape is unclear, which makes the
+    balance check a no-op rather than a false failure.
+    """
+    text = _norm(query)
+    left = right = ""
+
+    m = re.split(r"\s+(?:vs\.?|versus)\s+", text)
+    if len(m) == 2:
+        left, right = m[0], m[1]
+    else:
+        m2 = re.search(r"compare\s+(.+)$", text)
+        if m2:
+            halves = re.split(r"\s+(?:and|with|to|against)\s+", m2.group(1), maxsplit=1)
+            if len(halves) == 2:
+                left, right = halves
+        else:
+            m3 = re.search(r"between\s+(.+)$", text)
+            if m3:
+                halves = re.split(r"\s+and\s+", m3.group(1), maxsplit=1)
+                if len(halves) == 2:
+                    left, right = halves
+
+    a = _entity_phrase_tokens(left)
+    b = _entity_phrase_tokens(right)
+    if not a or not b or set(a) == set(b):
+        return []
+    return [a[0], b[0]]
+
+
+def _entity_phrase_tokens(phrase: str) -> List[str]:
+    """Distinctive tokens of one side of a comparison, cut at the first tail."""
+    head = _ENTITY_TAIL_RE.split(phrase or "", maxsplit=1)[0]
+    words = [
+        w for w in re.findall(r"[a-z][a-z0-9\-]{2,}", head)
+        if w not in _CONTENT_STOPWORDS
+    ]
+    return words[:2]
+
+
+def _check_decision_completeness(
+    report: ConformanceReport,
+    query_type: str,
+    *,
+    lower: str,
+) -> None:
+    """A decision answer must cover a breadth of decision factors, not just the
+    best-evidenced axis (Phase 13 §9)."""
+    qt = {
+        "evaluative": "decision", "strategic": "decision",
+        "policy": "decision", "decision": "decision",
+    }.get(str(query_type or "").lower(), str(query_type or "").lower())
+    if qt != "decision":
+        return
+    hit = {
+        factor for factor, cues in _DECISION_FACTORS.items()
+        if any(c in lower for c in cues)
+    }
+    if len(hit) < DECISION_MIN_FACTORS:
+        missing = [f for f in _DECISION_FACTORS if f not in hit]
+        report.decision_complete = False
+        report.failures.append(
+            "Decision completeness: this is a decision question but the answer "
+            f"covers only {len(hit)} decision factor(s). Organise around the actual "
+            "decision factors — benefits/use cases, risks, costs/operational burden, "
+            "implementation requirements, when NOT to adopt, and success criteria — "
+            f"rather than the best-evidenced axis alone (missing: {', '.join(missing[:4])})."
         )
