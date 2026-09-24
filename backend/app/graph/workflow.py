@@ -9,6 +9,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agents.evidence_utils import dedupe_semantic_facts, filter_facts_by_domain, verify_answer_support
 from app.agents.answer_quality import evaluate_answer
+from app.agents.answer_conformance import check_answer_conformance
 from app.agents.thesis_fidelity import check_thesis_fidelity
 from app.agents.critic import critic_agent
 from app.agents.direct_answer import direct_answer_agent
@@ -82,6 +83,13 @@ class ResearchState(TypedDict, total=False):
     direct_answer_meta: Dict[str, Any]
     # Answer quality gate: five-axis 0-100 score of the delivered report.
     quality: Dict[str, Any]
+    # Thesis fidelity (Phase 8): how faithfully the delivered prose reflects
+    # the analyst's brief. Declared so LangGraph carries it to the audit layer.
+    thesis_fidelity: Dict[str, Any]
+    # Answer conformance (Phase 12): whether the delivered prose fits the
+    # question's shape, calibrates inference, synthesises its conflicts and has
+    # depth proportional to the question. Carried to the audit layer.
+    answer_conformance: Dict[str, Any]
     # Answer-first outline (GPT Researcher adaptation): the section shape the
     # writer targeted (broad flag + section list), and whether section-wise
     # synthesis was used. Declared on state so LangGraph carries them to the
@@ -176,6 +184,13 @@ class SynthesizerUpdate(TypedDict):
     # state so the existing final_report event can surface it.
     outline: Dict[str, Any]
     section_wise: bool
+    # Thesis fidelity (Phase 8): how faithfully the prose reflects the
+    # analyst's brief. Audit-only; never rendered into the primary answer.
+    thesis_fidelity: Dict[str, Any]
+    # Answer conformance (Phase 12): whether the prose fits the question's
+    # shape, calibrates inference, synthesises conflicts and has depth
+    # proportional to the question. Audit-only.
+    answer_conformance: Dict[str, Any]
     # Machine-owned synthesis provenance (measured evidence accounting,
     # integrity notes) the synthesizer deliberately kept OUT of the answer.
     # Rendered by build_answer_audit, never by the primary answer.
@@ -981,6 +996,22 @@ def build_answer_audit(
     )
     if quality_line:
         lines.extend(["## Answer quality (measured)", quality_line, ""])
+
+    # Answer conformance (Phase 12): whether the prose fit the question's shape,
+    # calibrated inference, synthesised its conflicts and had proportional
+    # depth. Measured state, audit-only — never part of the primary answer.
+    conformance = state.get("answer_conformance") or {}
+    if isinstance(conformance, dict) and conformance.get("query_type"):
+        conformance_line = (
+            f"Question shape: {conformance.get('query_type')} · "
+            f"conformance score {conformance.get('score', 0)} "
+            f"(shape={'ok' if conformance.get('shape_conformant', True) else 'missed'}, "
+            f"inference={'ok' if conformance.get('inference_calibrated', True) else 'missed'}, "
+            f"conflict={'ok' if conformance.get('contradiction_synthesised', True) else 'missed'}, "
+            f"uncertainty={'ok' if conformance.get('uncertainty_proportionate', True) else 'missed'}, "
+            f"depth={'ok' if conformance.get('depth_fit', True) else 'missed'})."
+        )
+        lines.extend(["## Answer conformance (measured)", conformance_line, ""])
 
     # Research provenance: measured evidence accounting, conflicts, caveats.
     is_sufficient = bool(critique.get("is_sufficient", False))
@@ -2149,9 +2180,25 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             # Its failures ride the SAME single revision pass as the quality
             # gate's — no new loop, no new LLM call.
             fidelity = check_thesis_fidelity(answer, ctx.get("analytical_brief"))
-            return answer, support, health, quality, machine_notes, fidelity
+            # Answer conformance (Phase 12): does the finished prose actually do
+            # the work the question's shape demands — mechanism for a "why",
+            # criterion + verdict for a comparison, a marked projection for a
+            # forecast, an explained conflict, calibrated inference, and depth
+            # proportional to the question? Deterministic and observational; its
+            # failures ride the SAME single revision pass (no new loop, no LLM).
+            conformance = check_answer_conformance(
+                answer,
+                state["query"],
+                intent,
+                brief=ctx.get("analytical_brief"),
+                plan=ctx.get("synthesis_plan"),
+                contradictions=ctx.get("contradictions"),
+                mode=str(state.get("mode", "standard") or "standard"),
+            )
+            return answer, support, health, quality, machine_notes, fidelity, conformance
 
-        answer, support, citation_health, quality, synthesis_notes, fidelity = await _synthesize_and_score(base_context)
+        (answer, support, citation_health, quality, synthesis_notes, fidelity,
+         conformance) = await _synthesize_and_score(base_context)
 
         # Answer revision pass (the quality optimizer's LLM half): the writer
         # rewrites its draft ONCE — fed the measured failures when the gate
@@ -2162,20 +2209,27 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
         # Quick mode trades the unconditional polish pass for latency; the
         # gate still repairs a FAILING draft there.
         quick_mode = str(state.get("mode", "standard")) == "quick"
-        # Thesis-fidelity failures are actionable and belong in the rewrite
-        # prompt alongside the gate's failures (bounded: one revision).
+        # Thesis-fidelity and answer-conformance failures are actionable and
+        # belong in the rewrite prompt alongside the gate's failures (bounded:
+        # one revision).
         if fidelity.failures:
             logger.info("thesis_fidelity_failed", score=fidelity.score,
                         failures=len(fidelity.failures))
+        if conformance.failures:
+            logger.info("answer_conformance_failed", score=conformance.score,
+                        query_type=conformance.query_type,
+                        failures=len(conformance.failures))
+        actionable = bool(fidelity.failures) or bool(conformance.failures)
         run_revision = (
             gate_enabled and revision_enabled
             and ("synthesizer" not in take_fallbacks())
-            and (not quick_mode or not quality.passed or bool(fidelity.failures))
+            and (not quick_mode or not quality.passed or actionable)
         )
         if run_revision:
-            feedback = [*quality.failures, *fidelity.failures]
+            feedback = [*quality.failures, *fidelity.failures, *conformance.failures]
             try:
-                answer2, support2, health2, quality2, notes2, fidelity2 = await _synthesize_and_score({
+                (answer2, support2, health2, quality2, notes2, fidelity2,
+                 conformance2) = await _synthesize_and_score({
                     **base_context,
                     "quality_feedback": feedback,
                     "revision": True,
@@ -2183,13 +2237,18 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             except Exception as exc:
                 logger.warning("synthesis_revision_failed", error=str(exc), exc_info=exc)
             else:
-                # Ship the revision when it is no worse on quality AND no worse
-                # on fidelity — fidelity failures are why the pass may have run.
-                if quality2.overall >= quality.overall and fidelity2.score >= fidelity.score:
+                # Ship the revision when it is no worse on quality, fidelity AND
+                # conformance — any of the three is why the pass may have run.
+                if (
+                    quality2.overall >= quality.overall
+                    and fidelity2.score >= fidelity.score
+                    and conformance2.score >= conformance.score
+                ):
                     answer, support, citation_health, quality = (
                         answer2, support2, health2, quality2,
                     )
                     fidelity = fidelity2
+                    conformance = conformance2
                     synthesis_notes = notes2
 
         logger.info("synthesizer_done", answer_chars=len(answer), usable_facts=len(usable),
@@ -2208,6 +2267,10 @@ def create_workflow(llm: LLMClient, search_client: SearchClient, entry_node: str
             # Thesis fidelity: how faithfully the prose reflects the analyst's
             # brief. Audit-only; never rendered into the primary answer.
             "thesis_fidelity": fidelity.to_dict(),
+            # Answer conformance (Phase 12): whether the prose fits the
+            # question's shape, calibrates inference, synthesises conflicts and
+            # has depth proportional to the question. Audit-only.
+            "answer_conformance": conformance.to_dict(),
             # Machine-owned provenance the synthesizer kept out of the answer;
             # rendered by build_answer_audit.
             "synthesis_machine_notes": synthesis_notes,
